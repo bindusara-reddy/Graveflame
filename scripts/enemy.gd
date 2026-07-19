@@ -37,6 +37,10 @@ var _fuse_t := 0.0
 var _blast_radius := 90.0
 var _fuse_total := 0.8
 var _bomb_armed := false
+# Graveflame damage-over-time status.
+var burn_time := 0.0
+var burn_dps := 0.0
+var _ledge_ray: RayCast2D
 
 func setup(p_kind: int, p_pos: Vector2) -> void:
 	kind = p_kind
@@ -84,6 +88,11 @@ func _ready() -> void:
 	_atk_shape.shape = arect
 	_atk_shape.disabled = true
 	_atk_area.add_child(_atk_shape)
+	_atk_area.set_meta("team", "enemy")
+	_atk_area.set_meta("owner", self)
+	_atk_area.set_meta("owner_id", _owner_id)
+	_atk_area.set_meta("attack_kind", "melee")
+	_atk_area.set_meta("attack_active", false)
 	add_child(_atk_area)
 	if data.is_empty():
 		data = Content.ENEMY[Kind.STALKER]
@@ -91,15 +100,32 @@ func _ready() -> void:
 	if kind == Kind.WISP:
 		_wisp_y = global_position.y
 		collision_mask = 0  # wisp hovers, ignores world
+	else:
+		_ledge_ray = RayCast2D.new()
+		_ledge_ray.collision_mask = Content.L_WORLD
+		_ledge_ray.exclude_parent = true
+		_ledge_ray.enabled = true
+		_ledge_ray.target_position = Vector2(0.0, 42.0)
+		add_child(_ledge_ray)
 	state = EState.SEEK
 	_spawn_anim = 0.4
 
 func _physics_process(delta: float) -> void:
 	if dead: return
+	_tick_status(delta)
+	if dead: return
+	if _bomb_armed:
+		_fuse_t -= delta
+		if _fuse_t <= 0.0:
+			_do_explosion()
+			return
 	_spawn_anim = maxf(0.0, _spawn_anim - delta)
 	_hurt_flash = maxf(0.0, _hurt_flash - delta)
 	_shield_flash = maxf(0.0, _shield_flash - delta)
 	cd = maxf(0.0, cd - delta)
+	if global_position.y > Content.FLOOR_Y + 220.0:
+		_die(false)
+		return
 	queue_redraw()
 	match state:
 		EState.SPAWN, EState.SEEK: _step_seek(delta)
@@ -200,11 +226,6 @@ func _step_windup(delta: float) -> void:
 	_move_x(0.0, delta)
 	move_and_slide()
 	st_timer -= delta
-	if kind == Kind.BOMBER:
-		_fuse_t -= delta
-		if _fuse_t <= 0.0:
-			_do_explosion()
-			return
 	if st_timer <= 0.0:
 		if kind == Kind.WISP:
 			_wisp_shoot()
@@ -221,6 +242,7 @@ func _step_windup(delta: float) -> void:
 			_atk_shape.position = Vector2(facing * (float(data.w) * 0.5 + 20.0), 0.0)
 			_atk_shape.disabled = false
 			_atk_area.monitoring = true
+			_atk_area.set_meta("attack_active", true)
 
 func _step_attack(delta: float) -> void:
 	_apply_gravity(delta)
@@ -239,6 +261,7 @@ func _step_attack(delta: float) -> void:
 	if st_timer <= 0.0:
 		_atk_shape.disabled = true
 		_atk_area.monitoring = false
+		_atk_area.set_meta("attack_active", false)
 		state = EState.RECOVER
 		st_timer = float(data.recover)
 		cd = float(data.cd)
@@ -251,16 +274,19 @@ func _wisp_shoot() -> void:
 		dir = d
 	emit_signal("projectile_requested", "enemy", global_position + Vector2(facing * 18.0, 0.0), dir * Content.WISP_SHOT_SPEED, Content.WISP_SHOT_DAMAGE, 160.0, 0, Content.WISP_SHOT_LIFE, data.color)
 
-func _do_explosion() -> void:
-	# AoE damage to player if in range, then die
+func _do_explosion(reduced: bool = false) -> void:
+	# Killing an armed bomber still pops it, but rewards the player with a much
+	# smaller blast that is practical to dash away from.
+	var blast := _blast_radius * (0.55 if reduced else 1.0)
+	var blast_damage := float(data.damage) * (0.4 if reduced else 1.0)
 	var player = _get_player()
 	if player != null and is_instance_valid(player):
 		var d: float = global_position.distance_to(player.global_position)
-		if d <= _blast_radius:
+		if d <= blast:
 			var kdir: Vector2 = (player.global_position - global_position).normalized()
 			if kdir == Vector2.ZERO: kdir = Vector2.UP
-			player.take_damage(float(data.damage), Vector2(kdir.x, -0.5), 380.0)
-	emit_signal("exploded", global_position, _blast_radius, float(data.damage))
+			player.take_damage(blast_damage, Vector2(kdir.x, -0.5), 380.0)
+	emit_signal("exploded", global_position, blast, blast_damage)
 	_die()
 
 func _step_recover(delta: float) -> void:
@@ -303,32 +329,66 @@ func take_damage(amount: float, from_dir: Vector2, kb: float) -> void:
 	hp -= amount
 	_hurt_flash = 0.1
 	if hp <= 0.0:
-		_die()
+		if kind == Kind.BOMBER and _bomb_armed:
+			_do_explosion(true)
+		else:
+			_die()
 		return
 	state = EState.STAGGER
 	stagger_t = 0.18
 	velocity = from_dir.normalized() * kb
 	if kind == Kind.WISP:
 		velocity.y = from_dir.y * kb * 0.5
-	# Bomber hit during fuse: still explodes (kamikaze), but dies "cleanly" if killed fast
-	if kind == Kind.BOMBER and _bomb_armed and _fuse_t > 0.0:
-		# killed before fuse — smaller, hasty explosion
-		_fuse_t = minf(_fuse_t, 0.08)
+	# An armed fuse deliberately keeps counting down through this stagger state.
 
-func _die() -> void:
+func apply_burn(dps: float, duration: float) -> void:
+	burn_dps = dps if burn_time <= 0.0 else maxf(burn_dps, dps)
+	burn_time = maxf(burn_time, duration)
+	queue_redraw()
+
+func _tick_status(delta: float) -> void:
+	if burn_time <= 0.0:
+		burn_dps = 0.0
+		return
+	burn_time = maxf(0.0, burn_time - delta)
+	hp -= burn_dps * delta
+	_hurt_flash = maxf(_hurt_flash, 0.025)
+	if burn_time <= 0.0:
+		burn_dps = 0.0
+	if hp <= 0.0:
+		if kind == Kind.BOMBER and _bomb_armed:
+			_do_explosion(true)
+		else:
+			_die()
+
+func on_parried(knock_dir: Vector2) -> void:
+	_atk_shape.set_deferred("disabled", true)
+	_atk_area.monitoring = false
+	_atk_area.set_meta("attack_active", false)
+	state = EState.STAGGER
+	stagger_t = 0.4
+	velocity = knock_dir.normalized() * 260.0
+
+func _die(award_reward: bool = true) -> void:
 	if dead: return
 	dead = true
 	state = EState.DEAD
 	_atk_shape.disabled = true
 	_atk_area.monitoring = false
+	_atk_area.set_meta("attack_active", false)
 	_hurtbox.set_deferred("monitorable", false)
-	emit_signal("died", int(data.score))
+	emit_signal("died", int(data.score) if award_reward else 0)
 
 func _apply_gravity(delta: float) -> void:
 	if kind != Kind.WISP:
 		velocity.y += Content.GRAVITY * delta
 
 func _move_x(speed: float, delta: float) -> void:
+	if _ledge_ray != null and speed != 0.0 and is_on_floor():
+		_ledge_ray.position = Vector2(signf(speed) * (float(data.w) * 0.5 + 12.0), float(data.h) * 0.35)
+		_ledge_ray.force_raycast_update()
+		if not _ledge_ray.is_colliding():
+			speed = 0.0
 	velocity.x = _approach(velocity.x, speed, 2000.0 * delta)
 
 func _approach(c: float, t: float, d: float) -> float:
@@ -348,34 +408,61 @@ func _draw() -> void:
 	var s := 1.0
 	if _spawn_anim > 0.0: s = 1.0 - _spawn_anim / 0.4
 	draw_set_transform(Vector2.ZERO, 0.0, Vector2(s, s))
+	if kind != Kind.WISP:
+		draw_colored_polygon(PackedVector2Array([
+			Vector2(-w * 0.58, h * 0.51), Vector2(w * 0.58, h * 0.51),
+			Vector2(w * 0.38, h * 0.60), Vector2(-w * 0.38, h * 0.60),
+		]), Color(0.0, 0.0, 0.0, 0.30))
 	match kind:
 		Kind.STALKER:
-			draw_rect(Rect2(-w*0.5, -h*0.5, w, h), col)
-			draw_circle(Vector2(facing * w * 0.2, -h * 0.5 - 4.0), w * 0.3, col)
-			draw_circle(Vector2(facing * w * 0.25, -h * 0.5 - 4.0), 2.0, Color("ffd23f"))
+			# Hooked cloak, hood and a short cleaver.
+			draw_colored_polygon(PackedVector2Array([
+				Vector2(-w * 0.38, -h * 0.35), Vector2(w * 0.34, -h * 0.35),
+				Vector2(w * 0.52, h * 0.48), Vector2(0.0, h * 0.34),
+				Vector2(-w * 0.56, h * 0.48),
+			]), col)
+			var hood := Vector2(facing * 2.0, -h * 0.48)
+			draw_circle(hood, w * 0.34, col.darkened(0.15))
+			draw_circle(hood + Vector2(facing * 5.0, 0.0), 2.2, Color("ffd23f"))
+			draw_line(Vector2(facing * 8.0, -2.0), Vector2(facing * 24.0, 9.0), Color("b6a9a2"), 4.0, true)
 		Kind.HOPPER:
 			var pts := PackedVector2Array([
 				Vector2(0, -h*0.5), Vector2(w*0.5, h*0.3), Vector2(0, h*0.2), Vector2(-w*0.5, h*0.3)
 			])
 			draw_colored_polygon(pts, col)
+			draw_colored_polygon(PackedVector2Array([
+				Vector2(-w * 0.2, -h * 0.35), Vector2(0.0, -h * 0.72), Vector2(w * 0.14, -h * 0.30)
+			]), col.lightened(0.12))
+			draw_line(Vector2(-w * 0.3, h * 0.22), Vector2(-w * 0.55, h * 0.48), col.darkened(0.32), 5.0, true)
+			draw_line(Vector2(w * 0.3, h * 0.22), Vector2(w * 0.55, h * 0.48), col.darkened(0.32), 5.0, true)
 			draw_circle(Vector2(facing * 4.0, -h * 0.2), 2.5, Color("ffd23f"))
 		Kind.WISP:
-			draw_circle(Vector2.ZERO, w * 0.5, col)
-			draw_arc(Vector2.ZERO, w * 0.5, 0, TAU, 24, Color(col.r, col.g, col.b, 0.6), 2.0)
-			draw_circle(Vector2.ZERO, w * 0.25, Color("ffd23f"))
+			var pulse := 0.9 + sin(_wisp_t * 5.0) * 0.1
+			draw_circle(Vector2.ZERO, w * 0.8 * pulse, Color(col.r, col.g, col.b, 0.12))
+			draw_colored_polygon(PackedVector2Array([
+				Vector2(0.0, -w * 0.62), Vector2(w * 0.52, 0.0),
+				Vector2(w * 0.18, w * 0.62), Vector2(0.0, w * 0.38),
+				Vector2(-w * 0.18, w * 0.62), Vector2(-w * 0.52, 0.0),
+			]), col)
+			draw_arc(Vector2.ZERO, w * 0.52, 0, TAU, 24, col.lightened(0.25), 2.0)
+			draw_circle(Vector2.ZERO, w * 0.20, Color("ffd23f"))
 		Kind.BRUTE:
-			# heavy blocky body
-			draw_rect(Rect2(-w*0.5, -h*0.5, w, h), col)
-			# shoulder plates
-			draw_rect(Rect2(-w*0.5, -h*0.5, w*0.3, 8.0), col.darkened(0.3))
-			draw_rect(Rect2(w*0.2, -h*0.5, w*0.3, 8.0), col.darkened(0.3))
-			# eyes
-			draw_circle(Vector2(facing * 8.0, -h*0.3), 3.0, Color("ff3d3d"))
-			draw_circle(Vector2(-facing * 8.0, -h*0.3), 3.0, Color("ff3d3d"))
+			# Squat plated body with oversized pauldrons.
+			draw_colored_polygon(PackedVector2Array([
+				Vector2(-w * 0.44, -h * 0.34), Vector2(w * 0.44, -h * 0.34),
+				Vector2(w * 0.50, h * 0.48), Vector2(-w * 0.50, h * 0.48),
+			]), col)
+			draw_circle(Vector2(-w * 0.44, -h * 0.24), 10.0, col.darkened(0.22))
+			draw_circle(Vector2(w * 0.44, -h * 0.24), 10.0, col.darkened(0.22))
+			draw_rect(Rect2(-w * 0.28, -h * 0.48, w * 0.56, 17.0), Color("29301f"))
+			draw_line(Vector2(-8.0, -h * 0.34), Vector2(8.0, -h * 0.34), Color("ff5a3d"), 3.0, true)
 		Kind.BOMBER:
 			# round body with a fuse spark on top
-			draw_circle(Vector2.ZERO, w * 0.5, col)
-			draw_circle(Vector2.ZERO, w * 0.3, col.darkened(0.2))
+			draw_circle(Vector2.ZERO, w * 0.54, col.darkened(0.28))
+			draw_circle(Vector2.ZERO, w * 0.43, col)
+			draw_arc(Vector2.ZERO, w * 0.28, 0.0, TAU, 18, Color("efb04f"), 3.0)
+			draw_line(Vector2(-6.0, 0.0), Vector2(6.0, 0.0), Color("efb04f"), 2.0)
+			draw_line(Vector2(0.0, -6.0), Vector2(0.0, 6.0), Color("efb04f"), 2.0)
 			# fuse spark pulsing when armed
 			if _bomb_armed:
 				var spark := 0.5 + sin(Time.get_ticks_msec() * 0.04) * 0.5
@@ -409,3 +496,18 @@ func _draw() -> void:
 		var off: float = 0.0 if facing >= 0.0 else 40.0
 		draw_rect(Rect2(facing * (w*0.5) - off, -h*0.5 - 5, 40, h + 10), Color(1, 0.2, 0.2, 0.3))
 	draw_set_transform(Vector2.ZERO, 0.0, Vector2.ONE)
+	if hp < float(data.hp):
+		var hp_width := maxf(30.0, w)
+		var hp_frac := clampf(hp / float(data.hp), 0.0, 1.0)
+		draw_rect(Rect2(-hp_width * 0.5, -h * 0.72 - 9.0, hp_width, 4.0), Color(0.08, 0.06, 0.10, 0.8))
+		draw_rect(Rect2(-hp_width * 0.5, -h * 0.72 - 9.0, hp_width * hp_frac, 4.0), col)
+	if burn_time > 0.0:
+		var flame_pulse := 0.75 + sin(Time.get_ticks_msec() * 0.02) * 0.2
+		for i in range(3):
+			var fx := -w * 0.28 + float(i) * w * 0.28
+			var fy := -h * 0.48 - float((i + int(Time.get_ticks_msec() / 120)) % 2) * 5.0
+			draw_colored_polygon(PackedVector2Array([
+				Vector2(fx - 4.0, fy + 10.0),
+				Vector2(fx, fy - 7.0 * flame_pulse),
+				Vector2(fx + 4.0, fy + 10.0),
+			]), Color(1.0, 0.35 + float(i) * 0.08, 0.08, 0.9))

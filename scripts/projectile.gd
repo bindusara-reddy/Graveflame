@@ -12,6 +12,7 @@ var radius := 9.0
 var color := Color("7fd4ff")
 var _hit: Dictionary = {}
 var _shape: CollisionShape2D
+var _age := 0.0
 
 func setup(p_team: String, p_pos: Vector2, p_vel: Vector2, p_dmg: float, p_kb: float, p_pierce: int, p_life: float, p_color: Color) -> void:
 	team = p_team
@@ -33,6 +34,10 @@ func _update_layers() -> void:
 		collision_layer = Content.L_ENEMY_ATK
 		collision_mask = Content.L_PLAYER_HURT
 		color = color if color != Color("7fd4ff") else Color("ff6b6b")
+	set_meta("team", team)
+	set_meta("damage", damage)
+	set_meta("attack_kind", "projectile")
+	set_meta("owner_id", get_instance_id())
 
 func _ready() -> void:
 	# Build collision shape
@@ -42,12 +47,15 @@ func _ready() -> void:
 	_shape.shape = circ
 	add_child(_shape)
 	monitoring = true
-	monitorable = false
-	set_meta("team", team)
-	set_meta("damage", damage)
+	# Parry areas need to be able to detect the projectile itself.
+	monitorable = true
+	_update_layers()
 
 func _physics_process(delta: float) -> void:
+	_age += delta
 	global_position += vel * delta
+	rotation = vel.angle()
+	queue_redraw()
 	life -= delta
 	if life <= 0.0:
 		_die()
@@ -79,6 +87,33 @@ func _try_hit(area: Area2D) -> void:
 	else:
 		_die()
 
+func reflect(direction: Vector2, damage_boost: float = 1.6) -> void:
+	team = "player"
+	var speed := maxf(vel.length() * 1.2, 520.0)
+	var out_dir := direction.normalized()
+	if out_dir == Vector2.ZERO:
+		out_dir = -vel.normalized()
+	vel = out_dir * speed
+	damage *= damage_boost
+	pierce = maxi(pierce, 1)
+	color = Content.PAL.special
+	_hit.clear()
+	_update_layers()
+	queue_redraw()
+
 func _die() -> void:
 	set_physics_process(false)
 	queue_free()
+
+func _draw() -> void:
+	var pulse := 0.85 + sin(_age * 22.0) * 0.15
+	var glow := Color(color.r, color.g, color.b, 0.16)
+	draw_circle(Vector2.ZERO, radius * 2.2 * pulse, glow)
+	draw_colored_polygon(PackedVector2Array([
+		Vector2(radius * 1.35, 0.0),
+		Vector2(0.0, radius * 0.7),
+		Vector2(-radius * 1.5, 0.0),
+		Vector2(0.0, -radius * 0.7),
+	]), color)
+	draw_line(Vector2(-radius * 1.2, 0.0), Vector2(-radius * 3.4, 0.0), Color(color.r, color.g, color.b, 0.35), 4.0, true)
+	draw_circle(Vector2(radius * 0.35, -1.0), 2.0, Color.WHITE)

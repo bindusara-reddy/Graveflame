@@ -2,15 +2,15 @@ class_name Content
 extends RefCounted
 ## Immutable tuning, room templates, enemy stats, combo data, and upgrade defs.
 
-# --- Physics layers (must match project.godot) ---
-const L_WORLD := 1
-const L_PLAYER_BODY := 2
-const L_ENEMY_BODY := 3
-const L_PLAYER_HURT := 4
-const L_ENEMY_HURT := 5
-const L_PLAYER_ATK := 6
-const L_ENEMY_ATK := 7
-const L_TRIGGER := 8
+# --- Physics layer bitmasks (must match project.godot layer ordinals) ---
+const L_WORLD := 1 << 0
+const L_PLAYER_BODY := 1 << 1
+const L_ENEMY_BODY := 1 << 2
+const L_PLAYER_HURT := 1 << 3
+const L_ENEMY_HURT := 1 << 4
+const L_PLAYER_ATK := 1 << 5
+const L_ENEMY_ATK := 1 << 6
+const L_TRIGGER := 1 << 7
 
 # --- World / camera ---
 const VIEW_W := 1280
@@ -38,11 +38,17 @@ const P_DASH_TIME := 0.18
 const P_DASH_CD := 0.55
 const P_DASH_IFRAMES := 0.22
 const P_HURT_IFRAMES := 0.7
+const P_ATTACK_BUFFER := 0.18
 const P_BODY_W := 26.0
 const P_BODY_H := 54.0
 const P_SPECIAL_MAX := 100.0
 const P_SPECIAL_GAIN := 9.0
-const P_SPECIAL_COST := 50.0
+const P_SPECIAL_COST := 40.0
+const P_FLAME_DURATION := 5.0
+const P_FLAME_DAMAGE_MUL := 1.35
+const P_FLAME_BURN_DPS := 8.0
+const P_FLAME_BURN_TIME := 3.0
+const P_HEAL_TIME := 0.55
 
 # --- Down-slam (air attack) ---
 const P_SLAM_DAMAGE := 30.0
@@ -71,9 +77,9 @@ const FLASK_REFILL_ON_CLEAR := true  # refill to max when a room is cleared
 
 # --- Combo: three swings. Times in seconds. ---
 const COMBO := [
-	{ "name": "cut",   "startup": 0.06, "active": 0.08, "recover": 0.16, "damage": 12.0, "knock": 220.0, "range": 64.0,  "arc": 1.6,  "window": 0.32 },
-	{ "name": "cleave","startup": 0.08, "active": 0.10, "recover": 0.22, "damage": 16.0, "knock": 300.0, "range": 74.0,  "arc": 1.8,  "window": 0.34 },
-	{ "name": "finish","startup": 0.10, "active": 0.12, "recover": 0.30, "damage": 24.0, "knock": 460.0, "range": 84.0,  "arc": 2.05, "window": 0.0  },
+	{ "name": "cut",   "startup": 0.06, "active": 0.08, "recover": 0.16, "damage": 12.0, "knock": 220.0, "range": 64.0,  "arc": 1.6,  "window": 0.32, "lunge": 150.0 },
+	{ "name": "cleave","startup": 0.08, "active": 0.10, "recover": 0.20, "damage": 16.0, "knock": 300.0, "range": 74.0,  "arc": 1.8,  "window": 0.34, "lunge": 185.0 },
+	{ "name": "finish","startup": 0.10, "active": 0.12, "recover": 0.26, "damage": 24.0, "knock": 460.0, "range": 84.0,  "arc": 2.05, "window": 0.0, "lunge": 235.0 },
 ]
 const COMBO_RESET := 0.55
 
@@ -145,6 +151,7 @@ static var UPGRADES: Array = [
 static var ROOM_TEMPLATES: Array = [
 	{
 		"tag": "intro",
+		"name": "ASHEN CELLS",
 		"platforms": [ Rect2(ROOM_LEFT, FLOOR_Y, ROOM_RIGHT - ROOM_LEFT, 120) ],
 		"hazards": [],
 		"slots": [ Vector2(380, FLOOR_Y - 40), Vector2(900, FLOOR_Y - 40) ],
@@ -153,18 +160,20 @@ static var ROOM_TEMPLATES: Array = [
 	},
 	{
 		"tag": "gap",
+		"name": "BROKEN CAUSEWAY",
 		"platforms": [
 			Rect2(ROOM_LEFT, FLOOR_Y, 620, 120),
 			Rect2(860, FLOOR_Y, ROOM_RIGHT - 860, 120),
 			Rect2(680, FLOOR_Y - 180, 140, 40),
 		],
 		"hazards": [ Rect2(620, FLOOR_Y + 20, 240, 100) ],
-		"slots": [ Vector2(460, FLOOR_Y - 40), Vector2(720, FLOOR_Y - 220), Vector2(1040, FLOOR_Y - 40) ],
+		"slots": [ Vector2(300, FLOOR_Y - 40), Vector2(720, FLOOR_Y - 220), Vector2(1040, FLOOR_Y - 40) ],
 		"entry": Vector2(180, FLOOR_Y - 80),
 		"exit": Vector2(1180, FLOOR_Y - 80),
 	},
 	{
 		"tag": "tiers",
+		"name": "WARDEN'S ASCENT",
 		"platforms": [
 			Rect2(ROOM_LEFT, FLOOR_Y, ROOM_RIGHT - ROOM_LEFT, 120),
 			Rect2(300, FLOOR_Y - 170, 260, 36),
@@ -178,6 +187,7 @@ static var ROOM_TEMPLATES: Array = [
 	},
 	{
 		"tag": "arena",
+		"name": "BLOODLESS YARD",
 		"platforms": [
 			Rect2(ROOM_LEFT, FLOOR_Y, ROOM_RIGHT - ROOM_LEFT, 120),
 			Rect2(240, FLOOR_Y - 200, 160, 36),
@@ -190,6 +200,7 @@ static var ROOM_TEMPLATES: Array = [
 	},
 	{
 		"tag": "platforms",
+		"name": "CINDERWORKS",
 		"platforms": [
 			Rect2(ROOM_LEFT, FLOOR_Y, 460, 120),
 			Rect2(820, FLOOR_Y, ROOM_RIGHT - 820, 120),
@@ -205,6 +216,7 @@ static var ROOM_TEMPLATES: Array = [
 	{
 		# Vertical shaft with tall walls — designed for wall slide + wall jump.
 		"tag": "chamber",
+		"name": "HOLLOW SHAFT",
 		"platforms": [
 			Rect2(ROOM_LEFT, FLOOR_Y, 320, 120),
 			Rect2(960, FLOOR_Y, ROOM_RIGHT - 960, 120),
@@ -215,13 +227,15 @@ static var ROOM_TEMPLATES: Array = [
 		],
 		"walls": [ Rect2(360, 100, 30, 460), Rect2(890, 100, 30, 460) ],  # climbable wall surfaces
 		"hazards": [ Rect2(400, FLOOR_Y + 20, 560, 100) ],
-		"slots": [ Vector2(240, FLOOR_Y - 40), Vector2(540, FLOOR_Y - 190), Vector2(740, FLOOR_Y - 320), Vector2(1100, FLOOR_Y - 40) ],
-		"entry": Vector2(180, FLOOR_Y - 80),
+		# Keep the first wave clear of the entry ledge.
+		"slots": [ Vector2(1100, FLOOR_Y - 40), Vector2(540, FLOOR_Y - 190), Vector2(740, FLOOR_Y - 320) ],
+		"entry": Vector2(40, FLOOR_Y - 80),
 		"exit": Vector2(1180, FLOOR_Y - 80),
 	},
 	{
 		# Two raised side platforms with a central pit — encourages air combat and slamming.
 		"tag": "crossfire",
+		"name": "GALLOW CROSSING",
 		"platforms": [
 			Rect2(ROOM_LEFT, FLOOR_Y, 360, 120),
 			Rect2(920, FLOOR_Y, ROOM_RIGHT - 920, 120),
@@ -231,13 +245,14 @@ static var ROOM_TEMPLATES: Array = [
 		],
 		"hazards": [ Rect2(360, FLOOR_Y + 20, 560, 100) ],
 		"slots": [ Vector2(330, FLOOR_Y - 260), Vector2(950, FLOOR_Y - 260), Vector2(640, FLOOR_Y - 400), Vector2(120, FLOOR_Y - 40) ],
-		"entry": Vector2(180, FLOOR_Y - 80),
+		"entry": Vector2(40, FLOOR_Y - 80),
 		"exit": Vector2(1180, FLOOR_Y - 80),
 	},
 ]
 
 static var BOSS_TEMPLATE: Dictionary = {
 	"tag": "boss",
+	"name": "EMBER THRONE",
 	"platforms": [ Rect2(ROOM_LEFT, FLOOR_Y, ROOM_RIGHT - ROOM_LEFT, 120) ],
 	"hazards": [],
 	"slots": [],
@@ -245,16 +260,26 @@ static var BOSS_TEMPLATE: Dictionary = {
 	"exit": Vector2(640, FLOOR_Y - 80),
 }
 
-## Encounter budgets per room index (room 0 is intro, light).
-static func encounter_for_room(room_index: int) -> Array:
-	# returns array of EnemyKind
+## Authored encounter waves per route position. A short breath between waves keeps
+## combat readable while still building the gauntlet pressure of the genre.
+static func encounter_waves_for_room(room_index: int) -> Array:
 	match room_index:
-		0: return [EnemyKind.STALKER, EnemyKind.STALKER]
-		1: return [EnemyKind.STALKER, EnemyKind.HOPPER, EnemyKind.WISP]
-		2: return [EnemyKind.HOPPER, EnemyKind.HOPPER, EnemyKind.WISP, EnemyKind.STALKER]
-		3: return [EnemyKind.WISP, EnemyKind.HOPPER, EnemyKind.STALKER, EnemyKind.BRUTE, EnemyKind.BOMBER]
-		4: return [EnemyKind.BRUTE, EnemyKind.BOMBER, EnemyKind.WISP, EnemyKind.HOPPER, EnemyKind.STALKER]
-		_: return [EnemyKind.STALKER, EnemyKind.HOPPER, EnemyKind.WISP, EnemyKind.BRUTE]
+		0: return [[EnemyKind.STALKER, EnemyKind.STALKER]]
+		1: return [[EnemyKind.STALKER, EnemyKind.HOPPER], [EnemyKind.WISP, EnemyKind.STALKER]]
+		2: return [[EnemyKind.HOPPER, EnemyKind.WISP], [EnemyKind.HOPPER, EnemyKind.STALKER]]
+		3: return [[EnemyKind.WISP, EnemyKind.STALKER], [EnemyKind.BRUTE, EnemyKind.BOMBER]]
+		4: return [[EnemyKind.BRUTE, EnemyKind.WISP], [EnemyKind.BOMBER, EnemyKind.HOPPER, EnemyKind.STALKER]]
+		_: return [[EnemyKind.STALKER, EnemyKind.HOPPER], [EnemyKind.WISP, EnemyKind.BRUTE]]
+
+## Compatibility helper used by tests and tooling that want a flat encounter.
+static func encounter_for_room(room_index: int) -> Array:
+	var out: Array = []
+	for wave in encounter_waves_for_room(room_index):
+		out.append_array(wave)
+	return out
+
+static func room_name(template: Dictionary) -> String:
+	return str(template.get("name", str(template.get("tag", "unknown")).to_upper()))
 
 # --- Cells meta-progression (currency kept across runs, Dead Cells-style) ---
 const META_UPGRADES: Array = [

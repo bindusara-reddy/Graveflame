@@ -7,13 +7,15 @@ extends CharacterBody2D
 signal hp_changed(hp: float, max_hp: float)
 signal special_changed(value: float, maximum: float)
 signal projectile_requested(team: String, pos: Vector2, vel: Vector2, dmg: float, kb: float, pierce: int, life: float, color: Color)
-signal hit_landed(damage: float)
+signal hit_landed(damage: float, pos: Vector2, heavy: bool)
 signal died
 signal slam_landed(pos: Vector2, radius: float)
 signal parried(pos: Vector2, success: bool)
 signal flask_changed(charges: int, max_charges: int)
+signal hurt_taken(amount: float, pos: Vector2)
+signal action_feedback(kind: String, pos: Vector2)
 
-enum State { LOCOMOTION, ATTACK, SLAM, DASH, PARRY, HURT, DEAD }
+enum State { LOCOMOTION, ATTACK, SLAM, DASH, PARRY, HEAL, HURT, DEAD }
 
 var build: Dictionary = {}
 var state: State = State.LOCOMOTION
@@ -26,6 +28,8 @@ var combo_timer := 0.0
 var atk_phase := "none"  # startup | active | recover | none
 var atk_time := 0.0
 var atk_hit: Dictionary = {}
+var attack_buffer := 0.0
+var _queued_attack := false
 var dash_cd := 0.0
 var dash_time := 0.0
 var iframes := 0.0
@@ -61,8 +65,14 @@ var _parry_area: Area2D
 var _parry_shape: CollisionShape2D
 var _parry_rect := RectangleShape2D.new()
 var _parry_hit: Dictionary = {}
+var _parry_succeeded := false
 # --- Flask heal visual ---
 var _flask_heal_flash := 0.0
+var _heal_time := 0.0
+# --- Full-meter Graveflame mode ---
+var _flame_time := 0.0
+var _anim_time := 0.0
+var _input_lock_frames := 0
 
 func setup(rm: RunModel) -> void:
 	_run_model = rm
@@ -105,7 +115,7 @@ func _ready() -> void:
 	# Parry deflection area (front-facing rectangle)
 	_parry_area = Area2D.new()
 	_parry_area.collision_layer = Content.L_PLAYER_ATK
-	_parry_area.collision_mask = Content.L_ENEMY_ATK | Content.L_ENEMY_HURT
+	_parry_area.collision_mask = Content.L_ENEMY_ATK
 	_parry_area.monitoring = false
 	_parry_shape = CollisionShape2D.new()
 	_parry_shape.shape = _parry_rect
@@ -131,6 +141,17 @@ func _ready() -> void:
 func _physics_process(delta: float) -> void:
 	if dead:
 		return
+	var controls_locked := _input_lock_frames > 0
+	if controls_locked:
+		_input_lock_frames -= 1
+		attack_buffer = 0.0
+		jump_buffer = 0.0
+	_anim_time += delta
+	if not controls_locked and Input.is_action_just_pressed("attack"):
+		attack_buffer = Content.P_ATTACK_BUFFER
+	else:
+		attack_buffer = maxf(0.0, attack_buffer - delta)
+	_flame_time = maxf(0.0, _flame_time - delta)
 	if iframes > 0.0: iframes -= delta
 	if dash_cd > 0.0: dash_cd -= delta
 	if _hurt_flash > 0.0: _hurt_flash -= delta
@@ -144,19 +165,20 @@ func _physics_process(delta: float) -> void:
 	combo_timer = maxf(0.0, combo_timer - delta)
 
 	match state:
-		State.LOCOMOTION: _step_locomotion(delta)
+		State.LOCOMOTION: _step_locomotion(delta, controls_locked)
 		State.ATTACK: _step_attack(delta)
 		State.SLAM: _step_slam(delta)
 		State.DASH: _step_dash(delta)
 		State.PARRY: _step_parry(delta)
+		State.HEAL: _step_heal(delta)
 		State.HURT: _step_hurt(delta)
 		State.DEAD: pass
 
 	queue_redraw()
 
 # --- Locomotion ---
-func _step_locomotion(delta: float) -> void:
-	var dir := Input.get_axis("move_left", "move_right")
+func _step_locomotion(delta: float, controls_locked: bool = false) -> void:
+	var dir := 0.0 if controls_locked else Input.get_axis("move_left", "move_right")
 	if dir != 0.0: facing = signf(dir)
 	var accel := Content.P_AIR_ACCEL if not is_on_floor() else Content.P_ACCEL
 	var target := dir * Content.P_SPEED * float(build.get("speed_mul", 1.0))
@@ -168,7 +190,7 @@ func _step_locomotion(delta: float) -> void:
 		velocity.y = minf(velocity.y, Content.P_WALL_SLIDE_SPEED)
 	velocity.y += grav * delta
 	# Jump
-	if Input.is_action_just_pressed("jump"):
+	if not controls_locked and Input.is_action_just_pressed("jump"):
 		jump_buffer = Content.P_JUMP_BUFFER
 	# Wall jump takes priority over air jump when against a wall
 	if jump_buffer > 0.0 and _wall_dir != 0.0 and not is_on_floor():
@@ -181,33 +203,38 @@ func _step_locomotion(delta: float) -> void:
 		_do_jump(true)
 		jump_buffer = 0.0
 	# Variable jump cut
-	if Input.is_action_just_released("jump") and velocity.y < 0.0:
+	if not controls_locked and Input.is_action_just_released("jump") and velocity.y < 0.0:
 		velocity.y *= Content.P_JUMP_CUT
 	# Friction on ground when no input
 	if dir == 0.0 and is_on_floor():
 		velocity.x = _approach(velocity.x, 0.0, Content.P_FRICTION * delta)
 	# Dash
-	if Input.is_action_just_pressed("dash") and dash_cd <= 0.0:
+	if not controls_locked and Input.is_action_just_pressed("dash") and dash_cd <= 0.0:
 		_begin_dash()
 		return
 	# Parry
-	if Input.is_action_just_pressed("parry") and parry_cd <= 0.0:
+	if not controls_locked and Input.is_action_just_pressed("parry") and parry_cd <= 0.0:
 		_begin_parry()
 		return
-	# Attack (ground) or Slam (air)
-	if Input.is_action_just_pressed("attack"):
+	# Buffered attack (ground/upward air) or down-slam while falling.
+	if attack_buffer > 0.0:
+		attack_buffer = 0.0
 		if not is_on_floor() and velocity.y > -50.0:
 			_begin_slam()
 			return
 		_begin_attack()
 		return
 	# Special
-	if Input.is_action_just_pressed("special") and special >= Content.P_SPECIAL_COST:
+	if not controls_locked and Input.is_action_just_pressed("special") and special >= Content.P_SPECIAL_COST:
 		_do_special()
 		return
+	if not controls_locked and Input.is_action_just_pressed("ignite") and special >= max_special:
+		_do_graveflame()
+		return
 	# Flask heal
-	if Input.is_action_just_pressed("heal"):
-		_use_flask()
+	if not controls_locked and Input.is_action_just_pressed("heal"):
+		_begin_heal()
+		return
 	move_and_slide()
 	_floor_and_wall_tracking()
 
@@ -248,6 +275,7 @@ func _do_jump(is_double: bool) -> void:
 	jumps_left -= 1
 	if is_double: jumps_left = mini(jumps_left, Content.P_MAX_JUMPS - 1)
 	wall_sliding = false
+	emit_signal("action_feedback", "jump", global_position)
 
 func _do_wall_jump() -> void:
 	# Leap away from the wall
@@ -257,27 +285,45 @@ func _do_wall_jump() -> void:
 	jumps_left = Content.P_MAX_JUMPS - 1
 	wall_sliding = false
 	_wall_dir = 0.0
+	emit_signal("action_feedback", "jump", global_position)
 
 func _approach(current: float, target: float, max_delta: float) -> float:
 	if current < target: return minf(current + max_delta, target)
 	return maxf(current - max_delta, target)
 
 # --- Attack combo ---
-func _begin_attack() -> void:
-	if combo_timer > 0.0 and attack_index >= 0 and attack_index < Content.COMBO.size() - 1:
+func _begin_attack(force_chain: bool = false) -> void:
+	if force_chain and attack_index >= 0 and attack_index < Content.COMBO.size() - 1:
+		attack_index += 1
+	elif combo_timer > 0.0 and attack_index >= 0 and attack_index < Content.COMBO.size() - 1:
 		attack_index += 1
 	else:
 		attack_index = 0
 	var def: Dictionary = Content.COMBO[attack_index]
+	attack_buffer = 0.0
+	_queued_attack = false
 	state = State.ATTACK
 	atk_phase = "startup"
 	atk_time = def.startup
-	velocity.x *= 0.3
+	velocity.x = facing * float(def.get("lunge", 150.0))
 	set_meta("atk_def", def)
+	emit_signal("action_feedback", "swing", global_position)
 
 func _step_attack(delta: float) -> void:
+	if attack_buffer > 0.0 and attack_index < Content.COMBO.size() - 1:
+		_queued_attack = true
+		attack_buffer = 0.0
+	# Recovery can be cancelled into a dash, keeping combat responsive without
+	# removing the commitment of startup and active frames.
+	if atk_phase == "recover" and Input.is_action_just_pressed("dash") and dash_cd <= 0.0:
+		_deactivate_hitbox()
+		_begin_dash()
+		return
 	velocity.y += Content.GRAVITY * delta
-	velocity.x = _approach(velocity.x, 0.0, Content.P_FRICTION * delta)
+	var air_dir := Input.get_axis("move_left", "move_right")
+	var drag := Content.P_AIR_ACCEL if not is_on_floor() else Content.P_FRICTION
+	var target_x := air_dir * Content.P_SPEED * 0.45 if not is_on_floor() else 0.0
+	velocity.x = _approach(velocity.x, target_x, drag * delta)
 	var def: Dictionary = get_meta("atk_def")
 	atk_time -= delta
 	if atk_phase == "startup" and atk_time <= 0.0:
@@ -292,6 +338,9 @@ func _step_attack(delta: float) -> void:
 			_deactivate_hitbox()
 	elif atk_phase == "recover" and atk_time <= 0.0:
 		atk_phase = "none"
+		if _queued_attack and attack_index < Content.COMBO.size() - 1:
+			_begin_attack(true)
+			return
 		combo_timer = def.window
 		state = State.LOCOMOTION
 		attack_index = -1 if def.window <= 0.0 else attack_index
@@ -308,6 +357,9 @@ func _activate_hitbox(def: Dictionary) -> void:
 	_attack_arc = def.arc
 	_attack_range = def.range
 	atk_hit.clear()
+	if attack_index == Content.COMBO.size() - 1 and _flame_time > 0.0:
+		var wave_pos := global_position + Vector2(facing * 34.0, -8.0)
+		emit_signal("projectile_requested", "player", wave_pos, Vector2(facing * 560.0, 0.0), 18.0 * float(build.get("dmg_mul", 1.0)), 320.0, 2, 0.32, Content.PAL.player_accent)
 
 func _deactivate_hitbox() -> void:
 	_atk_shape.disabled = true
@@ -327,8 +379,12 @@ func _scan_attack_hits(def: Dictionary) -> void:
 			var dmg: float = def.damage * float(build.get("dmg_mul", 1.0))
 			if attack_index == Content.COMBO.size() - 1:
 				dmg *= float(build.get("finish_mul", 1.0))
+			if _flame_time > 0.0:
+				dmg *= Content.P_FLAME_DAMAGE_MUL
 			tgt.take_damage(dmg, Vector2(facing, -0.2), def.knock)
-			emit_signal("hit_landed", dmg)
+			if _flame_time > 0.0 and tgt.has_method("apply_burn"):
+				tgt.apply_burn(Content.P_FLAME_BURN_DPS, Content.P_FLAME_BURN_TIME)
+			emit_signal("hit_landed", dmg, tgt.global_position, attack_index == Content.COMBO.size() - 1)
 			_gain_special(Content.P_SPECIAL_GAIN * float(build.get("special_mul", 1.0)))
 			if float(build.get("lifesteal", 0.0)) > 0.0:
 				_heal(float(build.lifesteal))
@@ -341,6 +397,7 @@ func _begin_slam() -> void:
 	velocity.x *= 0.3
 	# brief i-frames during descent so dropping through enemies feels fair
 	iframes = maxf(iframes, 0.08)
+	emit_signal("action_feedback", "slam", global_position)
 
 func _step_slam(delta: float) -> void:
 	velocity.y += Content.GRAVITY * delta
@@ -389,6 +446,14 @@ func _do_special() -> void:
 	var pierce := 3 if bool(build.get("special_pierce", false)) else 0
 	var pos := global_position + Vector2(facing * 30.0, -10.0)
 	emit_signal("projectile_requested", "player", pos, Vector2(facing * spd, 0.0), dmg, 360.0, pierce, 1.6, Content.PAL.special)
+	emit_signal("action_feedback", "special", pos)
+
+func _do_graveflame() -> void:
+	special = 0.0
+	_flame_time = Content.P_FLAME_DURATION
+	iframes = maxf(iframes, 0.18)
+	emit_signal("special_changed", special, max_special)
+	emit_signal("action_feedback", "flame", global_position)
 
 func _gain_special(amount: float) -> void:
 	special = minf(max_special, special + amount)
@@ -404,6 +469,7 @@ func _begin_dash() -> void:
 	if dir == 0.0: dir = facing
 	velocity = Vector2(dir * Content.P_DASH_SPEED, 0.0)
 	wall_sliding = false
+	emit_signal("action_feedback", "dash", global_position)
 
 func _step_dash(delta: float) -> void:
 	dash_time -= delta
@@ -425,7 +491,9 @@ func _begin_parry() -> void:
 	_parry_shape.disabled = false
 	_parry_area.monitoring = true
 	_parry_hit.clear()
+	_parry_succeeded = false
 	_draw_parry = parry_time + 0.05
+	emit_signal("action_feedback", "parry_start", global_position)
 
 func _step_parry(delta: float) -> void:
 	velocity.y += Content.GRAVITY * delta
@@ -435,53 +503,60 @@ func _step_parry(delta: float) -> void:
 	if parry_time <= 0.0:
 		_parry_shape.disabled = true
 		_parry_area.monitoring = false
+		if not _parry_succeeded:
+			emit_signal("parried", global_position + Vector2(facing * 40.0, 0.0), false)
 		state = State.LOCOMOTION
 	move_and_slide()
 	_floor_and_wall_tracking()
 
 func _scan_parry() -> void:
-	# Deflect enemy melee attacks and reflect enemy projectiles overlapping the parry area
+	# Persistent enemy hurtboxes are not in this area's mask: only active melee
+	# attack areas and reflectable projectiles qualify.
 	for area in _parry_area.get_overlapping_areas():
-		if not is_instance_valid(area): continue
-		var team = area.get_meta("team")
-		if team == null or team == "player": continue
-		var oid: int = area.get_meta("owner_id", 0)
-		if _parry_hit.has(oid): continue
-		# Is this a projectile (Area2D with team "enemy" and a vel)?
-		var owner = area.get_meta("owner", null)
-		if area.has_method("get") and area is Area2D:
-			# Projectiles are Area2D nodes directly (not hurtboxes); hurtboxes have an "owner" meta pointing to a body
-			if owner == null and area.get_meta("team") == "enemy":
-				# Treat as projectile — reflect it
-				_reflect_projectile(area)
-				_parry_hit[oid] = true
-				continue
-		# Melee attacker: deal parry damage + knockback
-		if owner != null and is_instance_valid(owner) and owner.has_method("take_damage"):
-			owner.take_damage(Content.PARRY_DAMAGE + float(build.get("parry_bonus_dmg", 0.0)), Vector2(-facing, 0.0), 420.0)
+		if not is_instance_valid(area) or area.get_meta("team", "") != "enemy":
+			continue
+		var oid: int = int(area.get_meta("owner_id", 0))
+		if _parry_hit.has(oid):
+			continue
+		var attack_kind := str(area.get_meta("attack_kind", ""))
+		if attack_kind == "projectile" and area.has_method("reflect"):
+			area.reflect(Vector2(facing, -0.05), Content.PARRY_PROJECTILE_BOOST)
 			_parry_hit[oid] = true
+			_parry_succeeded = true
+			emit_signal("parried", global_position + Vector2(facing * 40.0, 0.0), true)
+			_gain_special(Content.P_SPECIAL_GAIN * 2.5)
+			continue
+		if attack_kind != "melee" or not bool(area.get_meta("attack_active", false)):
+			continue
+		var attacker = area.get_meta("owner", null)
+		if attacker != null and is_instance_valid(attacker) and attacker.has_method("take_damage"):
+			attacker.take_damage(Content.PARRY_DAMAGE + float(build.get("parry_bonus_dmg", 0.0)), Vector2(-facing, 0.0), 420.0)
+			if attacker.has_method("on_parried"):
+				attacker.on_parried(Vector2(facing, -0.2))
+			_parry_hit[oid] = true
+			_parry_succeeded = true
 			emit_signal("parried", global_position + Vector2(facing * 40.0, 0.0), true)
 			_gain_special(Content.P_SPECIAL_GAIN * 2.5)
 
-func _reflect_projectile(proj: Area2D) -> void:
-	# Flip velocity and team
-	if "vel" in proj:
-		var v: Vector2 = proj.vel
-		proj.vel = -v * 1.3
-	if "team" in proj:
-		proj.team = "player"
-		if proj.has_method("_update_layers"):
-			proj._update_layers()
-	if "damage" in proj:
-		proj.damage = float(proj.damage) * Content.PARRY_PROJECTILE_BOOST
-	# reset hit tracking so it can hit the enemy that fired it
-	if "_hit" in proj:
-		(proj._hit as Dictionary).clear()
-	if "color" in proj:
-		proj.color = Content.PAL.special
-	emit_signal("parried", global_position + Vector2(facing * 40.0, 0.0), true)
-
 # --- Healing flask ---
+func _begin_heal() -> void:
+	if flask_charges <= 0 or float(build.hp) >= float(build.max_hp):
+		return
+	state = State.HEAL
+	_heal_time = Content.P_HEAL_TIME
+	velocity.x *= 0.2
+	emit_signal("action_feedback", "heal_start", global_position)
+
+func _step_heal(delta: float) -> void:
+	velocity.y += Content.GRAVITY * delta
+	velocity.x = _approach(velocity.x, 0.0, Content.P_FRICTION * 2.0 * delta)
+	move_and_slide()
+	_floor_and_wall_tracking()
+	_heal_time -= delta
+	if _heal_time <= 0.0:
+		_use_flask()
+		state = State.LOCOMOTION
+
 func _use_flask() -> void:
 	if flask_charges <= 0:
 		return
@@ -491,6 +566,7 @@ func _use_flask() -> void:
 	_heal(Content.FLASK_HEAL)
 	_flask_heal_flash = 0.5
 	emit_signal("flask_changed", flask_charges, flask_max)
+	emit_signal("action_feedback", "heal", global_position)
 
 func refill_flask() -> void:
 	flask_max = int(build.get("flask_charges", Content.FLASK_MAX))
@@ -500,10 +576,13 @@ func refill_flask() -> void:
 # --- Hurt ---
 func take_damage(amount: float, from_dir: Vector2, kb: float) -> void:
 	if dead or iframes > 0.0: return
-	# Parry active: ignore damage (deflect handled in _scan_parry)
+	# Only a confirmed forward deflection grants immunity. Hazards, explosions and
+	# attacks from behind still connect during the parry animation.
 	if state == State.PARRY and parry_time > 0.0:
-		emit_signal("parried", global_position + Vector2(facing * 40.0, 0.0), true)
-		return
+		var parries_before := _parry_hit.size()
+		_scan_parry()
+		if _parry_hit.size() > parries_before:
+			return
 	build.hp = maxf(0.0, float(build.hp) - amount)
 	if _run_model: _run_model.build.hp = build.hp
 	emit_signal("hp_changed", float(build.hp), float(build.max_hp))
@@ -511,9 +590,11 @@ func take_damage(amount: float, from_dir: Vector2, kb: float) -> void:
 	if float(build.hp) <= 0.0:
 		_die()
 		return
+	emit_signal("hurt_taken", amount, global_position)
 	state = State.HURT
 	iframes = Content.P_HURT_IFRAMES + float(build.get("iframes_bonus", 0.0))
-	velocity = from_dir.normalized() * Vector2(kb, -kb * 0.5)
+	var hit_dir := from_dir.normalized()
+	velocity = Vector2(hit_dir.x * kb, minf(-kb * 0.35, hit_dir.y * kb))
 	atk_phase = "none"
 	_deactivate_hitbox()
 	wall_sliding = false
@@ -536,21 +617,47 @@ func _die() -> void:
 	_deactivate_hitbox()
 	emit_signal("died")
 
-func respawn_at(pos: Vector2) -> void:
+func respawn_at(pos: Vector2, reset_resources: bool = false) -> void:
+	_deactivate_hitbox()
+	if _parry_shape != null:
+		_parry_shape.disabled = true
+	if _parry_area != null:
+		_parry_area.monitoring = false
 	global_position = pos
 	velocity = Vector2.ZERO
 	dead = false
 	state = State.LOCOMOTION
 	iframes = 1.2
+	attack_buffer = 0.0
+	_queued_attack = false
+	attack_index = -1
+	combo_timer = 0.0
+	atk_phase = "none"
+	atk_time = 0.0
+	atk_hit.clear()
+	_draw_attack = false
+	parry_time = 0.0
+	_parry_succeeded = false
+	_parry_hit.clear()
+	_draw_parry = 0.0
+	_slam_active = false
+	_slam_recover = 0.0
+	_draw_slam_impact = 0.0
+	_heal_time = 0.0
 	jumps_left = Content.P_MAX_JUMPS
 	wall_sliding = false
 	_wall_dir = 0.0
-	# Restore flask from build
-	flask_max = int(build.get("flask_charges", Content.FLASK_MAX))
-	flask_charges = flask_max
-	special = float(build.get("special_start", 0.0))
+	# Room travel preserves the run resources. Only a brand-new run requests a
+	# reset; _ready() already initializes them for the first room.
+	if reset_resources:
+		flask_max = int(build.get("flask_charges", Content.FLASK_MAX))
+		flask_charges = flask_max
+		special = float(build.get("special_start", 0.0))
 	emit_signal("flask_changed", flask_charges, flask_max)
 	emit_signal("special_changed", special, max_special)
+
+func suppress_gameplay_input(frames: int = 2) -> void:
+	_input_lock_frames = maxi(_input_lock_frames, frames)
 
 # --- Drawing ---
 func _draw() -> void:
@@ -561,14 +668,56 @@ func _draw() -> void:
 	if _hurt_flash > 0.0: body_col = Color.WHITE
 	if _flask_heal_flash > 0.0:
 		body_col = body_col.lerp(Color("5fe8a8"), 0.5)
-	# torso
-	draw_rect(Rect2(-w * 0.5, -h * 0.5, w, h * 0.7), body_col)
-	# head
-	draw_circle(Vector2(0.0, -h * 0.5 - 6.0), w * 0.45, body_col)
-	# accent cape
-	draw_rect(Rect2(-w * 0.5 - facing * 4.0, -h * 0.5, 6.0, h * 0.6), Content.PAL.player_accent)
-	# eye glow
-	draw_circle(Vector2(facing * 3.0, -h * 0.5 - 6.0), 2.5, Content.PAL.player_accent)
+	# Grounding shadow and a compact, readable flame-headed silhouette.
+	if is_on_floor():
+		draw_colored_polygon(PackedVector2Array([
+			Vector2(-18, h * 0.52), Vector2(18, h * 0.52),
+			Vector2(12, h * 0.60), Vector2(-12, h * 0.60),
+		]), Color(0.0, 0.0, 0.0, 0.28))
+	var run_amount := clampf(absf(velocity.x) / Content.P_SPEED, 0.0, 1.0)
+	var bob := sin(_anim_time * 14.0) * 1.5 * run_amount if is_on_floor() else 0.0
+	var lean := clampf(velocity.x / 1800.0, -0.12, 0.12)
+	draw_set_transform(Vector2(0.0, bob), lean, Vector2.ONE)
+	# Tattered scarf/cape trails opposite the facing direction.
+	draw_colored_polygon(PackedVector2Array([
+		Vector2(-facing * 7.0, -h * 0.3),
+		Vector2(-facing * (25.0 + run_amount * 9.0), -h * 0.08),
+		Vector2(-facing * 12.0, h * 0.24),
+	]), Color("c94a28"))
+	# Boots and legs.
+	draw_line(Vector2(-7.0, h * 0.12), Vector2(-8.0 - facing * run_amount * 4.0, h * 0.48), Color("17131f"), 8.0, true)
+	draw_line(Vector2(7.0, h * 0.12), Vector2(8.0 + facing * run_amount * 4.0, h * 0.48), Color("221a2c"), 8.0, true)
+	# Asymmetric coat with a bright Graveflame sash.
+	draw_colored_polygon(PackedVector2Array([
+		Vector2(-w * 0.48, -h * 0.28), Vector2(w * 0.42, -h * 0.32),
+		Vector2(w * 0.52, h * 0.24), Vector2(0.0, h * 0.36),
+		Vector2(-w * 0.56, h * 0.20),
+	]), body_col)
+	draw_line(Vector2(-facing * 7.0, -h * 0.24), Vector2(facing * 8.0, h * 0.24), Content.PAL.player_accent, 4.0, true)
+	# Dark mask under an animated, entirely procedural flame crown.
+	var head_pos := Vector2(0.0, -h * 0.52)
+	draw_circle(head_pos, w * 0.40, Color("211828"))
+	var flame_col := Color("ff7a18") if _flame_time <= 0.0 else Color("ffd23f")
+	for i in range(4):
+		var fx := -9.0 + float(i) * 6.0
+		var tip := 9.0 + sin(_anim_time * 10.0 + float(i) * 1.7) * 4.0
+		draw_colored_polygon(PackedVector2Array([
+			head_pos + Vector2(fx - 4.0, -4.0),
+			head_pos + Vector2(fx, -tip - 7.0),
+			head_pos + Vector2(fx + 4.0, -3.0),
+		]), flame_col)
+	draw_circle(head_pos + Vector2(facing * 4.0, -1.0), 2.8, Color("ffe8a3"))
+	# Sword silhouette reads even when no attack arc is active.
+	draw_line(Vector2(facing * 10.0, -4.0), Vector2(facing * 25.0, 13.0), Color("aab4c4"), 3.0, true)
+	draw_line(Vector2(facing * 7.0, 0.0), Vector2(facing * 14.0, -7.0), Color("f0b45a"), 3.0, true)
+	draw_set_transform(Vector2.ZERO, 0.0, Vector2.ONE)
+	if _flame_time > 0.0:
+		var aura_alpha := 0.10 + sin(_anim_time * 8.0) * 0.035
+		draw_circle(Vector2(0.0, -8.0), 34.0, Color(1.0, 0.3, 0.05, aura_alpha))
+		draw_arc(Vector2(0.0, -8.0), 30.0, 0.0, TAU, 32, Color(1.0, 0.55, 0.1, 0.45), 2.0)
+	if state == State.HEAL:
+		var heal_progress := clampf(1.0 - _heal_time / Content.P_HEAL_TIME, 0.0, 1.0)
+		draw_arc(Vector2.ZERO, 33.0, -PI * 0.5, -PI * 0.5 + TAU * heal_progress, 32, Color("5fe8a8"), 4.0)
 	# attack arc
 	if _draw_attack:
 		var origin := Vector2(facing * 8.0, -8.0)

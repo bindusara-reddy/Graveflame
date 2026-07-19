@@ -125,7 +125,7 @@ func apply_upgrade(u: Dictionary) -> void:
 			build.hp = minf(build.max_hp, build.hp + u.value)
 		"slam_mul":
 			build.slam_mul += u.value
-			build.slam_radius_bonus += u.value * 0.3
+			build.slam_radius_bonus += u.value * 45.0
 		"parry":
 			build.parry_bonus_dmg += u.value
 			build.parry_window_mul += 0.5
