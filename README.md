@@ -1,4 +1,4 @@
-# Emberfall
+# Graveflame
 
 An original **2D action-roguelite** built with **Godot 4**, inspired by the fast, fluid combat flow of *Dead Cells* — but with entirely original, procedurally drawn art and synthesized audio (no copied or licensed assets).
 
@@ -7,7 +7,7 @@ An original **2D action-roguelite** built with **Godot 4**, inspired by the fast
 ## Play
 
 1. Install **Godot 4.3+** (stable; tested on 4.7). The **GL Compatibility** renderer is used so it runs on any machine.
-2. Open the `emberfall/` folder in the Godot Project Manager (Import → select the folder).
+2. Open the `graveflame/` folder in the Godot Project Manager (Import → select the folder).
 3. Press **F5** (or `Run`) to play.
 
 ### Headless verification (no GUI)
@@ -87,7 +87,7 @@ Cells earned during runs persist after death. Spend them at the Forge (from the 
 ## Project structure
 
 ```
-emberfall/
+graveflame/
 ├── project.godot          # config, input map, physics layers
 ├── main.tscn              # minimal root scene → scripts/game.gd
 ├── scripts/
@@ -114,7 +114,7 @@ Everything is built **programmatically** (only `main.tscn` exists as a scene fil
 - Actors are `CharacterBody2D`/`Area2D` with collision layers: World, Player/Enemy Body, Player/Enemy Hurtbox, Player/Enemy Attack, Trigger.
 - Art is drawn with `_draw()` (polygons, arcs, circles). Audio is generated into `AudioStreamWAV` at runtime.
 - The player's slam AoE scans the `enemy_hurtbox` group; the parry reflects projectiles by flipping their `vel`/`team`/`damage` fields.
-- Save data lives at `user://emberfall_save.json` (per-user app data).
+- Save data lives at `user://graveflame_save.json` (per-user app data).
 - No external assets, no copyrighted material — safe to publish and extend.
 
 ## License
@@ -123,4 +123,4 @@ MIT (see `LICENSE`). The game design and all content are original.
 
 ## Acknowledgements
 
-Insppired by the combat feel of *Dead Cells* (Motion Twin, 2018) — a roguelike-Metroidvania with fluid melee, dodge-rolls, parries, down-slams, and flask healing. Emberfall is an original tribute, not a port or copy.
+Inspired by the combat feel of *Dead Cells* (Motion Twin, 2018) — a roguelike-Metroidvania with fluid melee, dodge-rolls, parries, down-slams, and flask healing. Graveflame is an original tribute, not a port or copy.

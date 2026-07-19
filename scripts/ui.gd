@@ -135,7 +135,7 @@ func _label(pos: Vector2, text: String, parent: Node, size: int = 14) -> Label:
 
 func _build_title() -> void:
 	var p := _panel("title", true)
-	_title(p, "EMBERFALL", 84, Vector2(0, -180))
+	_title(p, "GRAVEFLAME", 84, Vector2(0, -180))
 	_subtitle(p, "an action-roguelite", 20, Vector2(0, -110))
 	_hint(p, "Move: A/D or Arrows    Jump: W/Space    Attack: J", -30)
 	_hint(p, "Special: K    Dash: Shift/L    Parry: S    Flask: F", -6)
@@ -165,7 +165,7 @@ func _build_reward() -> void:
 func _build_victory() -> void:
 	var p := _panel("victory", true)
 	_title(p, "VICTORY", 72, Vector2(0, -120))
-	_subtitle(p, "The Warden falls. Ember endures.", 20, Vector2(0, -60))
+	_subtitle(p, "The Warden falls. Graveflame endures.", 20, Vector2(0, -60))
 	p.set_meta("cells_label", null)
 	_button(p, "RUN AGAIN", "again", Vector2(0, 30), true).pressed.connect(func(): emit_signal("restart_requested"))
 	_button(p, "TITLE", "title2", Vector2(0, 100), false).pressed.connect(func(): emit_signal("quit_to_title_requested"))

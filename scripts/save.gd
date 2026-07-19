@@ -1,9 +1,9 @@
 class_name Save
 extends RefCounted
 ## Persistent save: cells (meta currency), best score, purchased meta upgrades.
-## Stored as JSON at user://emberfall_save.json. Dead Cells-style meta progression.
+## Stored as JSON at user://graveflame_save.json. Dead Cells-style meta progression.
 
-const SAVE_PATH := "user://emberfall_save.json"
+const SAVE_PATH := "user://graveflame_save.json"
 
 static func load_save() -> Dictionary:
 	var defaults := {"cells": 0, "best_score": 0, "meta": []}
