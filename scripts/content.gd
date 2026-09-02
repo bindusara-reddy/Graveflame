@@ -115,17 +115,28 @@ const UPGRADES_PER_OFFER := 3
 
 # --- Palettes ---
 const PAL := {
-	"bg_top": Color("1a1426"),
-	"bg_bot": Color("0c0a14"),
-	"platform": Color("2b2436"),
-	"platform_edge": Color("4a3f5e"),
+	# Backdrop: deep void above, crypt navy through the arches, a faint warm
+	# horizon at the floor line, then the pit falls away to near-black.
+	"bg_top": Color("07050b"),
+	"bg_mid": Color("130d21"),
+	"bg_bot": Color("1a112b"),
+	"bg_pit": Color("050308"),
+	"tyrian": Color("221538"),
+	"mortar": Color("312347"),
+	"slate": Color("5e4b75"),
+	"rim": Color("7e639e"),
+	"platform": Color("1f1430"),
+	"platform_edge": Color("4d3866"),
 	"hazard": Color("6a2230"),
 	"player": Color("e8e0d0"),
 	"player_accent": Color("ff7a18"),
 	"enemy_hurt": Color("ffffff"),
-	"attack": Color("ffd23f"),
+	"attack": Color("ffa827"),
+	"flame_gold": Color("ffa827"),
+	"core_orange": Color("ff5500"),
+	"ember": Color("ff2a00"),
 	"special": Color("7fd4ff"),
-	"exit": Color("5fe8a8"),
+	"exit": Color("2be4c8"),
 	"text": Color("e8e0d0"),
 	"text_dim": Color("9a8fa6"),
 }

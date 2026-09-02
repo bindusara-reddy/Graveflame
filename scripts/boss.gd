@@ -79,6 +79,7 @@ func _physics_process(delta: float) -> void:
 		_atk_area.set_meta("attack_active", false)
 	_hurt_flash = maxf(0.0, _hurt_flash - delta)
 	_wisp_t += delta  # reuse for aura pulsing
+	_air_time = 0.0 if is_on_floor() else minf(_air_time + delta, 1.0)
 	queue_redraw()
 	if phase == BPhase.INTRO:
 		intro_t -= delta
@@ -278,11 +279,8 @@ func _draw() -> void:
 		var pulse := 0.12 + sin(_wisp_t * 4.0) * 0.05
 		draw_circle(Vector2.ZERO, w * 0.8, Color(1.0, 0.3, 0.3, pulse))
 		draw_circle(Vector2.ZERO, w * 1.1, Color(1.0, 0.3, 0.3, pulse * 0.5))
-	# Floor shadow, torn mantle and plated silhouette.
-	draw_colored_polygon(PackedVector2Array([
-		Vector2(-48.0, h * 0.50), Vector2(48.0, h * 0.50),
-		Vector2(34.0, h * 0.59), Vector2(-34.0, h * 0.59),
-	]), Color(0.0, 0.0, 0.0, 0.34))
+	# Contact shadow, torn mantle and plated silhouette.
+	VFX.draw_contact_shadow(self, Vector2(0.0, h * 0.5 + 2.0), 88.0, 16.0, clampf(_air_time / 0.3, 0.0, 1.0))
 	draw_colored_polygon(PackedVector2Array([
 		Vector2(-facing * 18.0, -h * 0.35),
 		Vector2(-facing * 58.0, -h * 0.05),
@@ -291,18 +289,23 @@ func _draw() -> void:
 	]), Color("421c2c"))
 	draw_line(Vector2(-18.0, h * 0.18), Vector2(-22.0, h * 0.48), Color("241a2b"), 16.0, true)
 	draw_line(Vector2(18.0, h * 0.18), Vector2(22.0, h * 0.48), Color("241a2b"), 16.0, true)
-	draw_colored_polygon(PackedVector2Array([
+	var plate := PackedVector2Array([
 		Vector2(-w * 0.48, -h * 0.34), Vector2(w * 0.48, -h * 0.34),
 		Vector2(w * 0.56, h * 0.22), Vector2(0.0, h * 0.40),
 		Vector2(-w * 0.56, h * 0.22),
-	]), col)
+	])
+	VFX.draw_shaded_polygon(self, plate, col, _hurt_flash <= 0.0)
+	VFX.draw_rim(self, plate, facing, 1.2)
 	# Armor ribs and a furnace core make the boss legible at a glance.
 	for rib in range(3):
 		var ry := -h * 0.12 + float(rib) * 15.0
 		draw_line(Vector2(-w * 0.36, ry), Vector2(w * 0.36, ry + 3.0), col.lightened(0.18), 3.0, true)
+	# Emissive furnace core; the light layer adds the large 240px pulse beneath.
 	var core_pulse := 0.85 + sin(_wisp_t * 6.0) * 0.12
-	draw_circle(Vector2(0.0, 6.0), 12.0 * core_pulse, Color(1.0, 0.25, 0.08, 0.24))
-	draw_circle(Vector2(0.0, 6.0), 6.0, Color("ff9d2e"))
+	draw_circle(Vector2(0.0, 6.0), 26.0 * core_pulse, Color(1.0, 0.25, 0.05, 0.12))
+	draw_circle(Vector2(0.0, 6.0), 14.0 * core_pulse, Color(1.0, 0.35, 0.08, 0.35))
+	draw_circle(Vector2(0.0, 6.0), 7.0, Color("ff8400"))
+	draw_circle(Vector2(0.0, 6.0), 3.5 * core_pulse, VFX.HOT)
 	# Mask and crown spikes.
 	draw_colored_polygon(PackedVector2Array([
 		Vector2(-w * 0.34, -h * 0.46), Vector2(w * 0.34, -h * 0.46),
@@ -323,6 +326,9 @@ func _draw() -> void:
 		Vector2(facing * 48.0, 8.0), Vector2(facing * 75.0, 20.0),
 		Vector2(facing * 58.0, 31.0), Vector2(facing * 40.0, 17.0),
 	]), Color("b8a9b8"))
+	# White-hot cutting edge.
+	draw_line(Vector2(facing * 58.0, 31.0), Vector2(facing * 75.0, 20.0), Color(VFX.HOT, 0.35), 5.0, true)
+	draw_line(Vector2(facing * 58.0, 31.0), Vector2(facing * 75.0, 20.0), VFX.HOT, 2.0, true)
 	# telegraph
 	if state == EState.WINDUP:
 		var t := 1.0 - st_timer / maxf(0.01, data.windup)

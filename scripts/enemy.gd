@@ -3,6 +3,8 @@ extends CharacterBody2D
 ## Compact state-machine enemy: STALKER (melee), HOPPER (leaping), WISP (ranged),
 ## BRUTE (shielded heavy), BOMBER (exploding kamikaze).
 
+const VFX := preload("res://scripts/vfx.gd")
+
 signal died(score: int)
 signal projectile_requested(team: String, pos: Vector2, vel: Vector2, dmg: float, kb: float, pierce: int, life: float, color: Color)
 signal exploded(pos: Vector2, radius: float, damage: float)
@@ -41,6 +43,7 @@ var _bomb_armed := false
 var burn_time := 0.0
 var burn_dps := 0.0
 var _ledge_ray: RayCast2D
+var _air_time := 0.0  # visual only: drives the contact shadow
 
 func setup(p_kind: int, p_pos: Vector2) -> void:
 	kind = p_kind
@@ -126,6 +129,7 @@ func _physics_process(delta: float) -> void:
 	if global_position.y > Content.FLOOR_Y + 220.0:
 		_die(false)
 		return
+	_air_time = 0.0 if is_on_floor() else minf(_air_time + delta, 1.0)
 	queue_redraw()
 	match state:
 		EState.SPAWN, EState.SEEK: _step_seek(delta)
@@ -408,28 +412,32 @@ func _draw() -> void:
 	var s := 1.0
 	if _spawn_anim > 0.0: s = 1.0 - _spawn_anim / 0.4
 	draw_set_transform(Vector2.ZERO, 0.0, Vector2(s, s))
+	var shade := _hurt_flash <= 0.0
 	if kind != Kind.WISP:
-		draw_colored_polygon(PackedVector2Array([
-			Vector2(-w * 0.58, h * 0.51), Vector2(w * 0.58, h * 0.51),
-			Vector2(w * 0.38, h * 0.60), Vector2(-w * 0.38, h * 0.60),
-		]), Color(0.0, 0.0, 0.0, 0.30))
+		VFX.draw_contact_shadow(self, Vector2(0.0, h * 0.5 + 1.0), w * 1.1, 8.0, clampf(_air_time / 0.3, 0.0, 1.0))
+	else:
+		VFX.draw_contact_shadow(self, Vector2(0.0, w * 1.1), w * 0.9, 6.0, 1.0)
 	match kind:
 		Kind.STALKER:
 			# Hooked cloak, hood and a short cleaver.
-			draw_colored_polygon(PackedVector2Array([
+			var cloak := PackedVector2Array([
 				Vector2(-w * 0.38, -h * 0.35), Vector2(w * 0.34, -h * 0.35),
 				Vector2(w * 0.52, h * 0.48), Vector2(0.0, h * 0.34),
 				Vector2(-w * 0.56, h * 0.48),
-			]), col)
+			])
+			VFX.draw_shaded_polygon(self, cloak, col, shade)
+			VFX.draw_rim(self, cloak, facing)
 			var hood := Vector2(facing * 2.0, -h * 0.48)
 			draw_circle(hood, w * 0.34, col.darkened(0.15))
+			VFX.draw_rim_circle(self, hood, w * 0.34, facing, 0.8)
 			draw_circle(hood + Vector2(facing * 5.0, 0.0), 2.2, Color("ffd23f"))
 			draw_line(Vector2(facing * 8.0, -2.0), Vector2(facing * 24.0, 9.0), Color("b6a9a2"), 4.0, true)
 		Kind.HOPPER:
 			var pts := PackedVector2Array([
 				Vector2(0, -h*0.5), Vector2(w*0.5, h*0.3), Vector2(0, h*0.2), Vector2(-w*0.5, h*0.3)
 			])
-			draw_colored_polygon(pts, col)
+			VFX.draw_shaded_polygon(self, pts, col, shade)
+			VFX.draw_rim(self, pts, facing)
 			draw_colored_polygon(PackedVector2Array([
 				Vector2(-w * 0.2, -h * 0.35), Vector2(0.0, -h * 0.72), Vector2(w * 0.14, -h * 0.30)
 			]), col.lightened(0.12))
@@ -448,10 +456,12 @@ func _draw() -> void:
 			draw_circle(Vector2.ZERO, w * 0.20, Color("ffd23f"))
 		Kind.BRUTE:
 			# Squat plated body with oversized pauldrons.
-			draw_colored_polygon(PackedVector2Array([
+			var plate := PackedVector2Array([
 				Vector2(-w * 0.44, -h * 0.34), Vector2(w * 0.44, -h * 0.34),
 				Vector2(w * 0.50, h * 0.48), Vector2(-w * 0.50, h * 0.48),
-			]), col)
+			])
+			VFX.draw_shaded_polygon(self, plate, col, shade)
+			VFX.draw_rim(self, plate, facing, 1.1)
 			draw_circle(Vector2(-w * 0.44, -h * 0.24), 10.0, col.darkened(0.22))
 			draw_circle(Vector2(w * 0.44, -h * 0.24), 10.0, col.darkened(0.22))
 			draw_rect(Rect2(-w * 0.28, -h * 0.48, w * 0.56, 17.0), Color("29301f"))
@@ -459,7 +469,8 @@ func _draw() -> void:
 		Kind.BOMBER:
 			# round body with a fuse spark on top
 			draw_circle(Vector2.ZERO, w * 0.54, col.darkened(0.28))
-			draw_circle(Vector2.ZERO, w * 0.43, col)
+			VFX.draw_shaded_polygon(self, VFX.ellipse_points(Vector2.ZERO, w * 0.43, w * 0.43), col, shade)
+			VFX.draw_rim_circle(self, Vector2.ZERO, w * 0.52, facing, 0.9)
 			draw_arc(Vector2.ZERO, w * 0.28, 0.0, TAU, 18, Color("efb04f"), 3.0)
 			draw_line(Vector2(-6.0, 0.0), Vector2(6.0, 0.0), Color("efb04f"), 2.0)
 			draw_line(Vector2(0.0, -6.0), Vector2(0.0, 6.0), Color("efb04f"), 2.0)

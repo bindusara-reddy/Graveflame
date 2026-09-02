@@ -2,6 +2,8 @@ class_name Room
 extends Node2D
 ## Builds geometry from a template, spawns encounters, seals/unseals the exit.
 
+const VFX := preload("res://scripts/vfx.gd")
+
 signal completed
 signal cleared(room_name: String)
 signal wave_started(current: int, total: int)
@@ -228,31 +230,16 @@ func _draw() -> void:
 		"boss": accent = Color("cf493f")
 	# A restrained room sigil makes each procedural chamber feel authored.
 	draw_string(ThemeDB.fallback_font, Vector2(440.0, 142.0), Content.room_name(template), HorizontalAlignment.HORIZONTAL_ALIGNMENT_CENTER, 400.0, 20, Color(accent.r, accent.g, accent.b, 0.34))
-	# Layered stone platforms with hand-cut brick seams.
-	for plat in template.get("platforms", []):
-		var pr := Rect2(plat.position, plat.size)
-		draw_rect(pr, Color("211c2a"))
-		draw_rect(Rect2(pr.position, Vector2(pr.size.x, 7.0)), Content.PAL.platform_edge)
-		draw_rect(Rect2(pr.position + Vector2(0.0, 7.0), Vector2(pr.size.x, 3.0)), Color(accent.r, accent.g, accent.b, 0.22))
-		var row_count := mini(4, int(pr.size.y / 28.0))
-		for row in range(1, row_count + 1):
-			var sy := pr.position.y + float(row) * 28.0
-			draw_line(Vector2(pr.position.x, sy), Vector2(pr.end.x, sy), Color(0.0, 0.0, 0.0, 0.20), 1.0)
-			var offset := 24.0 if row % 2 == 0 else 0.0
-			var col_count := int(pr.size.x / 48.0)
-			for col in range(1, col_count + 1):
-				var sx := pr.position.x + float(col) * 48.0 + offset
-				if sx < pr.end.x:
-					draw_line(Vector2(sx, sy - 28.0), Vector2(sx, sy), Color(0.0, 0.0, 0.0, 0.16), 1.0)
-	# climbable walls (distinct color so players know they can wall-slide)
-	for wl in template.get("walls", []):
-		draw_rect(Rect2(wl.position, wl.size), Color("352e43"))
-		draw_line(Vector2(wl.position.x, wl.position.y), Vector2(wl.position.x, wl.end.y), Color(accent.r, accent.g, accent.b, 0.65), 3.0)
-		# brick seams for visual texture
-		var seams := int(float(wl.size.y) / 32.0)
-		for i in range(1, seams):
-			var y: float = wl.position.y + float(i) * 32.0
-			draw_line(Vector2(wl.position.x, y), Vector2(wl.position.x + wl.size.x, y), Color(0, 0, 0, 0.25), 2.0)
+	# Volumetric masonry: slab courses, mortar joints, a lit rim and occlusion under the lip.
+	var platforms: Array = template.get("platforms", [])
+	for pi in range(platforms.size()):
+		_draw_masonry(Rect2(platforms[pi].position, platforms[pi].size), accent, pi + 1)
+	# climbable walls (accent edge so players know they can wall-slide)
+	var walls: Array = template.get("walls", [])
+	for wi in range(walls.size()):
+		var wr := Rect2(walls[wi].position, walls[wi].size)
+		_draw_masonry(wr, accent, 40 + wi)
+		draw_line(Vector2(wr.position.x, wr.position.y), Vector2(wr.position.x, wr.end.y), Color(accent.r, accent.g, accent.b, 0.65), 3.0)
 	for hz in template.get("hazards", []):
 		var r := Rect2(hz.position, hz.size)
 		draw_rect(r, Color("35121c"))
@@ -295,6 +282,43 @@ func _draw() -> void:
 		var wave_alpha := clampf(_wave_delay / 0.85, 0.0, 1.0)
 		for slot in template.get("slots", []):
 			draw_arc(slot, 22.0 * (1.0 - wave_alpha * 0.35), 0.0, TAU, 20, Color(accent.r, accent.g, accent.b, wave_alpha * 0.7), 2.0)
+
+## Stone courses with deterministic slab widths (48/64/80) so joints never line
+## up between rows, a 6px trim, a 1.5px rim catch-light and a 12px occlusion band.
+func _draw_masonry(pr: Rect2, accent: Color, salt: int) -> void:
+	var lip := 6.0
+	draw_rect(pr, Content.PAL.platform)
+	var y := pr.position.y + lip
+	var row := 0
+	while y < pr.end.y - 1.0:
+		var row_h := 16.0 if row < 3 else 26.0
+		row_h = minf(row_h, pr.end.y - y)
+		var x := pr.position.x - VFX.hash01(row + salt * 7, 3) * 56.0
+		var col := 0
+		while x < pr.end.x:
+			var pick := VFX.hash01(col * 31 + row * 17, salt)
+			var slab_w := 48.0 if pick < 0.34 else (64.0 if pick < 0.67 else 80.0)
+			var x0 := maxf(x, pr.position.x)
+			var x1 := minf(x + slab_w, pr.end.x)
+			if x1 > x0 + 1.0:
+				var tone := (VFX.hash01(col * 13 + row * 5, salt + 11) - 0.5) * 0.10
+				if tone < -0.015:
+					draw_rect(Rect2(x0, y, x1 - x0, row_h), Color(0.0, 0.0, 0.0, -tone))
+				elif tone > 0.015:
+					draw_rect(Rect2(x0, y, x1 - x0, row_h), Color(1.0, 1.0, 1.0, tone * 0.5))
+				if x + slab_w < pr.end.x - 1.0:
+					draw_line(Vector2(x + slab_w, y), Vector2(x + slab_w, y + row_h), VFX.JOINT, 2.0)
+			x += slab_w
+			col += 1
+		if y + row_h < pr.end.y - 1.0:
+			draw_line(Vector2(pr.position.x, y + row_h), Vector2(pr.end.x, y + row_h), VFX.JOINT, 2.0)
+		y += row_h
+		row += 1
+	VFX.draw_vgradient(self, Rect2(pr.position.x, pr.position.y + lip, pr.size.x, 12.0), Color(0.03, 0.016, 0.06, 0.7), Color(0.03, 0.016, 0.06, 0.0))
+	draw_rect(Rect2(pr.position, Vector2(pr.size.x, lip)), Content.PAL.platform_edge)
+	draw_rect(Rect2(pr.position + Vector2(0.0, lip), Vector2(pr.size.x, 2.0)), Color(accent.r, accent.g, accent.b, 0.28))
+	draw_line(Vector2(pr.position.x, pr.position.y + 0.75), Vector2(pr.end.x, pr.position.y + 0.75), VFX.RIM, 1.5)
+	draw_rect(Rect2(pr.position.x, pr.end.y - 2.0, pr.size.x, 2.0), VFX.JOINT)
 
 func despawn() -> void:
 	for e in enemies:

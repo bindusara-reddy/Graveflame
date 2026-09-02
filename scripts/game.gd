@@ -2,6 +2,8 @@ class_name Game
 extends Node2D
 ## Root orchestrator: run lifecycle, room replacement, signal routing, pause, background.
 
+const VFX := preload("res://scripts/vfx.gd")
+
 enum GState { TITLE, PLAYING, REWARD, GAME_OVER, VICTORY }
 
 var state: int = GState.TITLE
@@ -18,14 +20,32 @@ var _pending_upgrades: Array = []
 var _seed: int = 0
 var _bg_grad: Gradient
 var _run_cells: int = 0
+# Visual layers. Lights and ambience are inserted before World so they draw above
+# the backdrop but beneath platforms, actors and combat VFX.
+const TORCH_Y := Content.FLOOR_Y - 200.0
+var _light_layer: Node2D
+var _atmosphere: Node2D
+var _vignette: CanvasLayer
+var _view_center := Vector2(Content.VIEW_W, Content.VIEW_H) * 0.5
+var _atmo_t := 0.0
 
 func _ready() -> void:
 	process_mode = Node.PROCESS_MODE_ALWAYS
-	RenderingServer.set_default_clear_color(Content.PAL.bg_bot)
-	# Background gradient
+	RenderingServer.set_default_clear_color(Content.PAL.bg_top)
+	# Sky gradient: void above, crypt navy through the arches, warm at the floor line.
 	_bg_grad = Gradient.new()
-	_bg_grad.set_color(0, Content.PAL.bg_top)
-	_bg_grad.set_color(1, Content.PAL.bg_bot)
+	_bg_grad.offsets = PackedFloat32Array([0.0, 0.6, 1.0])
+	_bg_grad.colors = PackedColorArray([Content.PAL.bg_top, Content.PAL.bg_mid, Content.PAL.bg_bot])
+	# Additive lights and ambient particles (pausable, like the world they belong to).
+	_light_layer = load("res://scripts/light_layer.gd").new()
+	_light_layer.name = "LightLayer"
+	_light_layer.game = self
+	_light_layer.process_mode = Node.PROCESS_MODE_PAUSABLE
+	add_child(_light_layer)
+	_atmosphere = load("res://scripts/atmosphere.gd").new()
+	_atmosphere.name = "Atmosphere"
+	_atmosphere.process_mode = Node.PROCESS_MODE_PAUSABLE
+	add_child(_atmosphere)
 	# World (pausable)
 	world = Node2D.new()
 	world.name = "World"
@@ -45,6 +65,18 @@ func _ready() -> void:
 	ui.name = "UI"
 	ui.process_mode = Node.PROCESS_MODE_ALWAYS
 	add_child(ui)
+	# Fullscreen vignette. Layer 40 keeps it beneath the HUD (layer 50) so the
+	# corner panels never lose contrast.
+	_vignette = CanvasLayer.new()
+	_vignette.name = "Vignette"
+	_vignette.layer = 40
+	var vignette_rect := ColorRect.new()
+	vignette_rect.name = "VignetteRect"
+	vignette_rect.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	vignette_rect.material = VFX.vignette_material()
+	_vignette.add_child(vignette_rect)
+	vignette_rect.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	add_child(_vignette)
 	# Wire UI signals
 	ui.start_requested.connect(_on_start)
 	ui.resume_requested.connect(_on_resume)
@@ -64,6 +96,9 @@ func _ready() -> void:
 	set_process(true)
 
 func _process(delta: float) -> void:
+	_atmosphere.global_position = _view_center
+	if not get_tree().paused and not Feedback.motion_reduced:
+		_atmo_t += delta
 	queue_redraw()
 	if state == GState.PLAYING and is_instance_valid(player):
 		# Camera follows player, clamped to room bounds
@@ -78,64 +113,167 @@ func _process(delta: float) -> void:
 			player.take_damage(9999.0, Vector2.UP, 0.0)
 
 func _draw() -> void:
-	# Layered original crypt-city backdrop. It stays vector-only, but the broad
-	# silhouettes, furnace bloom, chains and drifting ash create real depth.
-	var gtl := Vector2(Content.ROOM_LEFT, -400)
-	# Camera can ease down to y=520, so cover well beyond the viewport bottom.
-	var gbr := Vector2(Content.ROOM_RIGHT, Content.FLOOR_Y + 480)
-	var n := 48
-	for i in range(n):
-		var t := float(i) / float(n)
-		var c := _bg_grad.sample(t)
-		var y0 := gtl.y + t * (gbr.y - gtl.y)
-		var y1 := gtl.y + (float(i + 1) / float(n)) * (gbr.y - gtl.y)
-		draw_rect(Rect2(gtl.x, y0, gbr.x - gtl.x, y1 - y0), c)
-	var now := float(Time.get_ticks_msec()) * 0.001
-	# Distant Graveflame furnace.
-	for i in range(5, 0, -1):
-		var rad := 70.0 + float(i) * 58.0
-		draw_circle(Vector2(770.0, 250.0), rad, Color(0.72, 0.18, 0.12, 0.012 + float(6 - i) * 0.008))
-	# Far prison skyline and uneven roofs.
-	var skyline := PackedVector2Array([
-		Vector2(-200, 470), Vector2(-200, 280), Vector2(-120, 240), Vector2(-40, 315),
-		Vector2(55, 210), Vector2(145, 300), Vector2(250, 185), Vector2(340, 300),
-		Vector2(455, 245), Vector2(560, 310), Vector2(670, 170), Vector2(755, 290),
-		Vector2(865, 220), Vector2(965, 310), Vector2(1080, 190), Vector2(1175, 275),
-		Vector2(1285, 225), Vector2(1480, 300), Vector2(1480, 560), Vector2(-200, 560),
-	])
-	draw_colored_polygon(skyline, Color("15111e"))
-	# Slit windows, arches and bridges make the silhouette read as architecture.
-	for i in range(13):
-		var x := -120.0 + float(i) * 132.0
-		var top := 290.0 + float((i * 37) % 90)
-		draw_rect(Rect2(x, top, 10.0, 58.0), Color(0.65, 0.24, 0.16, 0.15 + float(i % 3) * 0.04))
-		draw_arc(Vector2(x + 5.0, top), 5.0, PI, TAU, 8, Color(0.75, 0.32, 0.18, 0.18), 2.0)
-	for i in range(7):
-		var arch_x := -70.0 + float(i) * 245.0
-		draw_arc(Vector2(arch_x, 500.0), 78.0, PI, TAU, 24, Color(0.30, 0.25, 0.36, 0.16), 14.0)
-		draw_line(Vector2(arch_x - 78.0, 500.0), Vector2(arch_x - 78.0, 590.0), Color(0.30, 0.25, 0.36, 0.14), 14.0)
-		draw_line(Vector2(arch_x + 78.0, 500.0), Vector2(arch_x + 78.0, 590.0), Color(0.30, 0.25, 0.36, 0.14), 14.0)
-	# Hanging chains, each with a different deterministic sway.
-	for chain in range(8):
-		var cx := -80.0 + float(chain) * 225.0
-		var length := 95 + (chain * 43) % 150
-		var sway := sin(now * 0.7 + float(chain)) * 5.0
-		var pts := PackedVector2Array()
-		for link in range(8):
-			var lt := float(link) / 7.0
-			pts.append(Vector2(cx + sway * lt, -80.0 + float(length) * lt))
-		draw_polyline(pts, Color(0.40, 0.36, 0.46, 0.22), 2.0, true)
-	# Slow ash motes are positional and deterministic, so reduced motion can leave
-	# the gameplay feedback quiet without making the scene sterile.
-	for mote in range(34):
-		var mx := Content.ROOM_LEFT + fmod(float(mote * 173) + now * (4.0 + float(mote % 5)), Content.ROOM_RIGHT - Content.ROOM_LEFT)
-		var my := -80.0 + fmod(float(mote * 91) + now * (8.0 + float(mote % 4)), 620.0)
-		var ma := 0.12 + float(mote % 4) * 0.035
-		draw_circle(Vector2(mx, my), 1.0 + float(mote % 3) * 0.45, Color(0.82, 0.62, 0.48, ma))
-	# Low fog bands separate the walkable plane from the backdrop.
-	for band in range(4):
-		var fy := 500.0 + float(band) * 30.0 + sin(now * 0.25 + float(band)) * 5.0
-		draw_rect(Rect2(Content.ROOM_LEFT, fy, Content.ROOM_RIGHT - Content.ROOM_LEFT, 42.0), Color(0.34, 0.28, 0.39, 0.025))
+	# Camera-driven parallax crypt. Each plane is shifted by (1 - depth) of the
+	# view centre, so far planes crawl while near planes track the world. Read the
+	# camera here (draw runs after every _process) so nothing lags a frame.
+	_view_center = feedback.camera.get_screen_center_position()
+	var left := Content.ROOM_LEFT - 240.0
+	var right := Content.ROOM_RIGHT + 240.0
+	var span := right - left
+	var top := -560.0
+	var horizon := Content.FLOOR_Y
+	# Sky.
+	for i in range(_bg_grad.get_point_count() - 1):
+		var y0 := lerpf(top, horizon, _bg_grad.get_offset(i))
+		var y1 := lerpf(top, horizon, _bg_grad.get_offset(i + 1))
+		VFX.draw_vgradient(self, Rect2(left, y0, span, y1 - y0), _bg_grad.get_color(i), _bg_grad.get_color(i + 1))
+	# Under-floor pit: the floor line falls away into absolute void.
+	VFX.draw_vgradient(self, Rect2(left, horizon, span, 320.0), Content.PAL.bg_bot, Content.PAL.bg_pit)
+	draw_rect(Rect2(left, horizon + 320.0, span, 520.0), Content.PAL.bg_pit)
+	# Distant furnace bloom low on the horizon, behind the spires.
+	var bloom := Vector2(_plane_x(0.1, 184.0), horizon - 60.0)
+	for i in range(4, 0, -1):
+		draw_circle(bloom, 90.0 + float(i) * 72.0, Color(0.85, 0.25, 0.08, 0.016 + float(5 - i) * 0.012))
+	_draw_spires(horizon)
+	_draw_arches(horizon)
+	_draw_buttresses(horizon)
+	_draw_fog(horizon)
+
+## Visible repeat-index range for a plane at `depth` whose elements repeat every `period`.
+func _plane_range(depth: float, period: float, margin: float) -> Vector2i:
+	var half := get_viewport_rect().size.x * 0.5 + margin
+	return Vector2i(floori((_view_center.x * depth - half) / period), ceili((_view_center.x * depth + half) / period))
+
+func _plane_x(depth: float, layer_x: float) -> float:
+	return layer_x + _view_center.x * (1.0 - depth)
+
+## Sconce flame positions on the midground buttresses; the light layer stacks
+## its torch glows on exactly these points.
+func torch_positions() -> PackedVector2Array:
+	var out := PackedVector2Array()
+	var r := _plane_range(0.65, 320.0, 160.0)
+	for k in range(r.x, r.y + 1):
+		out.append(Vector2(_plane_x(0.65, float(k) * 320.0), TORCH_Y - 12.0))
+	return out
+
+func _draw_spires(horizon: float) -> void:
+	var depth := 0.15
+	var period := 150.0
+	var col := Color("0b0714")
+	var r := _plane_range(depth, period, 120.0)
+	var base := horizon + 80.0
+	var mass_top := horizon - 150.0
+	draw_rect(Rect2(_plane_x(depth, float(r.x) * period) - period, mass_top, float(r.y - r.x + 2) * period, base - mass_top), col)
+	for k in range(r.x, r.y + 1):
+		var h := 300.0 + VFX.hash01(k, 1) * 120.0
+		var w := 58.0 + VFX.hash01(k, 2) * 32.0
+		var x := _plane_x(depth, float(k) * period + VFX.hash01(k, 3) * 40.0)
+		var spire_top := base - h
+		draw_colored_polygon(PackedVector2Array([
+			Vector2(x - w * 0.5, base), Vector2(x - w * 0.5, spire_top + 40.0), Vector2(x - w * 0.28, spire_top + 14.0),
+			Vector2(x - w * 0.1, spire_top + 4.0), Vector2(x, spire_top - 26.0), Vector2(x + w * 0.1, spire_top + 6.0),
+			Vector2(x + w * 0.3, spire_top + 18.0), Vector2(x + w * 0.5, spire_top + 44.0), Vector2(x + w * 0.5, base),
+		]), col)
+		# Two dim slit windows keep the towers reading as inhabited ruins.
+		for wi in range(2):
+			var wy := spire_top + 90.0 + float(wi) * 70.0 + VFX.hash01(k + wi, 4) * 30.0
+			draw_rect(Rect2(x - 2.0 + (float(wi) - 0.5) * 10.0, wy, 4.0, 14.0), Color(0.9, 0.45, 0.2, 0.08 + VFX.hash01(k, 5 + wi) * 0.06))
+
+func _draw_arches(horizon: float) -> void:
+	var depth := 0.35
+	var period := 200.0
+	var wall := Color("160e26")
+	var edge := Color("24183b")
+	var r := _plane_range(depth, period, 160.0)
+	var base := horizon + 60.0
+	var arch_top := horizon - 340.0
+	var x_start := _plane_x(depth, float(r.x) * period) - period
+	var width := float(r.y - r.x + 2) * period
+	# Entablature above the colonnade plus its ground course.
+	draw_rect(Rect2(x_start, arch_top - 34.0, width, 34.0), wall)
+	draw_line(Vector2(x_start, arch_top - 34.0), Vector2(x_start + width, arch_top - 34.0), edge, 2.0)
+	draw_rect(Rect2(x_start, base - 24.0, width, 24.0), wall)
+	for k in range(r.x, r.y + 1):
+		var cx := _plane_x(depth, float(k) * period)
+		# Pillars and the spandrel over an open arch; the sky shows through the opening.
+		draw_rect(Rect2(cx - 80.0, arch_top, 28.0, base - arch_top), wall)
+		draw_rect(Rect2(cx + 52.0, arch_top, 28.0, base - arch_top), wall)
+		var spandrel := PackedVector2Array([Vector2(cx - 80.0, arch_top), Vector2(cx + 80.0, arch_top), Vector2(cx + 80.0, arch_top + 110.0)])
+		for i in range(13):
+			var a := -PI * float(i) / 12.0
+			spandrel.append(Vector2(cx, arch_top + 110.0) + Vector2(cos(a), sin(a)) * 52.0)
+		spandrel.append(Vector2(cx - 80.0, arch_top + 110.0))
+		draw_colored_polygon(spandrel, wall)
+		draw_arc(Vector2(cx, arch_top + 110.0), 52.0, PI, TAU, 16, edge, 1.5)
+		# Hanging chains, each with a slow deterministic sway.
+		if VFX.hash01(k, 7) > 0.35:
+			var length := 80.0 + VFX.hash01(k, 8) * 100.0
+			var sway := sin(_atmo_t * 0.7 + float(k)) * 4.0
+			draw_dashed_line(Vector2(cx, arch_top - 34.0), Vector2(cx + sway, arch_top - 34.0 + length), edge, 2.0, 6.0)
+		if VFX.hash01(k, 9) > 0.7:
+			var drop := 240.0 + VFX.hash01(k, 10) * 220.0
+			var sway2 := sin(_atmo_t * 0.5 + float(k) * 1.9) * 6.0
+			draw_dashed_line(Vector2(cx + 46.0, -560.0), Vector2(cx + 46.0 + sway2, -560.0 + drop), edge, 2.0, 6.0)
+
+func _draw_buttresses(horizon: float) -> void:
+	var depth := 0.65
+	var period := 320.0
+	var stone := Color("201435")
+	var frame := Color(VFX.MORTAR, 0.55)
+	var r := _plane_range(depth, period, 160.0)
+	var base := horizon + 60.0
+	var top := horizon - 470.0
+	var moving := not Feedback.motion_reduced
+	for k in range(r.x, r.y + 1):
+		var x := _plane_x(depth, float(k) * period)
+		# Pilaster with capital and plinth.
+		draw_rect(Rect2(x - 22.0, top, 44.0, base - top), stone)
+		draw_rect(Rect2(x - 30.0, top, 60.0, 14.0), stone.lightened(0.08))
+		draw_rect(Rect2(x - 28.0, horizon - 40.0, 56.0, 40.0), stone.lightened(0.05))
+		draw_line(Vector2(x - 22.0, top), Vector2(x - 22.0, base), Color(VFX.RIM, 0.18), 1.5)
+		# Recessed arch frame between pilasters.
+		var mid := x + period * 0.5
+		draw_arc(Vector2(mid, horizon - 230.0), 118.0, PI, TAU, 20, frame, 6.0)
+		draw_line(Vector2(mid - 118.0, horizon - 230.0), Vector2(mid - 118.0, horizon - 20.0), frame, 6.0)
+		draw_line(Vector2(mid + 118.0, horizon - 230.0), Vector2(mid + 118.0, horizon - 20.0), frame, 6.0)
+		# Torch sconce: iron bracket, bowl and a small flame under the additive light.
+		var sconce := Vector2(x, TORCH_Y)
+		draw_rect(Rect2(sconce.x - 3.0, sconce.y, 6.0, 22.0), Color("1a1024"))
+		draw_colored_polygon(PackedVector2Array([
+			sconce + Vector2(-10.0, -4.0), sconce + Vector2(10.0, -4.0), sconce + Vector2(5.0, 6.0), sconce + Vector2(-5.0, 6.0),
+		]), VFX.MORTAR)
+		var lick := sin(_atmo_t * 11.0 + float(k) * 2.1) * 3.0 if moving else 0.0
+		draw_colored_polygon(PackedVector2Array([
+			sconce + Vector2(-7.0, -4.0), sconce + Vector2(-1.0 + lick * 0.4, -26.0 - lick), sconce + Vector2(7.0, -4.0),
+		]), VFX.ORANGE)
+		draw_colored_polygon(PackedVector2Array([
+			sconce + Vector2(-3.5, -5.0), sconce + Vector2(0.5 + lick * 0.3, -17.0 - lick * 0.6), sconce + Vector2(3.5, -5.0),
+		]), VFX.GOLD)
+
+func _draw_fog(horizon: float) -> void:
+	# Three drifting bands: high between the arches, low across the play plane and
+	# a heavy layer in the pit. `_atmo_t` stops under reduced motion, so they freeze.
+	var bands := [
+		[horizon - 300.0, 120.0, 6.0, Color(VFX.NAVY, 0.09)],
+		[horizon - 60.0, 90.0, 12.0, Color(VFX.TYRIAN, 0.14)],
+		[horizon + 170.0, 140.0, 22.0, Color(VFX.TYRIAN, 0.14)],
+	]
+	var half := get_viewport_rect().size.x * 0.5 + 420.0
+	var period := 360.0
+	for b in range(bands.size()):
+		var y: float = bands[b][0]
+		var h: float = bands[b][1]
+		var speed: float = bands[b][2]
+		var col: Color = bands[b][3]
+		var scroll := fmod(_atmo_t * speed, period)
+		var kmin := floori((_view_center.x - half - scroll) / period)
+		var kmax := ceili((_view_center.x + half - scroll) / period)
+		for k in range(kmin, kmax + 1):
+			var x := float(k) * period + scroll + VFX.hash01(k, 20 + b) * 120.0
+			var rx := 220.0 + VFX.hash01(k, 30 + b) * 160.0
+			var ry := h * (0.35 + VFX.hash01(k, 40 + b) * 0.25)
+			var yy := y + sin(_atmo_t * 0.3 + float(k) * 1.3) * 6.0
+			VFX.draw_ellipse(self, Vector2(x, yy), rx, ry, col)
 
 # --- Run lifecycle ---
 func _on_start() -> void:
@@ -255,6 +393,10 @@ func _on_player_action(kind: String, pos: Vector2) -> void:
 		"swing":
 			feedback.play("swing")
 			feedback.slash(pos + Vector2(player.facing * 28.0, -8.0), player.facing, Content.PAL.player_accent if player._flame_time > 0.0 else Content.PAL.attack, player.attack_index == Content.COMBO.size() - 1)
+		"swing_active":
+			# Additive sweep afterglow matching the live hitbox arc.
+			var def: Dictionary = Content.COMBO[clampi(player.attack_index, 0, Content.COMBO.size() - 1)]
+			feedback.slash_arc(pos + Vector2(player.facing * 8.0, -8.0), player.facing, float(def.range), float(def.arc), player.attack_index == Content.COMBO.size() - 1)
 		"jump": feedback.play("jump")
 		"dash":
 			feedback.play("dash")
@@ -301,7 +443,7 @@ func _on_enemy_died(sc: int) -> void:
 				feedback.flash_death(e.global_position, e.data.color)
 		if room.boss != null and is_instance_valid(room.boss) and room.boss.dead:
 			boss_death = true
-			feedback.flash_death(room.boss.global_position, Content.BOSS_COLOR)
+			feedback.flash_death(room.boss.global_position, Content.BOSS_COLOR, true)
 			feedback.shake(16.0, 0.5)
 			feedback.play("die")
 	if boss_death:
@@ -376,6 +518,7 @@ func _on_slam_landed(pos: Vector2, radius: float) -> void:
 func _on_parried(pos: Vector2, success: bool) -> void:
 	if success:
 		feedback.impact(pos, Content.PAL.special, true)
+		feedback.parry_flash(pos)
 		feedback.hit_stop(0.065)
 		feedback.shake(4.0, 0.1)
 		feedback.play("parry")
@@ -388,6 +531,7 @@ func _on_enemy_exploded(pos: Vector2, radius: float, damage: float) -> void:
 		return
 	feedback.shake(10.0, 0.3)
 	feedback.burst(pos, 26, Color("ff7a18"), 360.0)
+	feedback.blast(pos, radius)
 	feedback.play("die")
 
 func _victory() -> void:
@@ -426,7 +570,9 @@ func _on_quit_to_title() -> void:
 
 func _on_option_toggled(key: String, value: bool) -> void:
 	match key:
-		"reduced_motion": feedback.set_reduced_motion(value)
+		"reduced_motion":
+			feedback.set_reduced_motion(value)
+			_atmosphere.set_reduced_motion(value)
 		"reduced_flash": feedback.set_reduced_flash(value)
 
 func _on_forge_requested() -> void:
