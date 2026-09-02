@@ -210,3 +210,42 @@ static func slash_ribbon(ci: CanvasItem, origin: Vector2, radius: float, arc: fl
 	outer.append_array(inner)
 	outer_cols.append_array(inner_cols)
 	ci.draw_polygon(outer, outer_cols)
+
+## Small emissive: soft halo, bright core and a white-hot pinpoint.
+static func draw_ember_dot(ci: CanvasItem, pos: Vector2, radius: float, color: Color, intensity: float = 1.0) -> void:
+	if intensity <= 0.0:
+		return
+	ci.draw_circle(pos, radius * 2.8, Color(color, 0.14 * intensity))
+	ci.draw_circle(pos, radius * 1.6, Color(color, 0.4 * intensity))
+	ci.draw_circle(pos, radius, Color(color, minf(1.0, 0.7 + 0.3 * intensity)))
+	ci.draw_circle(pos + Vector2(-radius * 0.25, -radius * 0.3), radius * 0.45, Color(HOT, 0.9 * intensity))
+
+## Two-tongue flame rising from `base`; `t` drives the flicker, `phase` desyncs neighbours.
+static func draw_flame(ci: CanvasItem, base: Vector2, height: float, width: float, t: float, phase: float, outer: Color = ORANGE, inner: Color = GOLD) -> void:
+	var lick := sin(t * 11.0 + phase) * 0.18 + sin(t * 17.0 + phase * 1.7) * 0.1
+	var tip := base + Vector2(width * lick, -height * (1.0 + lick * 0.5))
+	ci.draw_colored_polygon(PackedVector2Array([
+		base + Vector2(-width * 0.5, 0.0), base + Vector2(-width * 0.3, -height * 0.45), tip,
+		base + Vector2(width * 0.34, -height * 0.4), base + Vector2(width * 0.5, 0.0),
+	]), outer)
+	var inner_tip := base + Vector2(width * lick * 0.6, -height * 0.55 * (1.0 + lick * 0.4))
+	ci.draw_colored_polygon(PackedVector2Array([
+		base + Vector2(-width * 0.26, 0.0), inner_tip, base + Vector2(width * 0.26, 0.0),
+	]), inner)
+
+## Hanging chain: dashed links with a terminal ring. `sway` offsets the free end.
+static func draw_chain(ci: CanvasItem, from: Vector2, length: float, sway: float, color: Color) -> void:
+	var to := from + Vector2(sway, length)
+	ci.draw_dashed_line(from, to, color, 2.0, 4.0)
+	ci.draw_arc(to + Vector2(0.0, 3.0), 3.0, 0.0, TAU, 8, color, 1.5)
+
+## Pose transform that scales and leans about a pivot (normally the feet) and
+## mirrors on X for facing, so creature geometry can be authored facing right.
+static func set_pose(ci: CanvasItem, pivot: Vector2, facing: float, scale: Vector2, lean: float) -> void:
+	var xf := Transform2D(lean * signf(facing), Vector2(scale.x * signf(facing), scale.y), 0.0, Vector2.ZERO)
+	xf.origin = pivot - xf * pivot
+	ci.draw_set_transform_matrix(xf)
+
+## Points transformed into a limb frame: rotated by `angle`, placed at `origin`.
+static func limb(pts: PackedVector2Array, origin: Vector2, angle: float) -> PackedVector2Array:
+	return Transform2D(angle, origin) * pts

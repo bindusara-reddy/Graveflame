@@ -44,6 +44,7 @@ var burn_time := 0.0
 var burn_dps := 0.0
 var _ledge_ray: RayCast2D
 var _air_time := 0.0  # visual only: drives the contact shadow
+var _anim_t := 0.0  # visual only: idle motion clock
 
 func setup(p_kind: int, p_pos: Vector2) -> void:
 	kind = p_kind
@@ -130,6 +131,7 @@ func _physics_process(delta: float) -> void:
 		_die(false)
 		return
 	_air_time = 0.0 if is_on_floor() else minf(_air_time + delta, 1.0)
+	_anim_t += delta
 	queue_redraw()
 	match state:
 		EState.SPAWN, EState.SEEK: _step_seek(delta)
@@ -404,121 +406,277 @@ func _get_player():
 	return g
 
 func _draw() -> void:
-	var col: Color = data.color
-	if _hurt_flash > 0.0: col = Color.WHITE
+	# Value plan per creature: a dark base, the archetype hue for mid tones and a
+	# few animated emissives. Geometry is authored facing right; set_pose mirrors.
+	var flash := _hurt_flash > 0.0
+	var hue: Color = data.color
+	var mid: Color = Color.WHITE if flash else hue
+	var base: Color = Color(0.92, 0.9, 0.94) if flash else hue.darkened(0.58)
 	var w: float = float(data.w)
 	var h: float = float(data.h)
-	# spawn pop
-	var s := 1.0
-	if _spawn_anim > 0.0: s = 1.0 - _spawn_anim / 0.4
-	draw_set_transform(Vector2.ZERO, 0.0, Vector2(s, s))
-	var shade := _hurt_flash <= 0.0
-	if kind != Kind.WISP:
-		VFX.draw_contact_shadow(self, Vector2(0.0, h * 0.5 + 1.0), w * 1.1, 8.0, clampf(_air_time / 0.3, 0.0, 1.0))
-	else:
+	var t := _anim_t if not Feedback.motion_reduced else 0.0
+	# Pose: spawn pop, windup coil, attack lunge and stagger recoil, pivoting on the feet.
+	var pop := 1.0
+	if _spawn_anim > 0.0:
+		pop = 1.0 - _spawn_anim / 0.4
+	var tw := 0.0
+	if state == EState.WINDUP:
+		tw = clampf(1.0 - st_timer / maxf(0.01, float(data.windup)), 0.0, 1.0)
+	var ta := 0.0
+	if state == EState.ATTACK:
+		ta = clampf(1.0 - st_timer / maxf(0.01, float(data.get("active", 0.18))), 0.0, 1.0)
+	var squash := 1.0 - 0.2 * tw
+	if state == EState.ATTACK:
+		squash = 1.0 + 0.08 * (1.0 - ta)
+	var lean := 0.0
+	if state == EState.WINDUP:
+		lean = -0.2 * tw
+	elif state == EState.ATTACK:
+		lean = 0.22 * (1.0 - ta)
+	elif state == EState.STAGGER:
+		lean = -0.28 * clampf(stagger_t / 0.18, 0.0, 1.0)
+	var air := clampf(_air_time / 0.3, 0.0, 1.0)
+	if kind == Kind.WISP:
 		VFX.draw_contact_shadow(self, Vector2(0.0, w * 1.1), w * 0.9, 6.0, 1.0)
+		VFX.set_pose(self, Vector2.ZERO, facing, Vector2(pop, pop), 0.0)
+	else:
+		VFX.draw_contact_shadow(self, Vector2(0.0, h * 0.5 + 1.0), w * 1.1 * (2.0 - squash), 8.0, air)
+		VFX.set_pose(self, Vector2(0.0, h * 0.5), facing, Vector2(pop * (2.0 - squash), pop * squash), lean)
 	match kind:
-		Kind.STALKER:
-			# Hooked cloak, hood and a short cleaver.
-			var cloak := PackedVector2Array([
-				Vector2(-w * 0.38, -h * 0.35), Vector2(w * 0.34, -h * 0.35),
-				Vector2(w * 0.52, h * 0.48), Vector2(0.0, h * 0.34),
-				Vector2(-w * 0.56, h * 0.48),
-			])
-			VFX.draw_shaded_polygon(self, cloak, col, shade)
-			VFX.draw_rim(self, cloak, facing)
-			var hood := Vector2(facing * 2.0, -h * 0.48)
-			draw_circle(hood, w * 0.34, col.darkened(0.15))
-			VFX.draw_rim_circle(self, hood, w * 0.34, facing, 0.8)
-			draw_circle(hood + Vector2(facing * 5.0, 0.0), 2.2, Color("ffd23f"))
-			draw_line(Vector2(facing * 8.0, -2.0), Vector2(facing * 24.0, 9.0), Color("b6a9a2"), 4.0, true)
-		Kind.HOPPER:
-			var pts := PackedVector2Array([
-				Vector2(0, -h*0.5), Vector2(w*0.5, h*0.3), Vector2(0, h*0.2), Vector2(-w*0.5, h*0.3)
-			])
-			VFX.draw_shaded_polygon(self, pts, col, shade)
-			VFX.draw_rim(self, pts, facing)
-			draw_colored_polygon(PackedVector2Array([
-				Vector2(-w * 0.2, -h * 0.35), Vector2(0.0, -h * 0.72), Vector2(w * 0.14, -h * 0.30)
-			]), col.lightened(0.12))
-			draw_line(Vector2(-w * 0.3, h * 0.22), Vector2(-w * 0.55, h * 0.48), col.darkened(0.32), 5.0, true)
-			draw_line(Vector2(w * 0.3, h * 0.22), Vector2(w * 0.55, h * 0.48), col.darkened(0.32), 5.0, true)
-			draw_circle(Vector2(facing * 4.0, -h * 0.2), 2.5, Color("ffd23f"))
-		Kind.WISP:
-			var pulse := 0.9 + sin(_wisp_t * 5.0) * 0.1
-			draw_circle(Vector2.ZERO, w * 0.8 * pulse, Color(col.r, col.g, col.b, 0.12))
-			draw_colored_polygon(PackedVector2Array([
-				Vector2(0.0, -w * 0.62), Vector2(w * 0.52, 0.0),
-				Vector2(w * 0.18, w * 0.62), Vector2(0.0, w * 0.38),
-				Vector2(-w * 0.18, w * 0.62), Vector2(-w * 0.52, 0.0),
-			]), col)
-			draw_arc(Vector2.ZERO, w * 0.52, 0, TAU, 24, col.lightened(0.25), 2.0)
-			draw_circle(Vector2.ZERO, w * 0.20, Color("ffd23f"))
-		Kind.BRUTE:
-			# Squat plated body with oversized pauldrons.
-			var plate := PackedVector2Array([
-				Vector2(-w * 0.44, -h * 0.34), Vector2(w * 0.44, -h * 0.34),
-				Vector2(w * 0.50, h * 0.48), Vector2(-w * 0.50, h * 0.48),
-			])
-			VFX.draw_shaded_polygon(self, plate, col, shade)
-			VFX.draw_rim(self, plate, facing, 1.1)
-			draw_circle(Vector2(-w * 0.44, -h * 0.24), 10.0, col.darkened(0.22))
-			draw_circle(Vector2(w * 0.44, -h * 0.24), 10.0, col.darkened(0.22))
-			draw_rect(Rect2(-w * 0.28, -h * 0.48, w * 0.56, 17.0), Color("29301f"))
-			draw_line(Vector2(-8.0, -h * 0.34), Vector2(8.0, -h * 0.34), Color("ff5a3d"), 3.0, true)
-		Kind.BOMBER:
-			# round body with a fuse spark on top
-			draw_circle(Vector2.ZERO, w * 0.54, col.darkened(0.28))
-			VFX.draw_shaded_polygon(self, VFX.ellipse_points(Vector2.ZERO, w * 0.43, w * 0.43), col, shade)
-			VFX.draw_rim_circle(self, Vector2.ZERO, w * 0.52, facing, 0.9)
-			draw_arc(Vector2.ZERO, w * 0.28, 0.0, TAU, 18, Color("efb04f"), 3.0)
-			draw_line(Vector2(-6.0, 0.0), Vector2(6.0, 0.0), Color("efb04f"), 2.0)
-			draw_line(Vector2(0.0, -6.0), Vector2(0.0, 6.0), Color("efb04f"), 2.0)
-			# fuse spark pulsing when armed
-			if _bomb_armed:
-				var spark := 0.5 + sin(Time.get_ticks_msec() * 0.04) * 0.5
-				draw_circle(Vector2(0.0, -h*0.5 - 4.0), 3.0 + spark * 3.0, Color("ffd23f"))
-				draw_circle(Vector2(0.0, -h*0.5 - 4.0), 2.0, Color.WHITE)
-			else:
-				draw_circle(Vector2(0.0, -h*0.5 - 4.0), 2.0, Color("ffd23f"))
-	# Brute shield arc on facing side
-	if shield_active and kind == Kind.BRUTE:
-		var scol := Color("9ab0c4") if _shield_flash <= 0.0 else Color.WHITE
-		var sx: float = facing * w * 0.5
-		# shield as a rounded rect in front
-		draw_rect(Rect2(sx - 4.0, -h*0.4, 8.0, h*0.7), scol)
-		draw_arc(Vector2(sx, 0.0), 12.0, -PI*0.5, PI*0.5, 12, scol, 3.0)
-	# Bomber fuse telegraph: expanding ring toward blast radius
+		Kind.STALKER: _draw_stalker(w, h, base, mid, t, tw, ta, flash)
+		Kind.HOPPER: _draw_hopper(w, h, base, mid, t, tw, flash, air)
+		Kind.WISP: _draw_wisp(w, base, mid, t, tw, flash)
+		Kind.BRUTE: _draw_brute(w, h, base, mid, t, tw, ta, flash)
+		Kind.BOMBER: _draw_bomber(w, h, base, mid, t, flash)
+	draw_set_transform_matrix(Transform2D.IDENTITY)
+	# Bomber fuse telegraph: expanding ring toward the true blast radius.
 	if kind == Kind.BOMBER and _bomb_armed and _fuse_t > 0.0:
-		var t: float = 1.0 - _fuse_t / _fuse_total
-		var r := lerpf(12.0, _blast_radius, t)
-		var c := Color(1.0, 0.2, 0.2, 0.25 + t * 0.35)
-		draw_arc(Vector2.ZERO, r, 0, TAU, 28, c, 2.0)
-		# urgent flash near the end
-		if t > 0.7:
+		var ft: float = 1.0 - _fuse_t / _fuse_total
+		var r := lerpf(12.0, _blast_radius, ft)
+		draw_arc(Vector2.ZERO, r, 0, TAU, 28, Color(1.0, 0.3, 0.1, 0.25 + ft * 0.35), 2.0)
+		if ft > 0.7:
 			var pulse := 0.5 + sin(Time.get_ticks_msec() * 0.05) * 0.5
 			draw_circle(Vector2.ZERO, w * 0.5, Color(1.0, 0.3, 0.2, pulse * 0.4))
-	# telegraph during windup (non-bomber)
-	if state == EState.WINDUP and kind != Kind.BOMBER:
-		var tw: float = 1.0 - st_timer / float(data.windup)
-		draw_arc(Vector2(facing * w * 0.5, 0.0), 14.0, 0, TAU * tw, 16, Color("ff3d3d"), 3.0)
-	# attack lunge indicator
+	# Active melee area: the exact rectangle the hitbox covers.
 	if state == EState.ATTACK:
 		var off: float = 0.0 if facing >= 0.0 else 40.0
-		draw_rect(Rect2(facing * (w*0.5) - off, -h*0.5 - 5, 40, h + 10), Color(1, 0.2, 0.2, 0.3))
-	draw_set_transform(Vector2.ZERO, 0.0, Vector2.ONE)
+		draw_rect(Rect2(facing * (w * 0.5) - off, -h * 0.5 - 5, 40, h + 10), Color(1.0, 0.35, 0.1, 0.26))
 	if hp < float(data.hp):
 		var hp_width := maxf(30.0, w)
 		var hp_frac := clampf(hp / float(data.hp), 0.0, 1.0)
 		draw_rect(Rect2(-hp_width * 0.5, -h * 0.72 - 9.0, hp_width, 4.0), Color(0.08, 0.06, 0.10, 0.8))
-		draw_rect(Rect2(-hp_width * 0.5, -h * 0.72 - 9.0, hp_width * hp_frac, 4.0), col)
+		draw_rect(Rect2(-hp_width * 0.5, -h * 0.72 - 9.0, hp_width * hp_frac, 4.0), mid)
 	if burn_time > 0.0:
-		var flame_pulse := 0.75 + sin(Time.get_ticks_msec() * 0.02) * 0.2
 		for i in range(3):
-			var fx := -w * 0.28 + float(i) * w * 0.28
-			var fy := -h * 0.48 - float((i + int(Time.get_ticks_msec() / 120)) % 2) * 5.0
-			draw_colored_polygon(PackedVector2Array([
-				Vector2(fx - 4.0, fy + 10.0),
-				Vector2(fx, fy - 7.0 * flame_pulse),
-				Vector2(fx + 4.0, fy + 10.0),
-			]), Color(1.0, 0.35 + float(i) * 0.08, 0.08, 0.9))
+			VFX.draw_flame(self, Vector2(-w * 0.28 + float(i) * w * 0.28, -h * 0.4), 14.0, 8.0, t, float(i) * 2.1)
+
+func _draw_stalker(w: float, h: float, base: Color, mid: Color, t: float, tw: float, ta: float, flash: bool) -> void:
+	var sway := sin(t * 2.6) * 2.0
+	var sway2 := sin(t * 2.6 + 1.3) * 2.5
+	# Two tattered cloak flaps trail behind on offset phases.
+	draw_colored_polygon(PackedVector2Array([
+		Vector2(-4.0, -h * 0.32), Vector2(-w * 0.58 - sway, -h * 0.02), Vector2(-w * 0.66 - sway * 1.6, h * 0.44),
+		Vector2(-w * 0.34, h * 0.3), Vector2(-8.0, h * 0.08),
+	]), base if flash else base.darkened(0.25))
+	draw_colored_polygon(PackedVector2Array([
+		Vector2(-2.0, -h * 0.3), Vector2(-w * 0.42 - sway2, h * 0.12), Vector2(-w * 0.46 - sway2, h * 0.5),
+		Vector2(-w * 0.12, h * 0.4),
+	]), base)
+	# Robe with a ragged hem and a dark sash.
+	var robe := PackedVector2Array([
+		Vector2(-w * 0.3, -h * 0.3), Vector2(w * 0.3, -h * 0.3), Vector2(w * 0.42, h * 0.2),
+		Vector2(w * 0.36, h * 0.5), Vector2(w * 0.2, h * 0.36), Vector2(w * 0.04, h * 0.5),
+		Vector2(-w * 0.14, h * 0.38), Vector2(-w * 0.3, h * 0.5), Vector2(-w * 0.42, h * 0.22),
+	])
+	VFX.draw_shaded_polygon(self, robe, mid, not flash)
+	VFX.draw_rim(self, robe, 1.0)
+	draw_line(Vector2(-w * 0.36, -h * 0.02), Vector2(w * 0.38, h * 0.02), base, 3.0)
+	# Hood: dome plus a long peak trailing back; the face is a hollow with one ember eye.
+	var hood := Vector2(3.0, -h * 0.44)
+	draw_colored_polygon(PackedVector2Array([
+		hood + Vector2(-w * 0.1, -w * 0.3), Vector2(-w * 0.62, -h * 0.98 + sway * 1.5), Vector2(-w * 0.34, -h * 0.5),
+	]), mid if flash else mid.darkened(0.2))
+	draw_circle(hood, w * 0.36, mid if flash else mid.darkened(0.12))
+	VFX.draw_rim_circle(self, hood, w * 0.36, 1.0, 0.8)
+	VFX.draw_ellipse(self, hood + Vector2(6.0, 1.0), w * 0.22, w * 0.27, Color(0.05, 0.03, 0.06))
+	VFX.draw_ember_dot(self, hood + Vector2(9.0, -1.0), 2.0 + tw * 0.8, VFX.GOLD, 0.75 + 0.25 * sin(t * 9.0) + tw * 0.5)
+	# Cleaver arm: rests low, rises behind the head on windup, sweeps forward on attack.
+	var shoulder := Vector2(8.0, -h * 0.22)
+	var ang := lerpf(0.85, -2.1, tw)
+	if state == EState.ATTACK:
+		ang = lerpf(-2.1, 0.45, minf(1.0, ta * 1.5))
+	var hand := shoulder + Vector2(cos(ang), sin(ang)) * 17.0
+	draw_line(shoulder, hand, base, 5.0, true)
+	var blade := VFX.limb(PackedVector2Array([
+		Vector2(-2.0, -3.0), Vector2(16.0, -9.0), Vector2(24.0, -4.0), Vector2(23.0, 5.0),
+		Vector2(15.0, 8.0), Vector2(11.0, 4.0), Vector2(8.0, 8.0), Vector2(0.0, 5.0),
+	]), hand, ang + 0.35)
+	draw_colored_polygon(blade, Color("8f8496"))
+	draw_polyline(PackedVector2Array([blade[1], blade[2], blade[3]]), Color("d9d2dc"), 1.5, true)
+	draw_circle(hand, 3.0, base)
+
+func _draw_hopper(w: float, h: float, base: Color, mid: Color, t: float, tw: float, flash: bool, air: float) -> void:
+	# Grasshopper hind legs: the femur rises above the back and the shin drops to
+	# the foot, coiling tighter on windup and stretching out while airborne.
+	var hip := Vector2(-4.0, h * 0.1)
+	for i in range(2):
+		var off := Vector2(3.0 if i == 0 else -3.0, 0.0)
+		var knee := hip + off + Vector2(-w * 0.55, -h * 0.42 - tw * h * 0.1).lerp(Vector2(-w * 0.5, h * 0.05), air)
+		var foot := hip + off + Vector2(-w * 0.25, h * 0.4).lerp(Vector2(-w * 0.45, h * 0.55), air)
+		var leg_col := base if i == 0 else base.darkened(0.25)
+		draw_line(hip + off, knee, leg_col, 5.0, true)
+		draw_circle(knee, 3.0, leg_col)
+		draw_line(knee, foot, leg_col, 3.0, true)
+		draw_line(foot, foot + Vector2(6.0, 0.0), leg_col, 2.5, true)
+	draw_line(Vector2(6.0, h * 0.12), Vector2(10.0, h * 0.42), base, 3.0, true)
+	# Bean body pitched forward with a pale underbelly.
+	var body := Transform2D(0.3, Vector2(2.0, -h * 0.06)) * VFX.ellipse_points(Vector2.ZERO, w * 0.5, h * 0.3)
+	VFX.draw_shaded_polygon(self, body, mid, not flash)
+	VFX.draw_rim(self, body, 1.0)
+	VFX.draw_ellipse(self, Vector2(5.0, h * 0.1), w * 0.3, h * 0.13, mid if flash else mid.lightened(0.25))
+	# Snout and a dark dorsal stripe break the bean into a head and a back.
+	draw_colored_polygon(PackedVector2Array([
+		Vector2(w * 0.4, -h * 0.22), Vector2(w * 0.68, -h * 0.02), Vector2(w * 0.42, h * 0.06),
+	]), mid if flash else mid.darkened(0.1))
+	draw_line(Vector2(-w * 0.4, -h * 0.1), Vector2(w * 0.3, -h * 0.34), base, 3.0, true)
+	# Swept-back antenna with an ember tip.
+	var sway := sin(t * 3.2) * 3.0
+	var tip := Vector2(-w * 0.72, -h * 0.5 + sway * 1.6)
+	draw_polyline(PackedVector2Array([Vector2(2.0, -h * 0.3), Vector2(-w * 0.42, -h * 0.62 + sway), tip]), base, 2.5, true)
+	VFX.draw_ember_dot(self, tip, 1.6, VFX.ORANGE, 0.7)
+	# One big eye in a dark socket.
+	VFX.draw_ellipse(self, Vector2(w * 0.28, -h * 0.16), 5.5, 4.5, Color(0.06, 0.03, 0.05))
+	VFX.draw_ember_dot(self, Vector2(w * 0.3, -h * 0.17), 2.6 + tw, VFX.GOLD, 0.8 + tw * 0.6)
+
+func _draw_wisp(w: float, base: Color, mid: Color, t: float, tw: float, flash: bool) -> void:
+	var pulse := 0.9 + sin(t * 5.0) * 0.1
+	# Three spectral tails trail below and behind on staggered phases.
+	for i in range(3):
+		var pts := PackedVector2Array()
+		for k in range(5):
+			var fk := float(k)
+			pts.append(Vector2(sin(t * 4.0 + fk * 0.9 + float(i) * 2.1) * 4.0 - fk * 2.5 + (float(i) - 1.0) * 5.0, w * 0.3 + fk * 7.0))
+		draw_polyline(pts, Color(mid, 0.4 - float(i) * 0.1), 3.0 - float(i) * 0.6, true)
+	draw_circle(Vector2.ZERO, w * 0.9 * pulse, Color(mid, 0.1))
+	var body := PackedVector2Array([
+		Vector2(0.0, -w * 0.58), Vector2(w * 0.44, -w * 0.15), Vector2(w * 0.3, w * 0.25),
+		Vector2(0.0, w * 0.5), Vector2(-w * 0.3, w * 0.25), Vector2(-w * 0.44, -w * 0.15),
+	])
+	VFX.draw_shaded_polygon(self, body, mid, not flash)
+	# Dark cowl over the crown, a hollow face and one lantern eye.
+	draw_colored_polygon(PackedVector2Array([
+		Vector2(0.0, -w * 0.58), Vector2(w * 0.44, -w * 0.15), Vector2(w * 0.2, -w * 0.05),
+		Vector2(-w * 0.2, -w * 0.05), Vector2(-w * 0.44, -w * 0.15),
+	]), Color(base, 0.85))
+	VFX.draw_ellipse(self, Vector2(2.0, w * 0.02), w * 0.24, w * 0.2, Color(0.05, 0.03, 0.08))
+	VFX.draw_ember_dot(self, Vector2(3.0, 0.0), 3.0 + tw * 2.0, VFX.GOLD, 0.85 + tw * 0.6)
+	# Orbiting motes converge into the eye while a shot charges.
+	for i in range(3):
+		var a := t * 2.2 + float(i) * TAU / 3.0
+		var r := lerpf(w * 0.78, w * 0.15, tw)
+		draw_circle(Vector2(cos(a) * r, sin(a) * r * 0.55), 1.4 + tw, Color(VFX.HOT if tw > 0.0 else mid.lightened(0.4), 0.8))
+
+func _draw_brute(w: float, h: float, base: Color, mid: Color, t: float, tw: float, ta: float, flash: bool) -> void:
+	var breath := sin(t * 1.8) * 0.8
+	# Back smokestack venting an ember.
+	draw_rect(Rect2(-w * 0.34, -h * 0.66 - breath, w * 0.14, h * 0.28), base if flash else base.darkened(0.2))
+	draw_rect(Rect2(-w * 0.37, -h * 0.68 - breath, w * 0.2, 4.0), base)
+	var rise := fmod(t * 26.0, 22.0)
+	VFX.draw_ember_dot(self, Vector2(-w * 0.27 + sin(t * 7.0) * 2.0, -h * 0.68 - rise), 1.4, VFX.ORANGE, 1.0 - rise / 22.0)
+	# Legs: iron columns with knee plates.
+	for side: float in [-1.0, 1.0]:
+		draw_rect(Rect2(side * w * 0.22 - w * 0.11, h * 0.12, w * 0.22, h * 0.38), base)
+		draw_rect(Rect2(side * w * 0.22 - w * 0.08, h * 0.22, w * 0.16, 5.0), mid if flash else mid.darkened(0.2))
+	# Slab torso with plate seams.
+	var torso := PackedVector2Array([
+		Vector2(-w * 0.5, -h * 0.2), Vector2(-w * 0.36, -h * 0.44 - breath), Vector2(w * 0.36, -h * 0.44 - breath),
+		Vector2(w * 0.5, -h * 0.2), Vector2(w * 0.44, h * 0.22), Vector2(-w * 0.44, h * 0.22),
+	])
+	VFX.draw_shaded_polygon(self, torso, mid, not flash)
+	VFX.draw_rim(self, torso, 1.0, 1.1)
+	draw_line(Vector2(-w * 0.46, -h * 0.05), Vector2(w * 0.46, -h * 0.05), base, 2.0)
+	draw_line(Vector2(0.0, -h * 0.44 - breath), Vector2(0.0, h * 0.22), base, 2.0)
+	for side: float in [-1.0, 1.0]:
+		draw_colored_polygon(PackedVector2Array([
+			Vector2(side * w * 0.56, -h * 0.28 - breath), Vector2(side * w * 0.3, -h * 0.5 - breath),
+			Vector2(side * w * 0.18, -h * 0.34 - breath), Vector2(side * w * 0.5, -h * 0.12 - breath),
+		]), mid if flash else mid.darkened(0.18))
+	# Sunk visor head with two coal eyes.
+	draw_rect(Rect2(-w * 0.16, -h * 0.58 - breath, w * 0.34, h * 0.18), base)
+	draw_rect(Rect2(-w * 0.12, -h * 0.51 - breath, w * 0.28, 4.0), Color(0.04, 0.03, 0.04))
+	for ex: float in [0.0, 6.0]:
+		VFX.draw_ember_dot(self, Vector2(-w * 0.02 + ex, -h * 0.49 - breath), 1.6 + tw * 0.6, Color("ff5a3d"), 0.9 + tw * 0.5)
+	# Ember cracks open once the shield is gone.
+	if not shield_active:
+		var glow := 0.6 + sin(t * 6.0) * 0.3
+		draw_polyline(PackedVector2Array([Vector2(w * 0.1, -h * 0.3), Vector2(w * 0.2, -h * 0.12), Vector2(w * 0.14, h * 0.02), Vector2(w * 0.26, h * 0.14)]), Color(VFX.EMBER, glow), 1.5, true)
+		draw_polyline(PackedVector2Array([Vector2(-w * 0.3, -h * 0.1), Vector2(-w * 0.2, h * 0.04), Vector2(-w * 0.28, h * 0.16)]), Color(VFX.EMBER, glow * 0.8), 1.5, true)
+	# Club fist: rears back on windup, drives forward on attack.
+	var shoulder := Vector2(w * 0.36, -h * 0.3 - breath)
+	var rest := shoulder + Vector2(w * 0.16, h * 0.34)
+	var raised := shoulder + Vector2(-w * 0.15, -h * 0.4)
+	var hand := rest
+	if state == EState.WINDUP:
+		hand = rest.lerp(raised, tw)
+	elif state == EState.ATTACK:
+		hand = raised.lerp(shoulder + Vector2(w * 0.5, h * 0.12), minf(1.0, ta * 1.5))
+	var elbow := (shoulder + hand) * 0.5 + Vector2(6.0, -4.0)
+	draw_line(shoulder, elbow, base, 8.0, true)
+	draw_line(elbow, hand, base, 7.0, true)
+	draw_circle(hand, 8.0, base if flash else base.darkened(0.15))
+	draw_arc(hand, 8.0, -2.4, 0.4, 8, mid if flash else mid.darkened(0.1), 2.5)
+	# Riveted iron tower shield on the facing side.
+	if shield_active:
+		var scol := Color("6e6a7c") if _shield_flash <= 0.0 else Color.WHITE
+		var face := Color("9a94aa") if _shield_flash <= 0.0 else Color.WHITE
+		var sx := w * 0.5
+		draw_rect(Rect2(sx - 5.0, -h * 0.4, 10.0, h * 0.76), scol)
+		draw_circle(Vector2(sx, -h * 0.4), 5.0, scol)
+		draw_rect(Rect2(sx - 1.0, -h * 0.36, 3.0, h * 0.68), face)
+		for k in range(3):
+			draw_circle(Vector2(sx + 2.0, -h * 0.3 + float(k) * h * 0.26), 1.4, Color("d8d2e0"))
+
+func _draw_bomber(w: float, h: float, base: Color, mid: Color, t: float, flash: bool) -> void:
+	var run := clampf(absf(velocity.x) / float(data.speed), 0.0, 1.0)
+	var gait := sin(t * 18.0) * 0.6 * run
+	var fuse_t := 0.0
+	if _bomb_armed:
+		fuse_t = clampf(1.0 - _fuse_t / _fuse_total, 0.0, 1.0)
+	var jitter := Vector2(sin(t * 40.0), cos(t * 33.0)) * fuse_t * 1.5
+	# Stubby scissoring legs.
+	for side: float in [-1.0, 1.0]:
+		var hip := Vector2(side * 5.0, h * 0.28)
+		var foot := hip + Vector2(sin(gait) * side * 7.0, h * 0.22)
+		draw_line(hip, foot, base, 4.0, true)
+		draw_line(foot, foot + Vector2(4.0, 0.0), base, 3.0, true)
+	# Iron shell with a riveted seam band and a crack that glows once armed.
+	var center := Vector2(0.0, -2.0) + jitter
+	draw_circle(center, w * 0.48, base)
+	VFX.draw_shaded_polygon(self, VFX.ellipse_points(center, w * 0.42, w * 0.42), mid, not flash)
+	VFX.draw_rim_circle(self, center, w * 0.46, 1.0, 0.9)
+	VFX.draw_ellipse_ring(self, center, w * 0.42, w * 0.14, base, 2.5)
+	for a: float in [0.3, 1.0, 2.1, 2.8]:
+		draw_circle(center + Vector2(cos(a) * w * 0.42, sin(a) * w * 0.14), 1.3, mid if flash else mid.lightened(0.35))
+	var crack_a := 0.3 + fuse_t * 0.7 + sin(t * 20.0) * fuse_t * 0.2
+	if fuse_t > 0.0:
+		draw_circle(center + Vector2(w * 0.18, -w * 0.05), w * 0.3, Color(VFX.ORANGE, 0.18 * fuse_t))
+	draw_polyline(PackedVector2Array([
+		center + Vector2(w * 0.1, -w * 0.3), center + Vector2(w * 0.22, -w * 0.12),
+		center + Vector2(w * 0.14, w * 0.04), center + Vector2(w * 0.3, w * 0.18),
+	]), Color(VFX.EMBER, crack_a), 1.5 + fuse_t, true)
+	# Manic eye.
+	draw_circle(center + Vector2(w * 0.2, -w * 0.1), 4.2, Color.WHITE if flash else Color("f2ead8"))
+	draw_circle(center + Vector2(w * 0.2 + 1.2, -w * 0.1), 2.2 - fuse_t * 0.8, Color(0.06, 0.03, 0.04))
+	# Fuse rope; the spark burns down toward the shell while armed.
+	var fuse := PackedVector2Array([
+		center + Vector2(0.0, -w * 0.44), center + Vector2(-3.0, -w * 0.62),
+		center + Vector2(-8.0, -w * 0.74), center + Vector2(-14.0, -w * 0.76),
+	])
+	draw_polyline(fuse, base if flash else base.darkened(0.2), 2.5, true)
+	var u := (1.0 - fuse_t) * 3.0
+	var seg := mini(int(u), 2)
+	var spark := fuse[seg].lerp(fuse[seg + 1], u - float(seg))
+	VFX.draw_ember_dot(self, spark, 2.0 + fuse_t * 1.5, VFX.GOLD, 0.8 + sin(t * 30.0) * 0.2 + fuse_t * 0.4)
+	if _bomb_armed:
+		for k in range(3):
+			draw_circle(spark + Vector2(sin(t * 25.0 + float(k) * 2.0) * 6.0, -3.0 - fmod(t * 40.0 + float(k) * 7.0, 10.0)), 1.0, Color(VFX.HOT, 0.8))
