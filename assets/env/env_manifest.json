@@ -1,0 +1,50 @@
+{
+  "layer_far": {
+    "h": 200,
+    "w": 320
+  },
+  "layer_mid": {
+    "h": 200,
+    "w": 320
+  },
+  "layer_near": {
+    "h": 200,
+    "w": 320
+  },
+  "tile_fill": {
+    "h": 32,
+    "w": 32
+  },
+  "tile_ledge": {
+    "h": 16,
+    "w": 32
+  },
+  "tile_pillar": {
+    "h": 32,
+    "w": 32
+  },
+  "tile_pillar_cap": {
+    "h": 16,
+    "w": 32
+  },
+  "tile_side_l": {
+    "h": 32,
+    "w": 32
+  },
+  "tile_side_r": {
+    "h": 32,
+    "w": 32
+  },
+  "tile_top": {
+    "h": 32,
+    "w": 32
+  },
+  "tile_top_l": {
+    "h": 32,
+    "w": 32
+  },
+  "tile_top_r": {
+    "h": 32,
+    "w": 32
+  }
+}

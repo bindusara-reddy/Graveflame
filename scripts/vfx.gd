@@ -33,6 +33,7 @@ void fragment() {
 ## Sprite hit flash: mixes the sampled texel toward a flat colour, keeping alpha.
 const FLASH_SHADER := """
 shader_type canvas_item;
+render_mode unshaded;
 
 uniform float flash : hint_range(0.0, 1.0) = 0.0;
 uniform vec4 flash_color : source_color = vec4(1.0, 1.0, 1.0, 1.0);
@@ -42,7 +43,9 @@ void fragment() {
 }
 """
 
-## Fullscreen edge falloff. Kept below the HUD layer so corner panels stay crisp.
+## Fullscreen edge falloff plus a whisper of animated film grain. Kept below the
+## HUD layer so corner panels stay crisp.
+const GRAIN_DEFAULT := 0.028
 const VIGNETTE_SHADER := """
 shader_type canvas_item;
 render_mode unshaded;
@@ -51,11 +54,17 @@ uniform vec4 edge_color : source_color = vec4(0.027, 0.02, 0.043, 0.78);
 uniform float inner_radius = 0.30;
 uniform float outer_radius = 0.72;
 uniform float power = 2.1;
+uniform float grain = 0.028;
 
 void fragment() {
 	float r = length(UV - vec2(0.5));
 	float v = pow(smoothstep(inner_radius, outer_radius, r), power);
-	COLOR = vec4(edge_color.rgb, edge_color.a * v);
+	vec2 seed = floor(UV * vec2(640.0, 360.0)) + vec2(floor(TIME * 24.0) * 7.0, floor(TIME * 24.0) * 3.0);
+	float n = fract(sin(dot(seed, vec2(12.9898, 78.233))) * 43758.5453);
+	float g = (n - 0.5) * grain;
+	vec3 rgb = edge_color.rgb * v + vec3(0.5 + g);
+	float a = max(edge_color.a * v, grain * 0.9);
+	COLOR = vec4(mix(vec3(0.5 + g), edge_color.rgb, v), a);
 }
 """
 
@@ -91,7 +100,18 @@ static func additive_material() -> CanvasItemMaterial:
 	if _additive_material == null:
 		_additive_material = CanvasItemMaterial.new()
 		_additive_material.blend_mode = CanvasItemMaterial.BLEND_MODE_ADD
+		_additive_material.light_mode = CanvasItemMaterial.LIGHT_MODE_UNSHADED
 	return _additive_material
+
+static var _unshaded_material: CanvasItemMaterial
+
+## Emissive things (sparks, numbers, projectiles, flames) ignore the ambient
+## CanvasModulate and the point lights so they stay bright in the dark.
+static func unshaded_material() -> CanvasItemMaterial:
+	if _unshaded_material == null:
+		_unshaded_material = CanvasItemMaterial.new()
+		_unshaded_material.light_mode = CanvasItemMaterial.LIGHT_MODE_UNSHADED
+	return _unshaded_material
 
 ## Deterministic 0..1 noise so backdrops and masonry never reshuffle between frames.
 static func hash01(i: int, salt: int = 0) -> float:

@@ -5,6 +5,7 @@ extends CharacterBody2D
 ## A Dead Cells-inspired action-roguelite character. All art is drawn procedurally.
 
 const VFX := preload("res://scripts/vfx.gd")
+const KnightArt := preload("res://scripts/knight_art.gd")
 
 signal hp_changed(hp: float, max_hp: float)
 signal special_changed(value: float, maximum: float)
@@ -76,6 +77,17 @@ var _flame_time := 0.0
 var _anim_time := 0.0
 var _input_lock_frames := 0
 var _air_time := 0.0  # visual only: drives the contact shadow
+# --- Momentum boon: kill-fed speed/damage stacks ---
+var _momentum_t := 0.0
+var _momentum_stacks := 0
+# Visual only: landing squash and the airborne state from the previous tick.
+var _land_squash := 0.0
+var _was_on_floor := true
+var _prev_vy := 0.0
+# Pixel-art body (see knight_art.gd); _draw() paints the flame crown and overlays on top.
+var _knight: Sprite2D
+var _knight_flash: ShaderMaterial
+var _flame: Sprite2D
 
 func setup(rm: RunModel) -> void:
 	_run_model = rm
@@ -126,6 +138,7 @@ func _ready() -> void:
 	_parry_area.add_child(_parry_shape)
 	add_child(_parry_area)
 	jumps_left = Content.P_MAX_JUMPS
+	_build_body()
 	if build.is_empty():
 		build = {
 			"max_hp": Content.P_MAX_HP, "hp": Content.P_MAX_HP, "speed_mul": 1.0, "dmg_mul": 1.0,
@@ -150,11 +163,17 @@ func _physics_process(delta: float) -> void:
 		attack_buffer = 0.0
 		jump_buffer = 0.0
 	_anim_time += delta
+	_prev_vy = velocity.y
+	if _land_squash > 0.0: _land_squash -= delta
 	if not controls_locked and Input.is_action_just_pressed("attack"):
 		attack_buffer = Content.P_ATTACK_BUFFER
 	else:
 		attack_buffer = maxf(0.0, attack_buffer - delta)
 	_flame_time = maxf(0.0, _flame_time - delta)
+	if _momentum_t > 0.0:
+		_momentum_t -= delta
+		if _momentum_t <= 0.0:
+			_momentum_stacks = 0
 	if iframes > 0.0: iframes -= delta
 	if dash_cd > 0.0: dash_cd -= delta
 	if _hurt_flash > 0.0: _hurt_flash -= delta
@@ -177,6 +196,9 @@ func _physics_process(delta: float) -> void:
 		State.HURT: _step_hurt(delta)
 		State.DEAD: pass
 
+	if is_on_floor() and not _was_on_floor and _prev_vy > 320.0:
+		_land_squash = 0.12
+	_was_on_floor = is_on_floor()
 	_air_time = 0.0 if is_on_floor() else minf(_air_time + delta, 1.0)
 	queue_redraw()
 
@@ -185,7 +207,7 @@ func _step_locomotion(delta: float, controls_locked: bool = false) -> void:
 	var dir := 0.0 if controls_locked else Input.get_axis("move_left", "move_right")
 	if dir != 0.0: facing = signf(dir)
 	var accel := Content.P_AIR_ACCEL if not is_on_floor() else Content.P_ACCEL
-	var target := dir * Content.P_SPEED * float(build.get("speed_mul", 1.0))
+	var target := dir * Content.P_SPEED * _speed_mul()
 	velocity.x = _approach(velocity.x, target, accel * delta)
 	# Gravity (reduced while wall sliding)
 	var grav := Content.GRAVITY
@@ -296,6 +318,35 @@ func _approach(current: float, target: float, max_delta: float) -> float:
 	if current < target: return minf(current + max_delta, target)
 	return maxf(current - max_delta, target)
 
+# --- Build-derived multipliers ---
+func _speed_mul() -> float:
+	return float(build.get("speed_mul", 1.0)) + float(build.get("momentum", 0.0)) * float(_momentum_stacks)
+
+## Outgoing damage multiplier. Momentum stacks, Bloodrush (low HP) and
+## Executioner (low target HP) layer on top of the flat Power bonus.
+func _damage_mul(tgt = null) -> float:
+	var m := float(build.get("dmg_mul", 1.0))
+	if _momentum_stacks > 0:
+		m += 0.10 * float(_momentum_stacks)
+	if float(build.get("bloodrush", 0.0)) > 0.0 and float(build.hp) < float(build.max_hp) * Content.BLOODRUSH_HP_FRAC:
+		m += float(build.bloodrush)
+	if tgt != null and float(build.get("execute_bonus", 0.0)) > 0.0:
+		var thp = tgt.get("hp")
+		var tmax = tgt.get("hp_max")
+		if thp != null and tmax != null and float(tmax) > 0.0 and float(thp) <= float(tmax) * Content.EXECUTE_HP_FRAC:
+			m += float(build.execute_bonus)
+	return m
+
+## Called by the game on every kill the player earns.
+func on_enemy_killed() -> void:
+	if float(build.get("momentum", 0.0)) <= 0.0:
+		return
+	_momentum_stacks = mini(_momentum_stacks + 1, Content.MOMENTUM_MAX_STACKS)
+	_momentum_t = Content.MOMENTUM_TIME
+
+func momentum_stacks() -> int:
+	return _momentum_stacks
+
 # --- Attack combo ---
 func _begin_attack(force_chain: bool = false) -> void:
 	if force_chain and attack_index >= 0 and attack_index < Content.COMBO.size() - 1:
@@ -363,9 +414,10 @@ func _activate_hitbox(def: Dictionary) -> void:
 	_attack_range = def.range
 	atk_hit.clear()
 	emit_signal("action_feedback", "swing_active", global_position)
-	if attack_index == Content.COMBO.size() - 1 and _flame_time > 0.0:
+	if attack_index == Content.COMBO.size() - 1 and (_flame_time > 0.0 or bool(build.get("finisher_wave", false))):
 		var wave_pos := global_position + Vector2(facing * 34.0, -8.0)
-		emit_signal("projectile_requested", "player", wave_pos, Vector2(facing * 560.0, 0.0), 18.0 * float(build.get("dmg_mul", 1.0)), 320.0, 2, 0.32, Content.PAL.player_accent)
+		var wave_life := 0.32 if _flame_time > 0.0 else 0.26
+		emit_signal("projectile_requested", "player", wave_pos, Vector2(facing * 560.0, 0.0), 18.0 * _damage_mul(), 320.0, 2, wave_life, Content.PAL.player_accent)
 
 func _deactivate_hitbox() -> void:
 	_atk_shape.disabled = true
@@ -382,15 +434,18 @@ func _scan_attack_hits(def: Dictionary) -> void:
 		atk_hit[oid] = true
 		var tgt = area.get_meta("owner")
 		if tgt != null and is_instance_valid(tgt) and tgt.has_method("take_damage"):
-			var dmg: float = def.damage * float(build.get("dmg_mul", 1.0))
-			if attack_index == Content.COMBO.size() - 1:
+			var is_finisher := attack_index == Content.COMBO.size() - 1
+			var dmg: float = def.damage * _damage_mul(tgt)
+			if is_finisher:
 				dmg *= float(build.get("finish_mul", 1.0))
 			if _flame_time > 0.0:
 				dmg *= Content.P_FLAME_DAMAGE_MUL
 			tgt.take_damage(dmg, Vector2(facing, -0.2), def.knock)
-			if _flame_time > 0.0 and tgt.has_method("apply_burn"):
-				tgt.apply_burn(Content.P_FLAME_BURN_DPS, Content.P_FLAME_BURN_TIME)
-			emit_signal("hit_landed", dmg, tgt.global_position, attack_index == Content.COMBO.size() - 1)
+			# Graveflame ignites every hit; Kindling makes finishers ignite too.
+			var kindling := float(build.get("burn_bonus_dps", 0.0)) > 0.0
+			if (_flame_time > 0.0 or (is_finisher and kindling)) and tgt.has_method("apply_burn"):
+				tgt.apply_burn(Content.P_FLAME_BURN_DPS + float(build.get("burn_bonus_dps", 0.0)), Content.P_FLAME_BURN_TIME + float(build.get("burn_bonus_time", 0.0)))
+			emit_signal("hit_landed", dmg, tgt.global_position, is_finisher)
 			_gain_special(Content.P_SPECIAL_GAIN * float(build.get("special_mul", 1.0)))
 			if float(build.get("lifesteal", 0.0)) > 0.0:
 				_heal(float(build.lifesteal))
@@ -421,7 +476,7 @@ func _step_slam(delta: float) -> void:
 
 func _do_slam_impact() -> void:
 	var radius: float = Content.P_SLAM_RADIUS + float(build.get("slam_radius_bonus", 0.0))
-	var dmg: float = Content.P_SLAM_DAMAGE * float(build.get("slam_mul", 1.0)) * float(build.get("dmg_mul", 1.0))
+	var base_dmg: float = Content.P_SLAM_DAMAGE * float(build.get("slam_mul", 1.0))
 	# AoE: damage all enemies overlapping a circle centered on player
 	var center := global_position + Vector2(0.0, 10.0)
 	# Use a temporary Area2D circle query
@@ -433,7 +488,7 @@ func _do_slam_impact() -> void:
 			if tgt != null and is_instance_valid(tgt) and tgt.has_method("take_damage"):
 				var kdir: Vector2 = (tgt.global_position - center).normalized()
 				if kdir == Vector2.ZERO: kdir = Vector2.UP
-				tgt.take_damage(dmg, Vector2(kdir.x, -0.7), Content.P_SLAM_KNOCK)
+				tgt.take_damage(base_dmg * _damage_mul(tgt), Vector2(kdir.x, -0.7), Content.P_SLAM_KNOCK)
 				hit_any = true
 	if hit_any:
 		_gain_special(Content.P_SPECIAL_GAIN * float(build.get("special_mul", 1.0)) * 2.0)
@@ -447,7 +502,7 @@ func _do_special() -> void:
 	special -= Content.P_SPECIAL_COST
 	emit_signal("special_changed", special, max_special)
 	var spd := 700.0
-	var dmg := 26.0 * float(build.get("dmg_mul", 1.0))
+	var dmg := 26.0 * _damage_mul()
 	if build.get("special_pierce", false): dmg *= 1.2
 	var pierce := 3 if bool(build.get("special_pierce", false)) else 0
 	var pos := global_position + Vector2(facing * 30.0, -10.0)
@@ -530,7 +585,7 @@ func _scan_parry() -> void:
 			_parry_hit[oid] = true
 			_parry_succeeded = true
 			emit_signal("parried", global_position + Vector2(facing * 40.0, 0.0), true)
-			_gain_special(Content.P_SPECIAL_GAIN * 2.5)
+			_gain_special(Content.P_SPECIAL_GAIN * 2.5 + float(build.get("parry_special", 0.0)))
 			continue
 		if attack_kind != "melee" or not bool(area.get_meta("attack_active", false)):
 			continue
@@ -542,7 +597,7 @@ func _scan_parry() -> void:
 			_parry_hit[oid] = true
 			_parry_succeeded = true
 			emit_signal("parried", global_position + Vector2(facing * 40.0, 0.0), true)
-			_gain_special(Content.P_SPECIAL_GAIN * 2.5)
+			_gain_special(Content.P_SPECIAL_GAIN * 2.5 + float(build.get("parry_special", 0.0)))
 
 # --- Healing flask ---
 func _begin_heal() -> void:
@@ -589,7 +644,25 @@ func take_damage(amount: float, from_dir: Vector2, kb: float) -> void:
 		_scan_parry()
 		if _parry_hit.size() > parries_before:
 			return
-	build.hp = maxf(0.0, float(build.hp) - amount)
+	var new_hp := float(build.hp) - amount
+	if new_hp <= 0.0 and bool(build.get("second_wind", false)) and not bool(build.get("second_wind_used", false)):
+		# Second Wind: the flame refuses to go out, once.
+		build.second_wind_used = true
+		if _run_model: _run_model.build.second_wind_used = true
+		build.hp = float(build.max_hp) * Content.SECOND_WIND_HP_FRAC
+		if _run_model: _run_model.build.hp = build.hp
+		emit_signal("hp_changed", float(build.hp), float(build.max_hp))
+		_hurt_flash = 0.2
+		_flask_heal_flash = 0.6
+		iframes = 2.0
+		state = State.LOCOMOTION
+		velocity = Vector2(0.0, -420.0)
+		atk_phase = "none"
+		_deactivate_hitbox()
+		wall_sliding = false
+		emit_signal("action_feedback", "second_wind", global_position)
+		return
+	build.hp = maxf(0.0, new_hp)
 	if _run_model: _run_model.build.hp = build.hp
 	emit_signal("hp_changed", float(build.hp), float(build.max_hp))
 	_hurt_flash = 0.12
@@ -604,6 +677,25 @@ func take_damage(amount: float, from_dir: Vector2, kb: float) -> void:
 	atk_phase = "none"
 	_deactivate_hitbox()
 	wall_sliding = false
+	if float(build.get("thorns", 0.0)) > 0.0:
+		_thorns_burst()
+
+## Cinder Skin: a hit taken scorches everything standing close.
+func _thorns_burst() -> void:
+	var dmg := float(build.get("thorns", 0.0))
+	var hit_any := false
+	for area in get_tree().get_nodes_in_group("enemy_hurtbox"):
+		if not is_instance_valid(area): continue
+		var tgt = area.get_meta("owner")
+		if tgt == null or not is_instance_valid(tgt) or not tgt.has_method("take_damage"): continue
+		if bool(tgt.get("dead")): continue
+		if tgt.global_position.distance_to(global_position) <= Content.THORNS_RADIUS:
+			var dir: Vector2 = (tgt.global_position - global_position).normalized()
+			if dir == Vector2.ZERO: dir = Vector2(facing, 0.0)
+			tgt.take_damage(dmg, Vector2(dir.x, -0.3), 260.0)
+			hit_any = true
+	if hit_any:
+		emit_signal("action_feedback", "thorns", global_position)
 
 func _step_hurt(delta: float) -> void:
 	velocity.y += Content.GRAVITY * delta
@@ -666,66 +758,149 @@ func suppress_gameplay_input(frames: int = 2) -> void:
 	_input_lock_frames = maxi(_input_lock_frames, frames)
 
 # --- Drawing ---
+
+## Sword angle from the horizontal (positive = pointing down) for the current state.
+func _sword_angle(run_amount: float) -> float:
+	match state:
+		State.ATTACK:
+			var def: Dictionary = get_meta("atk_def", {})
+			if def.is_empty():
+				return 0.6
+			if atk_phase == "startup":
+				return lerpf(0.6, -1.5, 1.0 - atk_time / maxf(0.01, float(def.startup)))
+			if atk_phase == "active":
+				return lerpf(-_attack_arc * 0.5, _attack_arc * 0.5, 1.0 - atk_time / maxf(0.01, float(def.active)))
+			return lerpf(_attack_arc * 0.5 + 0.2, 0.6, 1.0 - atk_time / maxf(0.01, float(def.recover)))
+		State.SLAM: return 1.35
+		State.DASH: return 0.05
+		State.PARRY: return -1.35
+		State.HEAL: return 1.2
+		State.HURT: return -0.4
+		_:
+			if not is_on_floor():
+				return -0.25 if velocity.y < 0.0 else 0.9
+			return lerpf(0.6, 0.85, run_amount)
+
+## Sprite body: the authored pixel frames, pivoted on the feet so squash,
+## stretch and lean keep the knight planted.
+func _build_body() -> void:
+	_knight = Sprite2D.new()
+	_knight.name = "Body"
+	_knight.texture = KnightArt.texture()
+	_knight.region_enabled = true
+	_knight.region_rect = KnightArt.frame("idle0", 0)
+	_knight.centered = true
+	_knight.offset = Vector2(0.0, -KnightArt.frame_size().y * 0.5)
+	_knight.position = Vector2(0.0, Content.P_BODY_H * 0.5)
+	_knight.scale = Vector2(KnightArt.PX, KnightArt.PX)
+	_knight.texture_filter = CanvasItem.TEXTURE_FILTER_NEAREST
+	_knight.show_behind_parent = true
+	_knight_flash = ShaderMaterial.new()
+	_knight_flash.shader = VFX.flash_shader()
+	_knight.material = _knight_flash
+	add_child(_knight)
+	# The burning head: a child of the body so it inherits squash, lean and scale.
+	_flame = Sprite2D.new()
+	_flame.name = "Flame"
+	_flame.texture = KnightArt.flame_atlas()
+	_flame.region_enabled = true
+	_flame.region_rect = KnightArt.flame_rect(0)
+	_flame.centered = true
+	_flame.offset = Vector2(0.0, -KnightArt.FLAME_H * 0.5)
+	_flame.texture_filter = CanvasItem.TEXTURE_FILTER_NEAREST
+	_flame.use_parent_material = true
+	_flame.visible = not KnightArt.has_sheet()
+	_knight.add_child(_flame)
+
+## Which authored frame the current state shows.
+func pose_name(run_amount: float) -> String:
+	match state:
+		State.ATTACK: return KnightArt.attack_frame(_sword_angle(run_amount))
+		State.SLAM: return "slam"
+		State.DASH: return "dash"
+		State.PARRY: return "parry"
+		State.HEAL: return "heal"
+		State.HURT: return "hurt"
+	if not is_on_floor():
+		return "jump" if velocity.y < 0.0 else "fall"
+	if run_amount > 0.15:
+		return "run%d" % (int(_anim_time * 10.0) % 4)
+	return "idle%d" % (int(_anim_time * 1.6) % 2)
+
 func _draw() -> void:
 	var w := Content.P_BODY_W
 	var h := Content.P_BODY_H
 	var flicker := iframes > 0.0 and fmod(iframes, 0.12) < 0.06
-	var body_col: Color = Content.PAL.player if not flicker else Content.PAL.player_accent
-	if _hurt_flash > 0.0: body_col = Color.WHITE
-	if _flask_heal_flash > 0.0:
-		body_col = body_col.lerp(VFX.TEAL, 0.5)
-	# Contact shadow (shrinks and fades with air time), then the flame-headed silhouette.
-	VFX.draw_contact_shadow(self, Vector2(0.0, h * 0.5 + 1.0), 36.0, 8.0, clampf(_air_time / 0.3, 0.0, 1.0))
-	var run_amount := clampf(absf(velocity.x) / Content.P_SPEED, 0.0, 1.0)
-	var bob := sin(_anim_time * 14.0) * 1.5 * run_amount if is_on_floor() else 0.0
+	# Contact shadow (shrinks and fades with air time), then the knight.
+	var air := clampf(_air_time / 0.3, 0.0, 1.0)
+	VFX.draw_contact_shadow(self, Vector2(0.0, h * 0.5 + 1.0), 36.0, 8.0, air)
+	var run_amount := clampf(absf(velocity.x) / Content.P_SPEED, 0.0, 1.0) if is_on_floor() else 0.0
 	var lean := clampf(velocity.x / 1800.0, -0.12, 0.12)
-	draw_set_transform(Vector2(0.0, bob), lean, Vector2.ONE)
-	# Tattered scarf/cape trails opposite the facing direction.
-	draw_colored_polygon(PackedVector2Array([
-		Vector2(-facing * 7.0, -h * 0.3),
-		Vector2(-facing * (25.0 + run_amount * 9.0), -h * 0.08),
-		Vector2(-facing * 12.0, h * 0.24),
-	]), Color("c94a28"))
-	# Boots and legs.
-	draw_line(Vector2(-7.0, h * 0.12), Vector2(-8.0 - facing * run_amount * 4.0, h * 0.48), Color("17131f"), 8.0, true)
-	draw_line(Vector2(7.0, h * 0.12), Vector2(8.0 + facing * run_amount * 4.0, h * 0.48), Color("221a2c"), 8.0, true)
-	# Asymmetric coat with a bright Graveflame sash.
-	var coat := PackedVector2Array([
-		Vector2(-w * 0.48, -h * 0.28), Vector2(w * 0.42, -h * 0.32),
-		Vector2(w * 0.52, h * 0.24), Vector2(0.0, h * 0.36),
-		Vector2(-w * 0.56, h * 0.20),
-	])
-	VFX.draw_shaded_polygon(self, coat, body_col, _hurt_flash <= 0.0)
-	VFX.draw_rim(self, coat, facing, 1.25 if _flame_time > 0.0 else 1.0)
-	draw_line(Vector2(-facing * 7.0, -h * 0.24), Vector2(facing * 8.0, h * 0.24), Content.PAL.player_accent, 4.0, true)
-	# Dark mask under an animated, entirely procedural flame crown.
-	var head_pos := Vector2(0.0, -h * 0.52)
-	draw_circle(head_pos, w * 0.40, Color("211828"))
-	VFX.draw_rim_circle(self, head_pos, w * 0.40, facing, 0.9)
-	var flame_col := Color("ff7a18") if _flame_time <= 0.0 else VFX.GOLD
-	for i in range(4):
-		var fx := -9.0 + float(i) * 6.0
-		var tip := 9.0 + sin(_anim_time * 10.0 + float(i) * 1.7) * 4.0
-		draw_colored_polygon(PackedVector2Array([
-			head_pos + Vector2(fx - 4.0, -4.0),
-			head_pos + Vector2(fx, -tip - 7.0),
-			head_pos + Vector2(fx + 4.0, -3.0),
-		]), flame_col)
-	draw_circle(head_pos + Vector2(facing * 4.0, -1.0), 2.8, Color("ffe8a3"))
-	# Sword silhouette reads even when no attack arc is active.
-	draw_line(Vector2(facing * 10.0, -4.0), Vector2(facing * 25.0, 13.0), Color("aab4c4"), 3.0, true)
-	draw_line(Vector2(facing * 7.0, 0.0), Vector2(facing * 14.0, -7.0), Color("f0b45a"), 3.0, true)
-	draw_set_transform(Vector2.ZERO, 0.0, Vector2.ONE)
-	if _flame_time > 0.0:
+	var sc := Vector2.ONE
+	match state:
+		State.DASH: sc = Vector2(1.18, 0.88)
+		State.ATTACK: lean += facing * 0.08
+		State.HURT: lean -= facing * 0.18
+		_:
+			if not is_on_floor():
+				if velocity.y < -200.0: sc = Vector2(0.94, 1.07)
+				elif velocity.y > 400.0: sc = Vector2(0.96, 1.05)
+	if _land_squash > 0.0:
+		var k := _land_squash / 0.12
+		sc = Vector2(1.0 + 0.16 * k, 1.0 - 0.16 * k)
+	var flame := _flame_time > 0.0
+	if _knight != null:
+		var pose := pose_name(run_amount)
+		var tick := int(_anim_time * (14.0 if flame else 9.0))
+		_knight.region_rect = KnightArt.frame(pose, tick)
+		_knight.flip_h = facing < 0.0
+		# Fire: 4-frame flicker, faster and larger when the Graveflame is lit.
+		var anchor := KnightArt.flame_anchor(pose)
+		var fsz := KnightArt.frame_size()
+		var local := Vector2(float(anchor.x) - fsz.x * 0.5, float(anchor.y) - fsz.y)
+		if facing < 0.0:
+			local.x = -local.x
+		_flame.position = local
+		_flame.flip_h = facing < 0.0
+		_flame.region_rect = KnightArt.flame_rect(tick)
+		var fs := (1.35 if flame else 1.0) * (1.0 + air * 0.15)
+		_flame.scale = Vector2(fs, fs)
+		_flame.modulate = Color(1.25, 1.15, 1.05) if flame else Color.WHITE
+		_knight.scale = Vector2(KnightArt.PX * sc.x, KnightArt.PX * sc.y)
+		_knight.rotation = lean
+		_knight_flash.set_shader_parameter("flash", 1.0 if _hurt_flash > 0.0 else 0.0)
+		var tint := Color.WHITE
+		if flicker:
+			tint = Color(1.0, 0.8, 0.6, 0.55)
+		if _flask_heal_flash > 0.0:
+			tint = tint.lerp(VFX.TEAL, 0.45)
+		if KnightArt.has_sheet() and flame:
+			tint = tint * Color(1.2, 1.1, 1.0)
+		_knight.modulate = tint
+	if state == State.DASH:
+		# Speed lines behind the dash.
+		for i in range(3):
+			var y := -h * 0.3 + float(i) * h * 0.25
+			draw_line(Vector2(-facing * 18.0, y), Vector2(-facing * (46.0 + float(i) * 10.0), y), Color(VFX.HOT, 0.35 - float(i) * 0.08), 2.0)
+	if flame:
 		var aura_alpha := 0.10 + sin(_anim_time * 8.0) * 0.035
 		draw_circle(Vector2(0.0, -8.0), 34.0, Color(1.0, 0.3, 0.05, aura_alpha))
 		draw_arc(Vector2(0.0, -8.0), 30.0, 0.0, TAU, 32, Color(1.0, 0.55, 0.1, 0.45), 2.0)
+	if _momentum_stacks > 0:
+		# Momentum: one orbiting ember per stack, tighter and brighter as it grows.
+		var stack_t := _momentum_t / Content.MOMENTUM_TIME
+		for i in range(_momentum_stacks):
+			var ang := _anim_time * 5.0 + float(i) * TAU / float(_momentum_stacks)
+			var orbit := Vector2(cos(ang) * 24.0, -10.0 + sin(ang) * 9.0)
+			VFX.draw_ember_dot(self, orbit, 2.4, VFX.GOLD, 0.5 + 0.5 * stack_t)
 	if state == State.HEAL:
 		var heal_progress := clampf(1.0 - _heal_time / Content.P_HEAL_TIME, 0.0, 1.0)
 		draw_arc(Vector2.ZERO, 33.0, -PI * 0.5, -PI * 0.5 + TAU * heal_progress, 32, VFX.TEAL, 4.0)
+		var fpos := Vector2(-facing * 14.0, -h * 0.2)
+		draw_rect(Rect2(fpos.x - 4.0, fpos.y - 4.0, 8.0, 10.0), Color(VFX.TEAL, 0.8))
+		draw_rect(Rect2(fpos.x - 2.0, fpos.y - 8.0, 4.0, 4.0), Color("8a6a3a"))
 	# attack arc
 	if _draw_attack:
-		# Faint fan over the live hit area plus the white-gold-ember blade ribbon.
 		var origin := Vector2(facing * 8.0, -8.0)
 		_draw_arc(origin, _attack_range, _attack_arc, facing, Color(VFX.GOLD, 0.4), 1.0)
 		VFX.slash_ribbon(self, origin, _attack_range, _attack_arc, facing, 1.0, 11.0, 1.0)
@@ -739,14 +914,14 @@ func _draw() -> void:
 	# slam descent trail
 	if _slam_active:
 		draw_line(Vector2(0, 0), Vector2(0, 40), Color(1.0, 0.8, 0.3, 0.5), 3.0)
+		for i in range(3):
+			VFX.draw_flame(self, Vector2(-6.0 + float(i) * 6.0, -h * 0.3), 18.0, 6.0, _anim_time, float(i) * 2.0, Color(VFX.ORANGE, 0.6), Color(VFX.GOLD, 0.5))
 	# parry shield arc
 	if _draw_parry > 0.0:
 		var pw: float = Content.PARRY_RANGE
 		var t: float = clampf(_draw_parry / Content.PARRY_WINDOW, 0.0, 1.0)
 		var col := VFX.TEAL if t > 0.3 else VFX.GOLD
-		# crescent in front
 		_draw_arc(Vector2(facing * 8.0, 0.0), pw * 0.9, 2.4, facing, col, 5.0)
-		# glow
 		draw_circle(Vector2(facing * pw * 0.4, 0.0), pw * 0.3, Color(col.r, col.g, col.b, 0.15 * t))
 	# wall slide dust indicator
 	if wall_sliding:

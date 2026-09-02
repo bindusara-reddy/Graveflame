@@ -8,6 +8,7 @@ var route: Array = []             # array of template dictionaries
 var room_index: int = -1
 var build: Dictionary = {}
 var offered: Dictionary = {}      # upgrade ids already offered (to reduce repeats)
+var taken: Dictionary = {}        # upgrade ids applied this run (unique boons leave the pool)
 var rooms_cleared: int = 0
 
 func _init(s: int = 0) -> void:
@@ -17,8 +18,8 @@ func _init(s: int = 0) -> void:
 	_reset_build()
 	generate_route()
 
-func _reset_build() -> void:
-	build = {
+static func base_build() -> Dictionary:
+	return {
 		"max_hp": Content.P_MAX_HP,
 		"hp": Content.P_MAX_HP,
 		"speed_mul": 1.0,
@@ -36,17 +37,30 @@ func _reset_build() -> void:
 		"dash_cd_mul": 1.0,
 		"dash_iframes_bonus": 0.0,
 		"special_start": 0.0,
+		# --- Synergy boons ---
+		"parry_special": 0.0,
+		"burn_bonus_dps": 0.0,
+		"burn_bonus_time": 0.0,
+		"momentum": 0.0,
+		"bloodrush": 0.0,
+		"second_wind": false,
+		"second_wind_used": false,
+		"execute_bonus": 0.0,
+		"pyre_dmg": 0.0,
+		"finisher_wave": false,
+		"thorns": 0.0,
 	}
+
+func _reset_build() -> void:
+	build = base_build()
 
 func generate_route() -> void:
 	route.clear()
 	# Intro room first, then shuffled combat rooms, then boss.
-	var combat: Array = []
-	var tags: Array = ["gap", "tiers", "arena", "platforms"]
-	# Deterministic shuffle of combat templates by tag.
 	var pool: Array = Content.ROOM_TEMPLATES.duplicate()
 	pool = pool.filter(func(t): return t.tag != "intro")
-	# pick ROOMS_BEFORE_BOSS combat rooms, shuffled, allowing repeats if fewer exist.
+	# pick ROOMS_BEFORE_BOSS combat rooms, shuffled, allowing repeats only once
+	# every template has been used.
 	var order: Array = []
 	var idxs: Array = range(pool.size())
 	for i in range(Content.ROOMS_BEFORE_BOSS):
@@ -55,7 +69,6 @@ func generate_route() -> void:
 		idxs.remove_at(pick)
 		if idxs.is_empty():
 			idxs = range(pool.size())
-	# Always start with intro
 	route.append(Content.ROOM_TEMPLATES[0])
 	for o in order:
 		route.append(pool[o])
@@ -79,29 +92,41 @@ func advance_to_next_room() -> Dictionary:
 func room_cleared() -> void:
 	rooms_cleared += 1
 
-## Offer UPGRADES_PER_OFFER distinct upgrades, biased away from already-offered ones.
-func roll_upgrades() -> Array:
-	var avail: Array = Content.UPGRADES.duplicate()
-	# Fisher-Yates shuffle first (deterministic given rng)
-	for i in range(avail.size() - 1, 0, -1):
-		var j := rng.randi_range(0, i)
-		var tmp = avail[i]
-		avail[i] = avail[j]
-		avail[j] = tmp
-	# stable sort: not-yet-offered first
-	avail.sort_custom(func(a, b):
-		var ao: int = int(offered.get(a.id, 0))
-		var bo: int = int(offered.get(b.id, 0))
-		return ao < bo
+## Boons still eligible for an offer: unique boons already taken leave the pool.
+func available_upgrades() -> Array:
+	return Content.UPGRADES.filter(func(u):
+		return not (bool(u.get("unique", false)) and taken.has(u.id))
 	)
+
+## Offer UPGRADES_PER_OFFER distinct upgrades. Rarity weights the draw, and boons
+## offered earlier in the run are down-weighted so choices keep feeling fresh.
+func roll_upgrades() -> Array:
+	var avail: Array = available_upgrades()
 	var out: Array = []
 	for i in range(mini(Content.UPGRADES_PER_OFFER, avail.size())):
-		var u: Dictionary = avail[i].duplicate()
+		var total := 0.0
+		var weights: Array = []
+		for u in avail:
+			var w := float(Content.RARITY_WEIGHTS.get(Content.upgrade_rarity(u), 30.0))
+			w /= 1.0 + 1.5 * float(offered.get(u.id, 0))
+			weights.append(w)
+			total += w
+		var roll := rng.randf() * total
+		var pick := avail.size() - 1
+		for j in range(avail.size()):
+			roll -= float(weights[j])
+			if roll <= 0.0:
+				pick = j
+				break
+		var u: Dictionary = avail[pick].duplicate()
 		out.append(u)
 		offered[u.id] = int(offered.get(u.id, 0)) + 1
+		avail.remove_at(pick)
 	return out
 
 func apply_upgrade(u: Dictionary) -> void:
+	if u.has("id"):
+		taken[u.id] = int(taken.get(u.id, 0)) + 1
 	match u.kind:
 		"max_hp":
 			build.max_hp += u.value
@@ -136,6 +161,26 @@ func apply_upgrade(u: Dictionary) -> void:
 			build.dash_iframes_bonus += 0.12
 		"special_start":
 			build.special_start = maxf(build.special_start, u.value)
+		"parry_special":
+			build.parry_special += u.value
+		"burn":
+			build.burn_bonus_dps += u.value
+			build.burn_bonus_time += 2.0
+		"momentum":
+			build.momentum += u.value
+		"bloodrush":
+			build.bloodrush += u.value
+		"second_wind":
+			build.second_wind = true
+			build.second_wind_used = false
+		"execute":
+			build.execute_bonus += u.value
+		"pyre":
+			build.pyre_dmg += u.value
+		"finisher_wave":
+			build.finisher_wave = true
+		"thorns":
+			build.thorns += u.value
 
 func is_dead() -> bool:
 	return build.hp <= 0.0
@@ -147,5 +192,6 @@ func reset_run(new_seed: int) -> void:
 	room_index = -1
 	rooms_cleared = 0
 	offered.clear()
+	taken.clear()
 	_reset_build()
 	generate_route()

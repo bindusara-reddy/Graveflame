@@ -58,6 +58,7 @@ func _ready() -> void:
 	monitorable = true
 	_update_layers()
 	_build_trail()
+	material = VFX.unshaded_material()
 
 ## Comet ribbon: world-space points appended every physics tick and aged out.
 func _build_trail() -> void:

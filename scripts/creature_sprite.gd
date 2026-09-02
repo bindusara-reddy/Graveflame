@@ -14,12 +14,17 @@ const DEATH_FADE := 0.45
 
 static var _manifest: Dictionary = {}
 static var _textures: Dictionary = {}
+## Mood tint applied to every creature. Sprites are unshaded so enemies always
+## read, and this keeps them sitting in the room's light instead of popping out.
+static var tint := Color.WHITE
 
 var creature := "stalker"
 var foot_y := 0.0                    ## local y where the manifest feet row must sit
 var under: Node2D                    ## companion node (shadow pass) to redraw with us
 var creature_provider: Callable      ## optional: sheet family for this frame (boss phases)
 var active_time_provider: Callable   ## optional: seconds the owner's ATTACK state lasts
+var size_mul := 1.0                  ## elite scale on top of SHEET_SCALE
+var elite_tint := Color.WHITE        ## gilding for elites, multiplied with the mood tint
 var _sheet := ""
 var _idle_t := 0.0
 var _stagger_total := 0.18
@@ -117,11 +122,12 @@ func _process(delta: float) -> void:
 			_stagger_total = maxf(0.01, float(p.get("stagger_t")))
 		_last_state = st
 	flip_h = float(p.get("facing")) < 0.0
+	self_modulate = tint * elite_tint
 	var pop := 1.0
 	var spawn := float(p.get("_spawn_anim"))
 	if spawn > 0.0:
 		pop = 1.0 - spawn / 0.4
-	scale = Vector2(SHEET_SCALE * pop, SHEET_SCALE * pop)
+	scale = Vector2(SHEET_SCALE * pop * size_mul, SHEET_SCALE * pop * size_mul)
 	_flash_material.set_shader_parameter("flash", 1.0 if float(p.get("_hurt_flash")) > 0.0 else 0.0)
 	var data: Dictionary = p.get("data")
 	var st_timer := float(p.get("st_timer"))
@@ -173,7 +179,8 @@ func _on_owner_died(_score: int = 0) -> void:
 	corpse.hframes = maxi(1, int(info.get("frames", 1)))
 	corpse.frame = 0
 	corpse.flip_h = flip_h
-	corpse.scale = Vector2(SHEET_SCALE, SHEET_SCALE)
+	corpse.scale = Vector2(SHEET_SCALE * size_mul, SHEET_SCALE * size_mul)
+	corpse.self_modulate = self_modulate
 	corpse.offset = feet_offset(info, foot_y)
 	host.add_child(corpse)
 	corpse.global_position = p.global_position

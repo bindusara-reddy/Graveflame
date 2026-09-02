@@ -3,6 +3,7 @@ extends CanvasLayer
 ## Responsive HUD and atmospheric screen overlays, built with Godot-native controls.
 
 const VFX := preload("res://scripts/vfx.gd")
+const KnightArt := preload("res://scripts/knight_art.gd")
 
 signal start_requested
 signal resume_requested
@@ -50,6 +51,18 @@ var _best_label: Label
 var _room_clear_banner: Control
 var _room_clear_name: Label
 
+var _streak_panel: PanelContainer
+var _streak_kills_label: Label
+var _streak_mult_label: Label
+var _streak_bar: ProgressBar
+var _streak_tier := 0
+var _streak_tween: Tween
+
+var _room_intro: Dictionary = {}
+var _boss_intro: Dictionary = {}
+var _fade: ColorRect
+var _music_check: CheckBox
+
 var _panels: Dictionary = {}
 var _upgrade_row: HBoxContainer
 var _forge_rows: VBoxContainer
@@ -58,6 +71,7 @@ var _reduced_flash_check: CheckBox
 
 var _title_top_label: Label
 var _title_embers: CPUParticles2D
+var _title_masonry: Control
 var _title_t := 0.0
 
 
@@ -69,6 +83,14 @@ func _ready() -> void:
 	_root.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	add_child(_root)
 	_root.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+
+	# Rift transition veil: sits under the HUD and every screen, above the world.
+	_fade = ColorRect.new()
+	_fade.name = "RiftFade"
+	_fade.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_fade.color = Color(C_VOID, 0.0)
+	_root.add_child(_fade)
+	_fade.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 
 	_build_hud()
 	_build_title()
@@ -92,24 +114,107 @@ func _build_hud() -> void:
 	_hud.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 
 	_build_player_status()
+	_build_streak_meter()
 	_build_run_status()
 	_build_boss_status()
 	_build_room_clear_banner()
+	_room_intro = _build_banner("RoomIntro", 176.0, 258.0, Vector2(420, 70), 26, 11, C_EMBER, Color("14101ceb"))
+	_boss_intro = _build_banner("BossIntro", 236.0, 372.0, Vector2(620, 118), 40, 14, C_RED, Color("1a0c11f0"))
+
+
+func _build_streak_meter() -> void:
+	_streak_panel = PanelContainer.new()
+	_streak_panel.name = "StreakMeter"
+	_streak_panel.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_streak_panel.add_theme_stylebox_override("panel", _panel_box(Color("1b1624d9"), Color("715026"), 10, 1, 8))
+	_hud.add_child(_streak_panel)
+	_streak_panel.set_anchors_and_offsets_preset(Control.PRESET_TOP_LEFT)
+	_streak_panel.offset_left = 16.0
+	_streak_panel.offset_top = 122.0
+	_streak_panel.offset_right = 216.0
+	_streak_panel.offset_bottom = 166.0
+	_streak_panel.pivot_offset = Vector2(0.0, 25.0)
+	var margin := _margin_container(14, 14, 8, 8)
+	margin.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_streak_panel.add_child(margin)
+	var stack := VBoxContainer.new()
+	stack.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	stack.add_theme_constant_override("separation", 3)
+	margin.add_child(stack)
+	var head := HBoxContainer.new()
+	head.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	stack.add_child(head)
+	head.add_child(_make_label("STREAK", 11, C_MUTED, HorizontalAlignment.HORIZONTAL_ALIGNMENT_LEFT))
+	_streak_kills_label = _make_label("2 KILLS", 13, C_TEXT, HorizontalAlignment.HORIZONTAL_ALIGNMENT_CENTER)
+	head.add_child(_streak_kills_label)
+	_streak_mult_label = _make_label("x1.25", 15, C_GOLD, HorizontalAlignment.HORIZONTAL_ALIGNMENT_RIGHT)
+	head.add_child(_streak_mult_label)
+	_streak_bar = _make_bar(C_GOLD, Color("3a2c14"), 6.0)
+	_streak_bar.max_value = 100.0
+	_streak_bar.value = 100.0
+	stack.add_child(_streak_bar)
+	_streak_panel.visible = false
+
+
+## Fading title card used for room entries and the boss reveal.
+func _build_banner(node_name: String, top: float, bottom: float, minimum: Vector2, title_size: int, sub_size: int, accent: Color, background: Color) -> Dictionary:
+	var center := CenterContainer.new()
+	center.name = node_name
+	center.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_hud.add_child(center)
+	center.set_anchors_and_offsets_preset(Control.PRESET_TOP_WIDE)
+	center.offset_top = top
+	center.offset_bottom = bottom
+	var panel := PanelContainer.new()
+	panel.custom_minimum_size = minimum
+	panel.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	panel.add_theme_stylebox_override("panel", _panel_box(background, accent, 10, 1, 12))
+	center.add_child(panel)
+	var margin := _margin_container(28, 28, 10, 10)
+	margin.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	panel.add_child(margin)
+	var stack := VBoxContainer.new()
+	stack.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	stack.add_theme_constant_override("separation", 1)
+	margin.add_child(stack)
+	var sub := _make_label("", sub_size, C_MUTED, HorizontalAlignment.HORIZONTAL_ALIGNMENT_CENTER)
+	stack.add_child(sub)
+	var title := _make_label("", title_size, accent, HorizontalAlignment.HORIZONTAL_ALIGNMENT_CENTER)
+	stack.add_child(title)
+	center.visible = false
+	return { "root": center, "title": title, "sub": sub, "tween": null }
+
+
+func _play_banner(banner: Dictionary, title: String, subtitle: String, hold: float) -> void:
+	var root: Control = banner.root
+	(banner.title as Label).text = title
+	(banner.sub as Label).text = subtitle
+	if banner.tween != null and is_instance_valid(banner.tween):
+		(banner.tween as Tween).kill()
+	root.visible = true
+	root.modulate = Color(1.0, 1.0, 1.0, 0.0)
+	var tween := create_tween()
+	tween.set_pause_mode(Tween.TWEEN_PAUSE_PROCESS)
+	tween.tween_property(root, "modulate:a", 1.0, 0.22)
+	tween.tween_interval(hold)
+	tween.tween_property(root, "modulate:a", 0.0, 0.55)
+	tween.tween_callback(func(): root.visible = false)
+	banner.tween = tween
 
 
 func _build_player_status() -> void:
 	var panel := PanelContainer.new()
 	panel.name = "PlayerStatus"
 	panel.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	panel.add_theme_stylebox_override("panel", _panel_box(Color("1b1624d9"), C_EDGE, 12, 1, 10))
+	panel.add_theme_stylebox_override("panel", _panel_box(Color("100c16b8"), Color("3a3048"), 8, 1, 6))
 	_hud.add_child(panel)
 	panel.set_anchors_and_offsets_preset(Control.PRESET_TOP_LEFT)
-	panel.offset_left = 20.0
-	panel.offset_top = 18.0
-	panel.offset_right = 386.0
-	panel.offset_bottom = 164.0
+	panel.offset_left = 16.0
+	panel.offset_top = 14.0
+	panel.offset_right = 296.0
+	panel.offset_bottom = 112.0
 
-	var margin := _margin_container(18, 18, 14, 14)
+	var margin := _margin_container(12, 12, 8, 8)
 	margin.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	panel.add_child(margin)
 	var stack := VBoxContainer.new()
@@ -120,10 +225,10 @@ func _build_player_status() -> void:
 	var hp_head := HBoxContainer.new()
 	hp_head.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	stack.add_child(hp_head)
-	hp_head.add_child(_make_label("VITALITY", 12, C_MUTED, HorizontalAlignment.HORIZONTAL_ALIGNMENT_LEFT))
-	_hp_value_label = _make_label("100 / 100", 13, C_TEXT, HorizontalAlignment.HORIZONTAL_ALIGNMENT_RIGHT)
+	hp_head.add_child(_make_label("VITALITY", 10, C_MUTED, HorizontalAlignment.HORIZONTAL_ALIGNMENT_LEFT))
+	_hp_value_label = _make_label("100 / 100", 11, C_TEXT, HorizontalAlignment.HORIZONTAL_ALIGNMENT_RIGHT)
 	hp_head.add_child(_hp_value_label)
-	_hp_bar = _make_bar(C_RED, Color("4a1820"), 18.0)
+	_hp_bar = _make_bar(C_RED, Color("4a1820"), 12.0)
 	_hp_bar.max_value = 100.0
 	_hp_bar.value = 100.0
 	stack.add_child(_hp_bar)
@@ -131,10 +236,10 @@ func _build_player_status() -> void:
 	var sp_head := HBoxContainer.new()
 	sp_head.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	stack.add_child(sp_head)
-	sp_head.add_child(_make_label("GRAVEFLAME", 11, C_MUTED, HorizontalAlignment.HORIZONTAL_ALIGNMENT_LEFT))
-	_special_value_label = _make_label("0 / 100", 12, C_BLUE, HorizontalAlignment.HORIZONTAL_ALIGNMENT_RIGHT)
+	sp_head.add_child(_make_label("GRAVEFLAME", 10, C_MUTED, HorizontalAlignment.HORIZONTAL_ALIGNMENT_LEFT))
+	_special_value_label = _make_label("0 / 100", 10, C_BLUE, HorizontalAlignment.HORIZONTAL_ALIGNMENT_RIGHT)
 	sp_head.add_child(_special_value_label)
-	_special_bar = _make_bar(C_BLUE, Color("153243"), 10.0)
+	_special_bar = _make_bar(C_BLUE, Color("153243"), 7.0)
 	_special_bar.max_value = 100.0
 	_special_bar.value = 0.0
 	stack.add_child(_special_bar)
@@ -143,7 +248,7 @@ func _build_player_status() -> void:
 	supplies.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	supplies.add_theme_constant_override("separation", 8)
 	stack.add_child(supplies)
-	var flask_tag := _make_label("FLASK", 11, C_MUTED, HorizontalAlignment.HORIZONTAL_ALIGNMENT_LEFT)
+	var flask_tag := _make_label("FLASK", 10, C_MUTED, HorizontalAlignment.HORIZONTAL_ALIGNMENT_LEFT)
 	flask_tag.size_flags_horizontal = Control.SIZE_SHRINK_BEGIN
 	supplies.add_child(flask_tag)
 	_flask_container = HBoxContainer.new()
@@ -151,7 +256,7 @@ func _build_player_status() -> void:
 	_flask_container.add_theme_constant_override("separation", 5)
 	_flask_container.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	supplies.add_child(_flask_container)
-	_flask_count_label = _make_label("3 / 3  [F]", 11, C_MINT, HorizontalAlignment.HORIZONTAL_ALIGNMENT_RIGHT)
+	_flask_count_label = _make_label("3 / 3  [F]", 10, C_MINT, HorizontalAlignment.HORIZONTAL_ALIGNMENT_RIGHT)
 	_flask_count_label.size_flags_horizontal = Control.SIZE_SHRINK_END
 	supplies.add_child(_flask_count_label)
 	_rebuild_flask_dots(Content.FLASK_MAX)
@@ -161,15 +266,15 @@ func _build_run_status() -> void:
 	var panel := PanelContainer.new()
 	panel.name = "RunStatus"
 	panel.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	panel.add_theme_stylebox_override("panel", _panel_box(Color("1b1624d9"), C_EDGE, 12, 1, 10))
+	panel.add_theme_stylebox_override("panel", _panel_box(Color("100c16b8"), Color("3a3048"), 8, 1, 6))
 	_hud.add_child(panel)
 	panel.set_anchors_and_offsets_preset(Control.PRESET_TOP_RIGHT)
-	panel.offset_left = -276.0
-	panel.offset_top = 18.0
-	panel.offset_right = -20.0
-	panel.offset_bottom = 154.0
+	panel.offset_left = -226.0
+	panel.offset_top = 14.0
+	panel.offset_right = -16.0
+	panel.offset_bottom = 112.0
 
-	var margin := _margin_container(18, 18, 14, 14)
+	var margin := _margin_container(12, 12, 8, 8)
 	margin.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	panel.add_child(margin)
 	var stack := VBoxContainer.new()
@@ -177,7 +282,7 @@ func _build_run_status() -> void:
 	stack.add_theme_constant_override("separation", 4)
 	margin.add_child(stack)
 
-	_room_label = _make_label("ROOM 01 / 06", 15, C_EMBER_HI, HorizontalAlignment.HORIZONTAL_ALIGNMENT_RIGHT)
+	_room_label = _make_label("ROOM 01 / 06", 12, C_EMBER_HI, HorizontalAlignment.HORIZONTAL_ALIGNMENT_RIGHT)
 	stack.add_child(_room_label)
 	stack.add_child(_separator(C_EDGE))
 	_score_label = _make_stat_line(stack, "RUN SCORE", "0", C_TEXT)
@@ -304,8 +409,8 @@ func _build_title() -> void:
 
 func _build_pause() -> void:
 	var panel := _screen("pause", false, C_BLUE)
-	var content := _dialog(panel, Vector2(640, 560), C_BLUE, 48, 40)
-	content.add_theme_constant_override("separation", 12)
+	var content := _dialog(panel, Vector2(640, 600), C_BLUE, 48, 32)
+	content.add_theme_constant_override("separation", 10)
 
 	content.add_child(_make_label("RUN SUSPENDED", 13, C_BLUE, HorizontalAlignment.HORIZONTAL_ALIGNMENT_CENTER))
 	content.add_child(_make_label("PAUSED", 54, C_TEXT, HorizontalAlignment.HORIZONTAL_ALIGNMENT_CENTER))
@@ -338,6 +443,11 @@ func _build_pause() -> void:
 	options.add_child(_reduced_flash_check)
 	_reduced_motion_check.toggled.connect(func(value: bool): emit_signal("option_toggled", "reduced_motion", value))
 	_reduced_flash_check.toggled.connect(func(value: bool): emit_signal("option_toggled", "reduced_flash", value))
+	options.add_child(_make_label("SOUND", 12, C_EMBER_HI, HorizontalAlignment.HORIZONTAL_ALIGNMENT_LEFT))
+	_music_check = _check("Music", "Procedural ambient score and boss theme.")
+	_music_check.button_pressed = true
+	options.add_child(_music_check)
+	_music_check.toggled.connect(func(value: bool): emit_signal("option_toggled", "music", value))
 
 	content.add_child(_make_label("ESC  resume", 12, C_MUTED, HorizontalAlignment.HORIZONTAL_ALIGNMENT_CENTER))
 
@@ -367,8 +477,8 @@ func _build_reward() -> void:
 
 func _build_game_over() -> void:
 	var panel := _screen("gameover", true, C_RED)
-	var content := _dialog(panel, Vector2(700, 500), C_RED, 52, 44)
-	content.add_theme_constant_override("separation", 14)
+	var content := _dialog(panel, Vector2(760, 520), C_RED, 48, 30)
+	content.add_theme_constant_override("separation", 10)
 
 	content.add_child(_make_label("RUN ENDED", 13, C_RED, HorizontalAlignment.HORIZONTAL_ALIGNMENT_CENTER))
 	content.add_child(_make_label("THE FLAME FADES", 54, C_TEXT, HorizontalAlignment.HORIZONTAL_ALIGNMENT_CENTER))
@@ -378,6 +488,7 @@ func _build_game_over() -> void:
 	cells.visible = false
 	content.add_child(cells)
 	panel.set_meta("cells_label", cells)
+	_build_summary(content, panel, Color("75414b"))
 	content.add_child(_make_label("Return stronger, or descend again while the embers are warm.", 14, C_MUTED, HorizontalAlignment.HORIZONTAL_ALIGNMENT_CENTER))
 
 	var actions := HBoxContainer.new()
@@ -394,8 +505,8 @@ func _build_game_over() -> void:
 
 func _build_victory() -> void:
 	var panel := _screen("victory", true, C_MINT)
-	var content := _dialog(panel, Vector2(720, 520), C_MINT, 52, 44)
-	content.add_theme_constant_override("separation", 14)
+	var content := _dialog(panel, Vector2(760, 540), C_MINT, 48, 30)
+	content.add_theme_constant_override("separation", 10)
 
 	content.add_child(_make_label("WARDEN DEFEATED", 13, C_MINT, HorizontalAlignment.HORIZONTAL_ALIGNMENT_CENTER))
 	content.add_child(_make_label("GRAVEFLAME ENDURES", 50, C_TEXT, HorizontalAlignment.HORIZONTAL_ALIGNMENT_CENTER))
@@ -405,6 +516,7 @@ func _build_victory() -> void:
 	cells.visible = false
 	content.add_child(cells)
 	panel.set_meta("cells_label", cells)
+	_build_summary(content, panel, Color("1f5b52"))
 	content.add_child(_make_label("A brighter ember waits at the beginning.", 14, C_MUTED, HorizontalAlignment.HORIZONTAL_ALIGNMENT_CENTER))
 
 	var actions := HBoxContainer.new()
@@ -417,6 +529,37 @@ func _build_victory() -> void:
 	var title := _button("RETURN TO TITLE", "title", false, Vector2(230, 56))
 	title.pressed.connect(func(): emit_signal("quit_to_title_requested"))
 	actions.add_child(title)
+
+
+## Six run statistics in a compact grid; filled by show_run_summary.
+func _build_summary(content: VBoxContainer, panel: Control, edge: Color) -> void:
+	var grid := GridContainer.new()
+	grid.name = "RunSummary"
+	grid.columns = 3
+	grid.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	grid.add_theme_constant_override("h_separation", 8)
+	grid.add_theme_constant_override("v_separation", 8)
+	content.add_child(grid)
+	var labels := {}
+	for entry in [["time", "TIME"], ["kills", "KILLS"], ["elites", "ELITES"], ["streak", "BEST STREAK"], ["damage", "DAMAGE DEALT"], ["rooms", "CHAMBERS"]]:
+		var tile := PanelContainer.new()
+		tile.custom_minimum_size = Vector2(0, 52)
+		tile.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		tile.mouse_filter = Control.MOUSE_FILTER_IGNORE
+		tile.add_theme_stylebox_override("panel", _panel_box(C_INK, edge, 8, 1, 0))
+		grid.add_child(tile)
+		var margin := _margin_container(10, 10, 4, 4)
+		margin.mouse_filter = Control.MOUSE_FILTER_IGNORE
+		tile.add_child(margin)
+		var stack := VBoxContainer.new()
+		stack.mouse_filter = Control.MOUSE_FILTER_IGNORE
+		stack.add_theme_constant_override("separation", 0)
+		margin.add_child(stack)
+		stack.add_child(_make_label(entry[1], 10, C_MUTED, HorizontalAlignment.HORIZONTAL_ALIGNMENT_CENTER))
+		var value := _make_label("-", 17, C_TEXT, HorizontalAlignment.HORIZONTAL_ALIGNMENT_CENTER)
+		stack.add_child(value)
+		labels[entry[0]] = value
+	panel.set_meta("summary_labels", labels)
 
 
 func _build_forge() -> void:
@@ -485,6 +628,7 @@ func _build_title_scene(panel: Control) -> void:
 	masonry.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	masonry.draw.connect(_draw_title_masonry.bind(masonry))
 	masonry.resized.connect(masonry.queue_redraw)
+	_title_masonry = masonry
 
 	_title_embers = CPUParticles2D.new()
 	_title_embers.name = "TitleEmbers"
@@ -534,6 +678,17 @@ func _draw_title_masonry(ci: Control) -> void:
 	var s := ci.size
 	if s.x <= 0.0 or s.y <= 0.0:
 		return
+	var still := Feedback.motion_reduced
+	var t := 0.0 if still else _title_t
+	# A cold moon high on the left, behind everything.
+	var moon := Vector2(s.x * 0.075, s.y * 0.15)
+	for i in range(5, 0, -1):
+		ci.draw_circle(moon, 62.0 + float(i) * 30.0, Color("c9d2ee", 0.014 * float(6 - i)))
+	ci.draw_circle(moon, 62.0, Color("c9d2ee", 0.9))
+	for i in range(5):
+		var off := Vector2(VFX.hash01(i, 61) - 0.5, VFX.hash01(i, 62) - 0.5) * 84.0
+		ci.draw_circle(moon + off, 4.0 + VFX.hash01(i, 63) * 10.0, Color("9aa3c4", 0.5))
+	ci.draw_circle(moon + Vector2(30.0, -20.0), 58.0, Color(VFX.VOID, 0.88))
 	# Midground pillars in mortar, then ruined battlements in void along the bottom.
 	var pillar := Color(VFX.MORTAR, 0.6)
 	var count := int(s.x / 150.0) + 1
@@ -559,6 +714,30 @@ func _draw_title_masonry(ci: Control) -> void:
 	pts.append(Vector2(s.x, s.y + 2.0))
 	ci.draw_colored_polygon(pts, VFX.VOID)
 	ci.draw_line(Vector2(0.0, wall_top + 1.0), Vector2(s.x, wall_top + 1.0), Color(VFX.RIM, 0.12), 1.0)
+	# The knight, larger than life, watching the descent from the battlement.
+	var k_scale := clampf(s.y / 720.0, 0.6, 1.4) * 2.3
+	var feet_y := wall_top - 26.0
+	var kx := s.x * 0.915
+	ci.draw_set_transform(Vector2.ZERO, 0.0, Vector2(1.0, 0.35))
+	ci.draw_circle(Vector2(kx, (feet_y + 2.0) / 0.35), 30.0 * k_scale * 0.5, Color(0.0, 0.0, 0.0, 0.5))
+	ci.draw_set_transform(Vector2.ZERO, 0.0, Vector2.ONE)
+	for i in range(3, 0, -1):
+		ci.draw_circle(Vector2(kx, feet_y - 40.0 * k_scale * 0.5), 40.0 * k_scale * float(i) * 0.5, Color(VFX.ORANGE, 0.05))
+	var pose := "idle%d" % (int(t * 1.6) % 2)
+	var tick := int(t * 9.0)
+	var frame := KnightArt.frame(pose, tick)
+	var px := KnightArt.PX * k_scale
+	var fsize := frame.size * px
+	# Mirror about the knight's centre so the right-facing frame looks toward the title.
+	ci.draw_set_transform(Vector2(kx, 0.0), 0.0, Vector2(-1.0, 1.0))
+	var top_left := Vector2(-fsize.x * 0.5, feet_y - fsize.y)
+	ci.draw_texture_rect_region(KnightArt.texture(), Rect2(top_left, fsize), frame)
+	if not KnightArt.has_sheet():
+		var anchor := KnightArt.flame_anchor(pose)
+		var flame_size := Vector2(KnightArt.FLAME_W, KnightArt.FLAME_H) * px * 1.2
+		var flame_pos := top_left + Vector2(float(anchor.x) * px - flame_size.x * 0.5, float(anchor.y + 1) * px - flame_size.y)
+		ci.draw_texture_rect_region(KnightArt.flame_atlas(), Rect2(flame_pos, flame_size), KnightArt.flame_rect(tick))
+	ci.draw_set_transform(Vector2.ZERO, 0.0, Vector2.ONE)
 
 
 func _build_title_stack(text: String, size: int) -> Control:
@@ -603,6 +782,8 @@ func _process(delta: float) -> void:
 		_title_top_label.add_theme_color_override("font_color", VFX.GOLD)
 		return
 	_title_t += delta
+	if _title_masonry != null:
+		_title_masonry.queue_redraw()
 	var wave := 0.5 + 0.5 * sin(_title_t * 2.6)
 	var flicker := 1.0 + sin(_title_t * 11.0) * 0.03 + sin(_title_t * 29.0) * 0.03
 	var col := VFX.GOLD.lerp(VFX.ORANGE, wave * 0.4)
@@ -707,9 +888,9 @@ func _make_stat_line(parent: VBoxContainer, title: String, value: String, value_
 	var row := HBoxContainer.new()
 	row.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	parent.add_child(row)
-	var caption := _make_label(title, 11, C_MUTED, HorizontalAlignment.HORIZONTAL_ALIGNMENT_LEFT)
+	var caption := _make_label(title, 10, C_MUTED, HorizontalAlignment.HORIZONTAL_ALIGNMENT_LEFT)
 	row.add_child(caption)
-	var result := _make_label(value, 15, value_color, HorizontalAlignment.HORIZONTAL_ALIGNMENT_RIGHT)
+	var result := _make_label(value, 12, value_color, HorizontalAlignment.HORIZONTAL_ALIGNMENT_RIGHT)
 	row.add_child(result)
 	return result
 
@@ -851,6 +1032,15 @@ func hide_all_panels() -> void:
 	hide_room_clear()
 
 
+func hide_banners() -> void:
+	for banner in [_room_intro, _boss_intro]:
+		if banner.is_empty():
+			continue
+		if banner.tween != null and is_instance_valid(banner.tween):
+			(banner.tween as Tween).kill()
+		(banner.root as Control).visible = false
+
+
 func set_hp(hp: float, max_hp: float) -> void:
 	_hp_bar.max_value = maxf(1.0, max_hp)
 	_hp_bar.value = clampf(hp, 0.0, max_hp)
@@ -901,20 +1091,29 @@ func setup_upgrades(upgrades: Array) -> void:
 		var upgrade: Dictionary = upgrades[i]
 		var title := str(upgrade.get("title", "UNKNOWN BOON"))
 		var description := str(upgrade.get("desc", ""))
+		var rarity := Content.upgrade_rarity(upgrade)
+		var rc: Color = Content.rarity_color(rarity)
+		var tag := rarity.to_upper()
+		if bool(upgrade.get("unique", false)):
+			tag += "  \u00b7  ONCE PER RUN"
 		var button := _button(
-			"%02d  %s\n\n%s" % [i + 1, title.to_upper(), description],
+			"%s\n\n%02d  %s\n\n%s" % [tag, i + 1, title.to_upper(), description],
 			"Boon%d" % i,
 			false,
-			Vector2(0, 190)
+			Vector2(0, 200)
 		)
 		button.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 		button.alignment = HorizontalAlignment.HORIZONTAL_ALIGNMENT_CENTER
 		button.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 		button.add_theme_font_size_override("font_size", 16)
-		button.add_theme_stylebox_override("normal", _upgrade_box(C_SURFACE, C_EDGE, 1))
-		button.add_theme_stylebox_override("hover", _upgrade_box(C_SURFACE_HI, C_EMBER_HI, 2))
+		var edge_w := 2 if rarity == "epic" else 1
+		var tint := Color(rc.r, rc.g, rc.b, 0.10 if rarity == "epic" else 0.05)
+		button.add_theme_stylebox_override("normal", _upgrade_box(C_SURFACE.blend(tint), rc.darkened(0.25), edge_w))
+		button.add_theme_stylebox_override("hover", _upgrade_box(C_SURFACE_HI.blend(tint), rc, 2))
 		button.add_theme_stylebox_override("pressed", _upgrade_box(Color("332333"), C_GOLD, 2))
-		button.add_theme_stylebox_override("focus", _upgrade_box(Color("302337"), C_GOLD, 2))
+		button.add_theme_stylebox_override("focus", _upgrade_box(Color("302337").blend(tint), rc.lightened(0.2), 2))
+		button.add_theme_color_override("font_hover_color", rc.lightened(0.2))
+		button.add_theme_color_override("font_focus_color", C_TEXT)
 		button.pressed.connect(_on_upgrade_pressed.bind(i))
 		_upgrade_row.add_child(button)
 		buttons.append(button)
@@ -1002,6 +1201,82 @@ func show_run_cells(cells_earned: int, panel_name: String) -> void:
 		(label as Label).visible = true
 
 
+func set_streak(kills: int, frac: float, mult: float) -> void:
+	if _streak_panel == null:
+		return
+	if kills < 2:
+		hide_streak()
+		return
+	_streak_panel.visible = true
+	_streak_kills_label.text = "%d KILLS" % kills
+	_streak_mult_label.text = "x" + String.num(mult, 2)
+	_streak_bar.value = clampf(frac, 0.0, 1.0) * 100.0
+	var tier := Content.streak_tier(kills)
+	var tier_colors := [C_MUTED, C_TEXT, C_GOLD, C_EMBER_HI, C_RED]
+	var col: Color = tier_colors[clampi(tier, 0, tier_colors.size() - 1)]
+	_streak_mult_label.add_theme_color_override("font_color", col)
+	_streak_bar.add_theme_stylebox_override("fill", _bar_box(col))
+	if tier > _streak_tier and not Feedback.motion_reduced:
+		if _streak_tween != null and is_instance_valid(_streak_tween):
+			_streak_tween.kill()
+		_streak_panel.scale = Vector2(1.12, 1.12)
+		_streak_tween = create_tween()
+		_streak_tween.set_pause_mode(Tween.TWEEN_PAUSE_PROCESS)
+		_streak_tween.tween_property(_streak_panel, "scale", Vector2.ONE, 0.22).set_trans(Tween.TRANS_BACK).set_ease(Tween.EASE_OUT)
+	_streak_tier = tier
+
+
+func hide_streak() -> void:
+	if _streak_panel != null:
+		_streak_panel.visible = false
+		_streak_panel.scale = Vector2.ONE
+	_streak_tier = 0
+
+
+func show_room_intro(idx: int, total: int, room_name: String) -> void:
+	_play_banner(_room_intro, room_name.to_upper(), "CHAMBER %02d OF %02d" % [idx + 1, total], 1.5)
+
+
+func show_boss_intro(boss_name: String, subtitle: String, hold: float = 2.4) -> void:
+	# The boss card owns the screen: drop any chamber card still fading out.
+	if not _room_intro.is_empty():
+		if _room_intro.tween != null and is_instance_valid(_room_intro.tween):
+			(_room_intro.tween as Tween).kill()
+		(_room_intro.root as Control).visible = false
+	_play_banner(_boss_intro, boss_name.to_upper(), subtitle.to_upper(), hold)
+
+
+## Veil that lifts on arrival in a new chamber.
+func fade_from_black(duration: float = 0.45) -> void:
+	if _fade == null:
+		return
+	_fade.color = Color(C_VOID, 1.0)
+	var tween := create_tween()
+	tween.set_pause_mode(Tween.TWEEN_PAUSE_PROCESS)
+	tween.tween_property(_fade, "color:a", 0.0, duration).set_trans(Tween.TRANS_SINE).set_ease(Tween.EASE_IN)
+
+
+func show_run_summary(stats: Dictionary, panel_name: String) -> void:
+	if not _panels.has(panel_name):
+		return
+	var panel: Control = _panels[panel_name]
+	var labels = panel.get_meta("summary_labels", null)
+	if not (labels is Dictionary):
+		return
+	var seconds := int(float(stats.get("time", 0.0)))
+	var values := {
+		"time": "%d:%02d" % [seconds / 60, seconds % 60],
+		"kills": _format_number(int(stats.get("kills", 0))),
+		"elites": _format_number(int(stats.get("elites", 0))),
+		"streak": "x%d" % int(stats.get("best_streak", 0)),
+		"damage": _format_number(int(stats.get("damage_dealt", 0.0))),
+		"rooms": "%d / %d" % [int(stats.get("rooms", 0)), int(stats.get("rooms_total", 0))],
+	}
+	for key in values:
+		if labels.has(key):
+			(labels[key] as Label).text = str(values[key])
+
+
 func show_room_clear(room_name: String) -> void:
 	_room_clear_name.text = room_name.to_upper() if not room_name.strip_edges().is_empty() else "PATH UNSEALED"
 	_room_clear_banner.visible = true
@@ -1024,7 +1299,7 @@ func _rebuild_flask_dots(count: int) -> void:
 	_flask_dots.clear()
 	for i in range(count):
 		var dot := PanelContainer.new()
-		dot.custom_minimum_size = Vector2(20, 10)
+		dot.custom_minimum_size = Vector2(16, 8)
 		dot.size_flags_vertical = Control.SIZE_SHRINK_CENTER
 		dot.mouse_filter = Control.MOUSE_FILTER_IGNORE
 		_flask_container.add_child(dot)

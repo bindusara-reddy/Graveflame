@@ -30,6 +30,8 @@ func _ready() -> void:
 	camera.enabled = true
 	# Frame the authored 1280x720 play space before the player-follow code takes over.
 	camera.position = Vector2(Content.VIEW_W, Content.VIEW_H) * 0.5
+	# The pixel viewport is 1/PIXEL_SCALE the authored size; zoom out to match.
+	camera.zoom = Vector2.ONE / Content.PIXEL_SCALE
 	add_child(camera)
 	# Additive layer for pure-light effects: rings, parry halo, slash afterglow, flashes.
 	_glow = Node2D.new()
@@ -37,6 +39,7 @@ func _ready() -> void:
 	_glow.material = VFX.additive_material()
 	_glow.draw.connect(_draw_glow)
 	add_child(_glow)
+	material = VFX.unshaded_material()
 	_init_audio()
 	set_process(true)
 
@@ -63,6 +66,10 @@ func _init_audio() -> void:
 	_streams["flame"] = _make_sweep(150.0, 560.0, 0.24, 0.38, 0.48)
 	_streams["land"] = _make_sweep(105.0, 48.0, 0.10, 0.44, 0.30)
 	_streams["shield"] = _make_metallic(250.0, 0.22, 0.48)
+	_streams["elite"] = _make_metallic(140.0, 0.5, 0.55)
+	_streams["streak"] = _make_blip(520.0, 0.12, 0.32)
+	_streams["second_wind"] = _make_sweep(200.0, 900.0, 0.6, 0.5, 0.1)
+	_streams["pyre"] = _make_noise(0.35, 0.6, true)
 	for i in range(8):
 		var p := AudioStreamPlayer.new()
 		p.bus = "Master"
@@ -179,13 +186,63 @@ func _make_arpeggio() -> AudioStreamWAV:
 	stream.data = data
 	return stream
 
-func play(name: String) -> void:
+func play(name: String, pitch: float = 1.0) -> void:
 	if not _streams.has(name): return
 	var p := _audio_pool[_audio_idx]
 	_audio_idx = (_audio_idx + 1) % _audio_pool.size()
 	p.stream = _streams[name]
-	p.pitch_scale = randf_range(0.97, 1.03)
+	p.pitch_scale = pitch * randf_range(0.97, 1.03)
 	p.play(0.0)
+
+## Rift bloom where an enemy is pulled into the chamber: ring plus rising embers.
+func spawn_rift(pos: Vector2, color: Color) -> void:
+	_add_ring(pos, color, 4.0, 48.0, 0.36, 3.0)
+	if reduced_motion:
+		return
+	var effect_color := _accessible_color(color)
+	for i in range(12):
+		if _particles.size() >= MAX_PARTICLES: break
+		_push_particle({
+			"kind": "ember", "pos": pos + Vector2(randf_range(-16.0, 16.0), randf_range(0.0, 14.0)),
+			"vel": Vector2(randf_range(-30.0, 30.0), -randf_range(110.0, 240.0)),
+			"life": randf_range(0.3, 0.55), "max": 0.55, "color": effect_color, "size": randf_range(1.5, 3.2)
+		})
+
+## Floating combat text. `kind` picks the palette: hit, heavy, block, hurt, heal,
+## elite. Pass `text` for a word instead of a number.
+func damage_number(pos: Vector2, amount: float, kind: String = "hit", text: String = "") -> void:
+	var label := text if text != "" else str(roundi(amount))
+	if text == "" and roundi(amount) <= 0:
+		return
+	var color: Color = VFX.GOLD
+	var size := 26.0
+	match kind:
+		"heavy":
+			color = VFX.HOT
+			size = 34.0
+		"block":
+			color = VFX.SLATE.lightened(0.25)
+			size = 22.0
+		"hurt":
+			color = Content.PAL.hurt_number
+			size = 30.0
+		"heal":
+			color = Content.PAL.heal_number
+			size = 28.0
+		"elite":
+			color = Content.ELITE_COLOR
+			size = 32.0
+		_:
+			if amount >= 30.0:
+				color = VFX.GOLD.lerp(VFX.HOT, 0.5)
+				size = 30.0
+	var vel := Vector2(randf_range(-26.0, 26.0), -randf_range(120.0, 170.0))
+	if reduced_motion:
+		vel = Vector2(0.0, -40.0)
+	_push_particle({
+		"kind": "number", "pos": pos + Vector2(randf_range(-8.0, 8.0), 0.0), "vel": vel,
+		"life": 0.85, "max": 0.85, "color": _accessible_color(color), "size": size, "text": label
+	})
 
 ## Briefly slows the world, measured in real time so restoration is reliable.
 ## Overlapping calls extend the current stop instead of racing separate timers.
@@ -414,6 +471,13 @@ func _process(delta: float) -> void:
 			"puff":
 				p.vel *= maxf(0.0, 1.0 - 4.5 * delta)
 				p.vel.y -= 15.0 * delta
+			"number":
+				p.vel *= maxf(0.0, 1.0 - 4.0 * delta)
+				p.vel.y += 240.0 * delta
+			"ember":
+				p.vel *= maxf(0.0, 1.0 - 1.5 * delta)
+				p.vel.y -= 40.0 * delta
+				p.pos.x += sin(float(p.get("life", 0.0)) * 20.0) * 12.0 * delta
 			"hitspark":
 				p.vel *= maxf(0.0, 1.0 - 3.0 * delta)
 				p.vel.y += 400.0 * delta
@@ -481,6 +545,19 @@ func _draw() -> void:
 				draw_rect(Rect2(pos + Vector2(-13.0 - facing * 4.0, -27.0), Vector2(6.0, 32.0)), c)
 			"dust":
 				draw_circle(pos, maxf(0.8, size * a), c)
+			"number":
+				var font := ThemeDB.fallback_font
+				var txt := str(p.get("text", ""))
+				# Pop in over the first 20% of life, hold, then fade over the last 40%.
+				var age := 1.0 - a
+				var pop := 1.0 + 0.4 * (1.0 - clampf(age / 0.2, 0.0, 1.0))
+				var alpha := clampf(a / 0.4, 0.0, 1.0) * (0.55 if reduced_flash else 1.0)
+				var fs := maxi(8, int(size * pop))
+				var width := font.get_string_size(txt, HORIZONTAL_ALIGNMENT_CENTER, -1, fs).x
+				var at := pos + Vector2(-width * 0.5, 0.0)
+				var base: Color = p.get("color", VFX.GOLD)
+				draw_string_outline(font, at, txt, HORIZONTAL_ALIGNMENT_LEFT, -1, fs, 6, Color(0.0, 0.0, 0.0, alpha * 0.85))
+				draw_string(font, at, txt, HORIZONTAL_ALIGNMENT_LEFT, -1, fs, Color(base.r, base.g, base.b, alpha))
 			_:
 				draw_circle(pos, maxf(0.8, size * a), c)
 

@@ -17,8 +17,13 @@ func check(condition: bool, message: String) -> void:
 		printerr("FAIL: " + message)
 
 
+const MusicSynth := preload("res://scripts/music.gd")
+const TEST_SAVE := "user://graveflame_save_smoke.json"
+
+
 func _run() -> void:
 	await process_frame
+	Save.path = TEST_SAVE
 	_test_physics_layers()
 	_test_chamber_spawn_separation()
 	await _test_project_boot()
@@ -29,6 +34,17 @@ func _run() -> void:
 	await _test_room_exit_flow()
 	await _test_forge_focus_rebuild()
 	await _test_responsive_ui()
+	await _test_enemy_scaling_and_elites()
+	await _test_second_wind()
+	await _test_thorns_and_executioner()
+	await _test_pyre()
+	await _test_boss_charge_and_summons()
+	await _test_boss_room_adds()
+	await _test_music_renders()
+	await _test_room_dressing()
+	await _test_full_run_simulation()
+	if FileAccess.file_exists(TEST_SAVE):
+		DirAccess.remove_absolute(TEST_SAVE)
 	var passed := failures == 0
 	print("RUNTIME_SMOKE_RESULT: %s (%d checks, %d failures)" % ["PASS" if passed else "FAIL", checks, failures])
 	quit(0 if passed else 1)
@@ -311,6 +327,312 @@ func _is_usable_focus(control: Control, panel: Control) -> bool:
 	if not control.is_visible_in_tree() or control.focus_mode == Control.FOCUS_NONE:
 		return false
 	return not (control is BaseButton) or not (control as BaseButton).disabled
+
+
+func _test_enemy_scaling_and_elites() -> void:
+	var enemy := Enemy.new()
+	enemy.setup(Enemy.Kind.STALKER, Vector2(400, Content.FLOOR_Y - 40), { "hp_mul": 1.5, "dmg_mul": 1.2, "elite": true })
+	root.add_child(enemy)
+	var base: Dictionary = Content.ENEMY[Enemy.Kind.STALKER]
+	check(enemy.elite, "elite flag is applied from spawn mods")
+	check(is_equal_approx(enemy.hp_max, float(base.hp) * 1.5 * Content.ELITE_HP_MUL), "elite hp stacks difficulty and elite multipliers")
+	check(is_equal_approx(enemy.attack_damage(), float(base.damage) * 1.2 * Content.ELITE_DMG_MUL), "elite damage stacks difficulty and elite multipliers")
+	check(is_equal_approx(enemy._sprite.size_mul, Content.ELITE_SCALE), "elite body is drawn larger")
+	var events: Array = []
+	enemy.damaged.connect(func(amount: float, _pos: Vector2, blocked: bool): events.append([amount, blocked]))
+	enemy.take_damage(10.0, Vector2.RIGHT, 0.0)
+	check(events.size() == 1 and is_equal_approx(float(events[0][0]), 10.0) and not bool(events[0][1]), "enemy emits a damaged event for floating numbers")
+	var score := [0]
+	enemy.died.connect(func(s: int): score[0] = s)
+	enemy.take_damage(99999.0, Vector2.RIGHT, 0.0)
+	check(score[0] == int(base.score) * Content.ELITE_SCORE_MUL, "elite kills award multiplied score")
+	enemy.queue_free()
+	var brute := Enemy.new()
+	brute.setup(Enemy.Kind.BRUTE, Vector2(600, Content.FLOOR_Y - 40))
+	root.add_child(brute)
+	brute.facing = 1.0
+	var blocked_events: Array = []
+	brute.damaged.connect(func(_amount: float, _pos: Vector2, blocked: bool): blocked_events.append(blocked))
+	brute.take_damage(5.0, Vector2(-1.0, 0.0), 0.0)
+	check(blocked_events.size() == 1 and bool(blocked_events[0]), "brute shield hits report as blocked")
+	check(is_equal_approx(brute.hp, brute.hp_max), "blocked hits leave brute hp untouched")
+	brute.queue_free()
+	await process_frame
+
+
+func _test_second_wind() -> void:
+	var run_model := RunModel.new(8)
+	run_model.apply_upgrade({ "id": "secondwind", "kind": "second_wind", "value": 1.0 })
+	var player := Player.new()
+	player.setup(run_model)
+	root.add_child(player)
+	var died := [0]
+	var feedback_kinds: Array = []
+	player.died.connect(func(): died[0] += 1)
+	player.action_feedback.connect(func(kind: String, _pos: Vector2): feedback_kinds.append(kind))
+	player.take_damage(99999.0, Vector2.RIGHT, 100.0)
+	check(died[0] == 0 and not player.dead, "second wind survives a lethal hit")
+	check(is_equal_approx(float(player.build.hp), float(player.build.max_hp) * Content.SECOND_WIND_HP_FRAC), "second wind restores the configured fraction of max hp")
+	check(bool(run_model.build.second_wind_used), "second wind is spent on the run model")
+	check(feedback_kinds.has("second_wind"), "second wind announces itself for feedback")
+	player.iframes = 0.0
+	player.take_damage(99999.0, Vector2.RIGHT, 100.0)
+	check(died[0] == 1 and player.dead, "second wind only triggers once per run")
+	player.queue_free()
+	await process_frame
+
+
+func _test_thorns_and_executioner() -> void:
+	var run_model := RunModel.new(9)
+	run_model.apply_upgrade({ "id": "thorns", "kind": "thorns", "value": 15.0 })
+	run_model.apply_upgrade({ "id": "executioner", "kind": "execute", "value": 0.5 })
+	var player := Player.new()
+	player.setup(run_model)
+	root.add_child(player)
+	player.global_position = Vector2(500, Content.FLOOR_Y - 40)
+	var near := Enemy.new()
+	near.setup(Enemy.Kind.STALKER, Vector2(540, Content.FLOOR_Y - 40))
+	root.add_child(near)
+	var far := Enemy.new()
+	far.setup(Enemy.Kind.STALKER, Vector2(900, Content.FLOOR_Y - 40))
+	root.add_child(far)
+	await physics_frame
+	player.iframes = 0.0
+	player.take_damage(5.0, Vector2.RIGHT, 50.0)
+	check(is_equal_approx(near.hp, near.hp_max - 15.0), "cinder skin scorches an adjacent enemy")
+	check(is_equal_approx(far.hp, far.hp_max), "cinder skin leaves distant enemies alone")
+	check(is_equal_approx(player._damage_mul(far), 1.0), "executioner is inactive against healthy targets")
+	far.hp = far.hp_max * 0.2
+	check(is_equal_approx(player._damage_mul(far), 1.5), "executioner adds its bonus against low targets")
+	check(player.momentum_stacks() == 0, "momentum is inert without the boon")
+	run_model.apply_upgrade({ "id": "momentum", "kind": "momentum", "value": 0.12 })
+	player.on_enemy_killed()
+	player.on_enemy_killed()
+	check(player.momentum_stacks() == 2 and is_equal_approx(player._speed_mul(), 1.0 + 0.24), "momentum stacks feed speed")
+	check(is_equal_approx(player._damage_mul(), 1.2), "momentum stacks feed damage")
+	for n in [player, near, far]:
+		n.queue_free()
+	await process_frame
+
+
+func _test_pyre() -> void:
+	Enemy.pyre_damage = 60.0
+	var a := Enemy.new()
+	a.setup(Enemy.Kind.STALKER, Vector2(500, Content.FLOOR_Y - 40))
+	root.add_child(a)
+	var b := Enemy.new()
+	b.setup(Enemy.Kind.STALKER, Vector2(560, Content.FLOOR_Y - 40))
+	root.add_child(b)
+	var c := Enemy.new()
+	c.setup(Enemy.Kind.STALKER, Vector2(1000, Content.FLOOR_Y - 40))
+	root.add_child(c)
+	await physics_frame
+	var bursts := [0]
+	a.pyre_burst.connect(func(_pos: Vector2, _radius: float): bursts[0] += 1)
+	a.apply_burn(8.0, 3.0)
+	a.take_damage(99999.0, Vector2.RIGHT, 0.0)
+	check(bursts[0] == 1, "a burning enemy detonates when it dies")
+	check(is_equal_approx(b.hp, b.hp_max - 60.0) and b.burn_time > 0.0, "pyre damages and ignites a neighbour")
+	check(is_equal_approx(c.hp, c.hp_max), "pyre respects its radius")
+	var d := Enemy.new()
+	d.setup(Enemy.Kind.STALKER, Vector2(560, Content.FLOOR_Y - 40))
+	root.add_child(d)
+	var quiet := [0]
+	d.pyre_burst.connect(func(_pos: Vector2, _radius: float): quiet[0] += 1)
+	d.take_damage(99999.0, Vector2.RIGHT, 0.0)
+	check(quiet[0] == 0, "an unburnt enemy does not detonate")
+	Enemy.pyre_damage = 0.0
+	for n in [a, b, c, d]:
+		n.queue_free()
+	await process_frame
+
+
+func _test_boss_charge_and_summons() -> void:
+	var boss := Boss.new()
+	boss.intro_t = 0.01
+	root.add_child(boss)
+	var floor_body := StaticBody2D.new()
+	floor_body.collision_layer = Content.L_WORLD
+	var shape := CollisionShape2D.new()
+	var rect := RectangleShape2D.new()
+	rect.size = Vector2(4000, 100)
+	shape.shape = rect
+	floor_body.add_child(shape)
+	floor_body.position = Vector2(640, Content.FLOOR_Y + 50)
+	root.add_child(floor_body)
+	boss.global_position = Vector2(400, Content.FLOOR_Y - Content.BOSS_H * 0.5)
+	await physics_frame
+	await physics_frame
+	boss.facing = 1.0
+	boss._begin_charge()
+	check(boss.state == Enemy.EState.WINDUP and boss.action_idx == Boss.Action.CHARGE, "boss can enter a charge windup")
+	boss._do_charge()
+	check(boss.state == Enemy.EState.ATTACK and boss.velocity.x > 0.0, "charge commits with forward velocity")
+	var start_x := boss.global_position.x
+	var guard := 0
+	while boss.state == Enemy.EState.ATTACK and guard < 120:
+		await physics_frame
+		guard += 1
+	check(boss.state == Enemy.EState.RECOVER, "charge ends in recovery")
+	check(boss.global_position.x > start_x + 200.0, "charge covers real ground")
+	check(not boss._atk_area.monitoring, "charge disarms its hitbox when it ends")
+	var summons: Array = []
+	boss.summon_requested.connect(func(kind: int, pos: Vector2): summons.append([kind, pos]))
+	boss.hp = boss.max_hp * 0.4
+	boss._check_phase2()
+	check(boss.phase == Boss.BPhase.TWO, "boss enters phase two below half health")
+	check(summons.size() == 2 and int(summons[0][0]) == Content.BOSS_SUMMON_KIND, "phase two summons two wisps")
+	boss._check_phase2()
+	check(summons.size() == 2, "summons only happen once")
+	boss.queue_free()
+	floor_body.queue_free()
+	await process_frame
+
+
+func _test_boss_room_adds() -> void:
+	var player_stub := Node2D.new()
+	root.add_child(player_stub)
+	var room := Room.new()
+	room.setup(Content.BOSS_TEMPLATE, true, player_stub, 1357)
+	room.set_meta("room_index", Content.ROOMS_BEFORE_BOSS + 1)
+	var completed := [0]
+	var cleared := [0]
+	var deaths: Array = []
+	room.completed.connect(func(): completed[0] += 1)
+	room.cleared.connect(func(_n: String): cleared[0] += 1)
+	room.enemy_died.connect(func(score: int, _pos: Vector2, tier: int, _color: Color): deaths.append([score, tier]))
+	root.add_child(room)
+	check(room.boss != null and is_instance_valid(room.boss), "boss room spawns its boss")
+	room._on_boss_summon(Content.BOSS_SUMMON_KIND, Vector2(300, Content.FLOOR_Y - 260))
+	check(room.enemies.size() == 1, "boss summons register as room enemies")
+	var add: Node = room.enemies[0]
+	check(float(add.hp_max) > float(Content.ENEMY[Content.BOSS_SUMMON_KIND].hp), "summoned adds inherit the room's difficulty scaling")
+	add.take_damage(99999.0, Vector2.RIGHT, 0.0)
+	check(completed[0] == 0 and cleared[0] == 0 and not room.exit_open, "killing an add never clears or unseals the throne room")
+	check(deaths.size() == 1 and int(deaths[0][1]) == 0, "add death reports as a regular kill")
+	room.boss.take_damage(99999.0, Vector2.RIGHT, 0.0)
+	check(completed[0] == 1, "boss death completes the room")
+	check(deaths.size() == 2 and int(deaths[1][1]) == 2, "boss death reports the boss tier")
+	room.queue_free()
+	player_stub.queue_free()
+	await process_frame
+
+
+func _test_room_dressing() -> void:
+	var player_stub := Node2D.new()
+	root.add_child(player_stub)
+	var spawned: Array = []
+	var room := Room.new()
+	room.mood = Content.mood_for(0.4)
+	room.setup(Content.ROOM_TEMPLATES[1], false, player_stub, 99)
+	room.set_meta("room_index", 1)
+	room.enemy_spawned.connect(func(pos: Vector2, color: Color): spawned.append([pos, color]))
+	root.add_child(room)
+	check(spawned.size() == room.enemies.size() and spawned.size() > 0, "every spawned enemy announces a rift position")
+	check(room.exit_center() == room._exit_rect.get_center(), "exit_center exposes the rift gate position")
+	var lights: Array = room.light_points()
+	for lp in lights:
+		check(lp.has("pos") and lp.has("radius") and lp.has("color") and lp.has("alpha"), "room light points carry the light layer fields")
+	room.queue_free()
+	var throne := Room.new()
+	throne.mood = Content.mood_for(1.0)
+	throne.setup(Content.BOSS_TEMPLATE, true, player_stub, 7)
+	throne.set_meta("room_index", Content.ROOMS_BEFORE_BOSS + 1)
+	root.add_child(throne)
+	check(throne.light_points().size() >= 3, "the throne room lights its braziers")
+	throne.queue_free()
+	player_stub.queue_free()
+	await process_frame
+
+
+func _test_music_renders() -> void:
+	var music = MusicSynth.new()
+	root.add_child(music)
+	var waited := 0
+	while not music.is_ready() and waited < 1800:
+		await process_frame
+		waited += 1
+	check(music.is_ready(), "procedural score finishes rendering in the background")
+	if music.is_ready():
+		for name in ["explore", "boss"]:
+			var player: AudioStreamPlayer = music._players[name]
+			var stream := player.stream as AudioStreamWAV
+			check(stream != null and stream.loop_mode == AudioStreamWAV.LOOP_FORWARD, "%s track is a seamless loop" % name)
+			if stream != null:
+				var data := stream.data
+				var peak := 0
+				var stride := maxi(2, (data.size() / 2 / 400) * 2)
+				for i in range(0, data.size() - 1, stride):
+					peak = maxi(peak, absi(data.decode_s16(i)))
+				check(peak > 4000 and peak < 32700, "%s track has healthy level (peak %d)" % [name, peak])
+		music.play_track("boss")
+		check(music._current == "boss", "track switching records the active cue")
+	music.queue_free()
+	await process_frame
+
+
+## Drives a whole run headlessly: clear every chamber, take boons, fell the boss.
+func _test_full_run_simulation() -> void:
+	var packed = load("res://main.tscn")
+	var game: Game = packed.instantiate()
+	root.add_child(game)
+	await process_frame
+	var cells_before := Save.get_cells()
+	game._on_start()
+	await physics_frame
+	check(game.state == Game.GState.PLAYING and is_instance_valid(game.room), "simulated run starts in its first chamber")
+	var rooms_visited := 0
+	var saw_numbers := false
+	var saw_streak := false
+	var guard := 0
+	while game.state != Game.GState.VICTORY and game.state != Game.GState.GAME_OVER and guard < 4000:
+		guard += 1
+		var room: Room = game.room
+		if not is_instance_valid(room):
+			await physics_frame
+			continue
+		if room.is_boss:
+			if room.boss != null and is_instance_valid(room.boss) and not room.boss.dead:
+				if room.boss.phase == Boss.BPhase.INTRO:
+					await physics_frame
+					continue
+				room.boss.take_damage(room.boss.max_hp * 0.3, Vector2.RIGHT, 0.0)
+				for e in room.enemies.duplicate():
+					if is_instance_valid(e) and not e.dead:
+						e.take_damage(99999.0, Vector2.RIGHT, 0.0)
+			await physics_frame
+			continue
+		if room.exit_open:
+			rooms_visited += 1
+			game._on_room_completed()
+			await process_frame
+			check(game.state == Game.GState.REWARD and game._pending_upgrades.size() == Content.UPGRADES_PER_OFFER, "clearing a chamber offers boons")
+			game._on_upgrade_selected(0)
+			await physics_frame
+			continue
+		var alive := 0
+		for e in room.enemies.duplicate():
+			if is_instance_valid(e) and not e.dead:
+				alive += 1
+				e.take_damage(6.0, Vector2.RIGHT, 0.0)
+				e.take_damage(99999.0, Vector2.RIGHT, 0.0)
+		if alive > 0:
+			for p in game.feedback._particles:
+				if str(p.get("kind", "")) == "number":
+					saw_numbers = true
+			if game._streak_kills >= 2:
+				saw_streak = true
+		await physics_frame
+	check(game.state == Game.GState.VICTORY, "simulated run reaches victory (guard %d)" % guard)
+	check(rooms_visited == Content.ROOMS_BEFORE_BOSS + 1, "every combat chamber was cleared before the throne")
+	check(saw_numbers, "hits spawn floating damage numbers")
+	check(saw_streak, "chained kills build a streak")
+	check(int(game._stats.kills) > 0 and float(game._stats.damage_dealt) > 0.0, "run statistics accumulate")
+	check(int(game._stats.rooms) == game.run.rooms_total(), "run statistics record the final chamber")
+	check(Save.get_cells() > cells_before, "a run banks cells")
+	check(game.music._current == "title", "victory returns the score to the title cue")
+	game.queue_free()
+	await process_frame
 
 
 func _rect_inside(inner: Rect2, outer: Rect2) -> bool:

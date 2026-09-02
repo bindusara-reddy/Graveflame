@@ -4,12 +4,15 @@ extends RefCounted
 ## Stored as JSON at user://graveflame_save.json. Dead Cells-style meta progression.
 
 const SAVE_PATH := "user://graveflame_save.json"
+## Active file. Tests and tooling point this at a scratch file so simulated runs
+## never touch the player's real progress.
+static var path := SAVE_PATH
 
 static func load_save() -> Dictionary:
 	var defaults := {"cells": 0, "best_score": 0, "meta": []}
-	if not FileAccess.file_exists(SAVE_PATH):
+	if not FileAccess.file_exists(path):
 		return defaults
-	var f := FileAccess.open(SAVE_PATH, FileAccess.READ)
+	var f := FileAccess.open(path, FileAccess.READ)
 	if f == null:
 		return defaults
 	var text := f.get_as_text()
@@ -28,9 +31,9 @@ static func load_save() -> Dictionary:
 	return d
 
 static func save_save(data: Dictionary) -> void:
-	var f := FileAccess.open(SAVE_PATH, FileAccess.WRITE)
+	var f := FileAccess.open(path, FileAccess.WRITE)
 	if f == null:
-		push_warning("Save: could not write to %s" % SAVE_PATH)
+		push_warning("Save: could not write to %s" % path)
 		return
 	f.store_string(JSON.stringify(data, "  "))
 	f.close()

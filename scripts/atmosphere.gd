@@ -57,6 +57,7 @@ func _ready() -> void:
 		Color(VFX.SLATE, 0.0), Color(VFX.SLATE, 0.28), Color(VFX.SLATE, 0.28), Color(VFX.SLATE, 0.0),
 	])
 	_motes.color_ramp = mote_ramp
+	_motes.material = VFX.unshaded_material()
 	add_child(_motes)
 
 func set_reduced_motion(value: bool) -> void:
