@@ -1,0 +1,990 @@
+{
+  "baseline_exceptions": {
+    "brute": {
+      "attack_shield_overhang_frames": [
+        1
+      ]
+    },
+    "hopper": {
+      "attack_airborne_frames": [
+        1
+      ]
+    }
+  },
+  "creatures": {
+    "bomber": {
+      "attack": {
+        "feet_y": 91,
+        "file": "bomber_attack.png",
+        "frame_h": 96,
+        "frame_w": 128,
+        "frames": 3
+      },
+      "death": {
+        "feet_y": 91,
+        "file": "bomber_death.png",
+        "frame_h": 96,
+        "frame_w": 128,
+        "frames": 3
+      },
+      "idle": {
+        "feet_y": 91,
+        "file": "bomber_idle.png",
+        "frame_h": 96,
+        "frame_w": 128,
+        "frames": 4
+      },
+      "stagger": {
+        "feet_y": 91,
+        "file": "bomber_stagger.png",
+        "frame_h": 96,
+        "frame_w": 128,
+        "frames": 2
+      },
+      "windup": {
+        "feet_y": 91,
+        "file": "bomber_windup.png",
+        "frame_h": 96,
+        "frame_w": 128,
+        "frames": 3
+      }
+    },
+    "brute": {
+      "attack": {
+        "feet_y": 123,
+        "file": "brute_attack.png",
+        "frame_h": 128,
+        "frame_w": 192,
+        "frames": 3
+      },
+      "death": {
+        "feet_y": 123,
+        "file": "brute_death.png",
+        "frame_h": 128,
+        "frame_w": 192,
+        "frames": 3
+      },
+      "idle": {
+        "feet_y": 123,
+        "file": "brute_idle.png",
+        "frame_h": 128,
+        "frame_w": 192,
+        "frames": 4
+      },
+      "stagger": {
+        "feet_y": 123,
+        "file": "brute_stagger.png",
+        "frame_h": 128,
+        "frame_w": 192,
+        "frames": 2
+      },
+      "windup": {
+        "feet_y": 123,
+        "file": "brute_windup.png",
+        "frame_h": 128,
+        "frame_w": 192,
+        "frames": 3
+      }
+    },
+    "hopper": {
+      "attack": {
+        "feet_y": 91,
+        "file": "hopper_attack.png",
+        "frame_h": 96,
+        "frame_w": 128,
+        "frames": 3
+      },
+      "death": {
+        "feet_y": 91,
+        "file": "hopper_death.png",
+        "frame_h": 96,
+        "frame_w": 128,
+        "frames": 3
+      },
+      "idle": {
+        "feet_y": 91,
+        "file": "hopper_idle.png",
+        "frame_h": 96,
+        "frame_w": 128,
+        "frames": 4
+      },
+      "stagger": {
+        "feet_y": 91,
+        "file": "hopper_stagger.png",
+        "frame_h": 96,
+        "frame_w": 128,
+        "frames": 2
+      },
+      "windup": {
+        "feet_y": 91,
+        "file": "hopper_windup.png",
+        "frame_h": 96,
+        "frame_w": 128,
+        "frames": 3
+      }
+    },
+    "stalker": {
+      "attack": {
+        "feet_y": 91,
+        "file": "stalker_attack.png",
+        "frame_h": 96,
+        "frame_w": 128,
+        "frames": 3
+      },
+      "death": {
+        "feet_y": 91,
+        "file": "stalker_death.png",
+        "frame_h": 96,
+        "frame_w": 128,
+        "frames": 3
+      },
+      "idle": {
+        "feet_y": 91,
+        "file": "stalker_idle.png",
+        "frame_h": 96,
+        "frame_w": 128,
+        "frames": 4
+      },
+      "stagger": {
+        "feet_y": 91,
+        "file": "stalker_stagger.png",
+        "frame_h": 96,
+        "frame_w": 128,
+        "frames": 2
+      },
+      "windup": {
+        "feet_y": 91,
+        "file": "stalker_windup.png",
+        "frame_h": 96,
+        "frame_w": 128,
+        "frames": 3
+      }
+    },
+    "warden": {
+      "attack": {
+        "feet_y": 185,
+        "file": "warden_attack.png",
+        "frame_h": 192,
+        "frame_w": 280,
+        "frames": 3
+      },
+      "death": {
+        "feet_y": 185,
+        "file": "warden_death.png",
+        "frame_h": 192,
+        "frame_w": 280,
+        "frames": 3
+      },
+      "idle": {
+        "feet_y": 185,
+        "file": "warden_idle.png",
+        "frame_h": 192,
+        "frame_w": 280,
+        "frames": 4
+      },
+      "stagger": {
+        "feet_y": 185,
+        "file": "warden_stagger.png",
+        "frame_h": 192,
+        "frame_w": 280,
+        "frames": 2
+      },
+      "windup": {
+        "feet_y": 185,
+        "file": "warden_windup.png",
+        "frame_h": 192,
+        "frame_w": 280,
+        "frames": 3
+      }
+    },
+    "warden_phase2": {
+      "attack": {
+        "feet_y": 185,
+        "file": "warden_phase2_attack.png",
+        "frame_h": 192,
+        "frame_w": 280,
+        "frames": 3
+      },
+      "death": {
+        "feet_y": 185,
+        "file": "warden_phase2_death.png",
+        "frame_h": 192,
+        "frame_w": 280,
+        "frames": 3
+      },
+      "idle": {
+        "feet_y": 185,
+        "file": "warden_phase2_idle.png",
+        "frame_h": 192,
+        "frame_w": 280,
+        "frames": 4
+      },
+      "stagger": {
+        "feet_y": 185,
+        "file": "warden_phase2_stagger.png",
+        "frame_h": 192,
+        "frame_w": 280,
+        "frames": 2
+      },
+      "windup": {
+        "feet_y": 185,
+        "file": "warden_phase2_windup.png",
+        "frame_h": 192,
+        "frame_w": 280,
+        "frames": 3
+      }
+    },
+    "wisp": {
+      "attack": {
+        "feet_y": 89,
+        "file": "wisp_attack.png",
+        "frame_h": 96,
+        "frame_w": 120,
+        "frames": 3
+      },
+      "death": {
+        "feet_y": 89,
+        "file": "wisp_death.png",
+        "frame_h": 96,
+        "frame_w": 120,
+        "frames": 3
+      },
+      "idle": {
+        "feet_y": 89,
+        "file": "wisp_idle.png",
+        "frame_h": 96,
+        "frame_w": 120,
+        "frames": 4
+      },
+      "stagger": {
+        "feet_y": 89,
+        "file": "wisp_stagger.png",
+        "frame_h": 96,
+        "frame_w": 120,
+        "frames": 2
+      },
+      "windup": {
+        "feet_y": 89,
+        "file": "wisp_windup.png",
+        "frame_h": 96,
+        "frame_w": 120,
+        "frames": 3
+      }
+    }
+  },
+  "facing": {
+    "bomber": "right",
+    "brute": "right",
+    "hopper": "right",
+    "stalker": "right",
+    "warden": "right",
+    "warden_phase2": "right",
+    "wisp": "right"
+  },
+  "facing_scores": {
+    "bomber": 50.1043557168784,
+    "brute": 71.80085261875762,
+    "hopper": 49.327822120866585,
+    "stalker": 36.86649214659686,
+    "warden": 56.10395463797616,
+    "warden_phase2": 56.13254593175853,
+    "wisp": 42.025339925834366
+  },
+  "pose_metrics": {
+    "brute": {
+      "dust_rows": 1,
+      "dust_y": 127,
+      "shield_below_feet_px": 4,
+      "shield_lower_edge_y": 127
+    },
+    "hopper": {
+      "airborne_clearance_px": 10,
+      "crouch_bends": 2,
+      "landing_bends": 2
+    }
+  },
+  "quality_metrics": {
+    "bomber": {
+      "facing_right": true,
+      "palette_count": 8,
+      "states": {
+        "attack": {
+          "actual_bottom": [
+            91,
+            91,
+            91
+          ],
+          "feet_y": 91,
+          "mad_vs_idle": [
+            0.00020216457778587937,
+            0.00046160383499227464,
+            0.0003153972502332181
+          ],
+          "mad_vs_previous": [
+            0.0,
+            0.00038239877903833985,
+            0.00030185331706888974
+          ]
+        },
+        "death": {
+          "actual_bottom": [
+            91,
+            91,
+            91
+          ],
+          "feet_y": 91,
+          "mad_vs_idle": [
+            0.0002023185370489955,
+            0.0005482867709361017,
+            0.0006032760720700026
+          ],
+          "mad_vs_previous": [
+            0.0,
+            0.000583977613132447,
+            0.0007531433366239071
+          ]
+        },
+        "idle": {
+          "actual_bottom": [
+            91,
+            91,
+            91,
+            91
+          ],
+          "feet_y": 91,
+          "mad_vs_idle": [
+            0.0,
+            0.00010444074723636732,
+            8.506093581672758e-05,
+            0.00010373113036621362
+          ],
+          "mad_vs_previous": [
+            0.0,
+            0.00010444074723636732,
+            0.00013845961075276136,
+            0.00012559273454826325
+          ]
+        },
+        "stagger": {
+          "actual_bottom": [
+            91,
+            91
+          ],
+          "feet_y": 91,
+          "mad_vs_idle": [
+            0.0003612267319113016,
+            0.00020825948740821332
+          ],
+          "mad_vs_previous": [
+            0.0,
+            0.0002496147935744375
+          ]
+        },
+        "windup": {
+          "actual_bottom": [
+            91,
+            91,
+            91
+          ],
+          "feet_y": 91,
+          "mad_vs_idle": [
+            1.342131963610882e-05,
+            0.00017244344053324312,
+            0.00028032963746227324
+          ],
+          "mad_vs_previous": [
+            0.0,
+            0.00018352440383750945,
+            0.0001914177555590868
+          ]
+        }
+      },
+      "white_pixels": 0
+    },
+    "brute": {
+      "facing_right": true,
+      "palette_count": 6,
+      "states": {
+        "attack": {
+          "actual_bottom": [
+            123,
+            127,
+            123
+          ],
+          "feet_y": 123,
+          "mad_vs_idle": [
+            0.0002488038153387606,
+            0.0004285261093173176,
+            0.00011644534970400855
+          ],
+          "mad_vs_previous": [
+            0.0,
+            0.0005287592648528516,
+            0.00036772340536117554
+          ]
+        },
+        "death": {
+          "actual_bottom": [
+            123,
+            123,
+            123
+          ],
+          "feet_y": 123,
+          "mad_vs_idle": [
+            0.00020194058015476912,
+            0.0005028063897043467,
+            0.0007801211904734373
+          ],
+          "mad_vs_previous": [
+            0.0,
+            0.00043149845441803336,
+            0.00047953688772395253
+          ]
+        },
+        "idle": {
+          "actual_bottom": [
+            123,
+            123,
+            123,
+            123
+          ],
+          "feet_y": 123,
+          "mad_vs_idle": [
+            0.0,
+            0.00012204528320580721,
+            6.510354432975873e-05,
+            6.396903336280957e-05
+          ],
+          "mad_vs_previous": [
+            0.0,
+            0.00012204528320580721,
+            6.025702168699354e-05,
+            0.00012039202556479722
+          ]
+        },
+        "stagger": {
+          "actual_bottom": [
+            123,
+            123
+          ],
+          "feet_y": 123,
+          "mad_vs_idle": [
+            0.00026222073938697577,
+            0.00012033633538521826
+          ],
+          "mad_vs_previous": [
+            0.0,
+            0.00017768294492270797
+          ]
+        },
+        "windup": {
+          "actual_bottom": [
+            123,
+            123,
+            123
+          ],
+          "feet_y": 123,
+          "mad_vs_idle": [
+            2.2889083993504755e-05,
+            0.00012066172348568216,
+            0.00020445426343940198
+          ],
+          "mad_vs_previous": [
+            0.0,
+            0.00010904009104706347,
+            0.00011464628914836794
+          ]
+        }
+      },
+      "white_pixels": 0
+    },
+    "hopper": {
+      "facing_right": true,
+      "palette_count": 7,
+      "states": {
+        "attack": {
+          "actual_bottom": [
+            91,
+            81,
+            91
+          ],
+          "feet_y": 91,
+          "mad_vs_idle": [
+            0.0003546803491190076,
+            0.00045106600737199187,
+            0.00042192646651528776
+          ],
+          "mad_vs_previous": [
+            0.0,
+            0.0005663095507770777,
+            0.0006394691881723702
+          ]
+        },
+        "death": {
+          "actual_bottom": [
+            91,
+            91,
+            91
+          ],
+          "feet_y": 91,
+          "mad_vs_idle": [
+            0.00024035977548919618,
+            0.00041889562271535397,
+            0.0005103656440041959
+          ],
+          "mad_vs_previous": [
+            0.0,
+            0.0003300000389572233,
+            0.00025900622131302953
+          ]
+        },
+        "idle": {
+          "actual_bottom": [
+            91,
+            91,
+            91,
+            91
+          ],
+          "feet_y": 91,
+          "mad_vs_idle": [
+            0.0,
+            8.625488408142701e-05,
+            0.00013836074504069984,
+            0.00014292128616943955
+          ],
+          "mad_vs_previous": [
+            0.0,
+            8.625488408142701e-05,
+            7.64905198593624e-05,
+            8.235515269916505e-05
+          ]
+        },
+        "stagger": {
+          "actual_bottom": [
+            91,
+            91
+          ],
+          "feet_y": 91,
+          "mad_vs_idle": [
+            0.00011852162424474955,
+            0.00020936335204169154
+          ],
+          "mad_vs_previous": [
+            0.0,
+            0.0001911587023641914
+          ]
+        },
+        "windup": {
+          "actual_bottom": [
+            91,
+            91,
+            91
+          ],
+          "feet_y": 91,
+          "mad_vs_idle": [
+            0.00021633057622238994,
+            0.0003609063569456339,
+            0.00044281096779741347
+          ],
+          "mad_vs_previous": [
+            0.0,
+            0.0002041908010141924,
+            0.0002141679433407262
+          ]
+        }
+      },
+      "white_pixels": 0
+    },
+    "stalker": {
+      "facing_right": true,
+      "palette_count": 9,
+      "states": {
+        "attack": {
+          "actual_bottom": [
+            91,
+            91,
+            91
+          ],
+          "feet_y": 91,
+          "mad_vs_idle": [
+            0.00025280367117375135,
+            0.00046460246085189283,
+            0.0003729359887074679
+          ],
+          "mad_vs_previous": [
+            0.0,
+            0.00040167971746996045,
+            0.00032586875022388995
+          ]
+        },
+        "death": {
+          "actual_bottom": [
+            91,
+            91,
+            91
+          ],
+          "feet_y": 91,
+          "mad_vs_idle": [
+            0.00016362896712962538,
+            0.0003477528807707131,
+            0.0003904347540810704
+          ],
+          "mad_vs_previous": [
+            0.0,
+            0.00033430400071665645,
+            0.0002517461543902755
+          ]
+        },
+        "idle": {
+          "actual_bottom": [
+            91,
+            91,
+            91,
+            91
+          ],
+          "feet_y": 91,
+          "mad_vs_idle": [
+            0.0,
+            8.54564132168889e-05,
+            0.00010960327927023172,
+            7.301628647837788e-05
+          ],
+          "mad_vs_previous": [
+            0.0,
+            8.54564132168889e-05,
+            0.00015688076382502913,
+            0.00013795275299344212
+          ]
+        },
+        "stagger": {
+          "actual_bottom": [
+            91,
+            91
+          ],
+          "feet_y": 91,
+          "mad_vs_idle": [
+            0.0003590002888813615,
+            0.00020705426868516952
+          ],
+          "mad_vs_previous": [
+            0.0,
+            0.0002594742982182652
+          ]
+        },
+        "windup": {
+          "actual_bottom": [
+            91,
+            91,
+            91
+          ],
+          "feet_y": 91,
+          "mad_vs_idle": [
+            0.0001443981018383056,
+            0.00018985710630659014,
+            0.00021561594621744007
+          ],
+          "mad_vs_previous": [
+            0.0,
+            0.00011569443449843675,
+            0.0001164591230917722
+          ]
+        }
+      },
+      "white_pixels": 0
+    },
+    "warden": {
+      "facing_right": true,
+      "palette_count": 14,
+      "states": {
+        "attack": {
+          "actual_bottom": [
+            185,
+            185,
+            185
+          ],
+          "feet_y": 185,
+          "mad_vs_idle": [
+            0.00014076031220611185,
+            0.0003337140951771289,
+            0.00020695367129519582
+          ],
+          "mad_vs_previous": [
+            0.0,
+            0.00025487595121376216,
+            0.00019956038158852607
+          ]
+        },
+        "death": {
+          "actual_bottom": [
+            185,
+            185,
+            185
+          ],
+          "feet_y": 185,
+          "mad_vs_idle": [
+            0.0001517525379313156,
+            0.0003595826856326312,
+            0.00041551300091668963
+          ],
+          "mad_vs_previous": [
+            0.0,
+            0.00032566770096309483,
+            0.00028932729037478566
+          ]
+        },
+        "idle": {
+          "actual_bottom": [
+            185,
+            185,
+            185,
+            185
+          ],
+          "feet_y": 185,
+          "mad_vs_idle": [
+            0.0,
+            3.757426384254359e-05,
+            3.499111926430487e-06,
+            2.0461739040911198e-05
+          ],
+          "mad_vs_previous": [
+            0.0,
+            3.757426384254359e-05,
+            3.642887168098241e-05,
+            1.778762998583261e-05
+          ]
+        },
+        "stagger": {
+          "actual_bottom": [
+            185,
+            185
+          ],
+          "feet_y": 185,
+          "mad_vs_idle": [
+            0.00016600615344941616,
+            9.425204189028591e-05
+          ],
+          "mad_vs_previous": [
+            0.0,
+            0.00011402838572394103
+          ]
+        },
+        "windup": {
+          "actual_bottom": [
+            185,
+            185,
+            185
+          ],
+          "feet_y": 185,
+          "mad_vs_idle": [
+            2.089226290991064e-05,
+            0.00010871362610487267,
+            0.00018029352941084653
+          ],
+          "mad_vs_previous": [
+            0.0,
+            0.0001138736042776145,
+            0.00010670146730262786
+          ]
+        }
+      },
+      "white_pixels": 0
+    },
+    "warden_phase2": {
+      "facing_right": true,
+      "palette_count": 16,
+      "states": {
+        "attack": {
+          "actual_bottom": [
+            185,
+            185,
+            185
+          ],
+          "feet_y": 185,
+          "mad_vs_idle": [
+            0.0001542215613881126,
+            0.00033937752596102655,
+            0.0002140763244824484
+          ],
+          "mad_vs_previous": [
+            0.0,
+            0.0002592415257822722,
+            0.00020115917141083628
+          ]
+        },
+        "death": {
+          "actual_bottom": [
+            185,
+            185,
+            185
+          ],
+          "feet_y": 185,
+          "mad_vs_idle": [
+            0.00015981491014827043,
+            0.00034000573214143515,
+            0.00041259604040533304
+          ],
+          "mad_vs_previous": [
+            0.0,
+            0.0003101894981227815,
+            0.0002816897176671773
+          ]
+        },
+        "idle": {
+          "actual_bottom": [
+            185,
+            185,
+            185,
+            185
+          ],
+          "feet_y": 185,
+          "mad_vs_idle": [
+            0.0,
+            3.8613241486018524e-05,
+            3.3246139992115786e-06,
+            2.1579382519121282e-05
+          ],
+          "mad_vs_previous": [
+            0.0,
+            3.8613241486018524e-05,
+            3.729334639501758e-05,
+            1.8818311218637973e-05
+          ]
+        },
+        "stagger": {
+          "actual_bottom": [
+            185,
+            185
+          ],
+          "feet_y": 185,
+          "mad_vs_idle": [
+            0.00015972023538779467,
+            9.683117241365835e-05
+          ],
+          "mad_vs_previous": [
+            0.0,
+            0.00012027311458950862
+          ]
+        },
+        "windup": {
+          "actual_bottom": [
+            185,
+            185,
+            185
+          ],
+          "feet_y": 185,
+          "mad_vs_idle": [
+            1.9894478100468405e-05,
+            0.00011552133219083771,
+            0.00017454368935432285
+          ],
+          "mad_vs_previous": [
+            0.0,
+            0.00011908279702765867,
+            0.00011740477202693
+          ]
+        }
+      },
+      "white_pixels": 0
+    },
+    "wisp": {
+      "facing_right": true,
+      "palette_count": 8,
+      "states": {
+        "attack": {
+          "actual_bottom": [
+            89,
+            89,
+            89
+          ],
+          "feet_y": 89,
+          "mad_vs_idle": [
+            0.00021174948778934777,
+            0.0004113015020266175,
+            0.0002920498081948608
+          ],
+          "mad_vs_previous": [
+            0.0,
+            0.00034326809691265225,
+            0.0002910873154178262
+          ]
+        },
+        "death": {
+          "actual_bottom": [
+            89,
+            89,
+            89
+          ],
+          "feet_y": 89,
+          "mad_vs_idle": [
+            0.00018222293874714524,
+            0.00045960021088831127,
+            0.0005501157138496637
+          ],
+          "mad_vs_previous": [
+            0.0,
+            0.00043745996663346887,
+            0.0002403028920525685
+          ]
+        },
+        "idle": {
+          "actual_bottom": [
+            89,
+            89,
+            89,
+            89
+          ],
+          "feet_y": 89,
+          "mad_vs_idle": [
+            0.0,
+            0.0001390130491927266,
+            9.473652607994154e-05,
+            8.292349957628176e-05
+          ],
+          "mad_vs_previous": [
+            0.0,
+            0.0001390130491927266,
+            8.29421915113926e-05,
+            0.00014019847731105983
+          ]
+        },
+        "stagger": {
+          "actual_bottom": [
+            89,
+            89
+          ],
+          "feet_y": 89,
+          "mad_vs_idle": [
+            0.0003326805599499494,
+            0.00016556665650568902
+          ],
+          "mad_vs_previous": [
+            0.0,
+            0.00023588552721776068
+          ]
+        },
+        "windup": {
+          "actual_bottom": [
+            89,
+            89,
+            89
+          ],
+          "feet_y": 89,
+          "mad_vs_idle": [
+            1.5249209354806226e-05,
+            0.00015824040747247636,
+            0.00023717239673715085
+          ],
+          "mad_vs_previous": [
+            0.0,
+            0.00015386044105980545,
+            0.000159619448822923
+          ]
+        }
+      },
+      "white_pixels": 0
+    }
+  },
+  "scale": 2,
+  "version": 3,
+  "white_pixel_count": 0
+}

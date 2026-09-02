@@ -30,6 +30,18 @@ void fragment() {
 }
 """
 
+## Sprite hit flash: mixes the sampled texel toward a flat colour, keeping alpha.
+const FLASH_SHADER := """
+shader_type canvas_item;
+
+uniform float flash : hint_range(0.0, 1.0) = 0.0;
+uniform vec4 flash_color : source_color = vec4(1.0, 1.0, 1.0, 1.0);
+
+void fragment() {
+	COLOR.rgb = mix(COLOR.rgb, flash_color.rgb, flash);
+}
+"""
+
 ## Fullscreen edge falloff. Kept below the HUD layer so corner panels stay crisp.
 const VIGNETTE_SHADER := """
 shader_type canvas_item;
@@ -47,6 +59,7 @@ void fragment() {
 }
 """
 
+static var _flash_shader: Shader
 static var _radial_material: ShaderMaterial
 static var _vignette_material: ShaderMaterial
 static var _additive_material: CanvasItemMaterial
@@ -59,6 +72,12 @@ static func radial_material() -> ShaderMaterial:
 		_radial_material = ShaderMaterial.new()
 		_radial_material.shader = shader
 	return _radial_material
+
+static func flash_shader() -> Shader:
+	if _flash_shader == null:
+		_flash_shader = Shader.new()
+		_flash_shader.code = FLASH_SHADER
+	return _flash_shader
 
 static func vignette_material() -> ShaderMaterial:
 	if _vignette_material == null:
