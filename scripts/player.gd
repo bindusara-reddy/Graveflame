@@ -220,10 +220,11 @@ func _step_locomotion(delta: float, controls_locked: bool = false) -> void:
 	if not controls_locked and Input.is_action_just_pressed("parry") and parry_cd <= 0.0:
 		_begin_parry()
 		return
-	# Buffered attack (ground/upward air) or down-slam while falling.
+	# Buffered attack: real air slash while airborne, EXCEPT when already diving
+	# fast (committed fall -> down-slam). Grounded attacks unchanged.
 	if attack_buffer > 0.0:
 		attack_buffer = 0.0
-		if not is_on_floor() and velocity.y > -50.0:
+		if not is_on_floor() and velocity.y > 250.0:
 			_begin_slam()
 			return
 		_begin_attack()
