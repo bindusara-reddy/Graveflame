@@ -251,6 +251,7 @@ const SHEET_JSON := "res://assets/knight/knight_manifest.json"
 static var _sheet: Texture2D
 static var _sheet_frames: Dictionary = {}
 static var _sheet_flicker := 4
+static var _sheet_px := 1.0
 static var _sheet_checked := false
 
 static func _load_sheet() -> void:
@@ -273,6 +274,7 @@ static func _load_sheet() -> void:
 		return
 	_sheet = tex
 	_sheet_flicker = maxi(1, int(meta.get("flicker", 4)))
+	_sheet_px = float(meta.get("px", 1.0))
 	_sheet_frames.clear()
 	for name in meta.frames:
 		var r: Array = meta.frames[name]
@@ -288,6 +290,12 @@ static func texture() -> Texture2D:
 	if has_sheet():
 		return _sheet
 	return atlas()
+
+## World pixels per texel for the active frames.
+static func px() -> float:
+	if has_sheet():
+		return _sheet_px
+	return PX
 
 ## Art-pixel size of one frame (sheet frames may be larger than the tile frames).
 static func frame_size() -> Vector2:

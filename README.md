@@ -32,7 +32,8 @@ Gamepad is mapped too: left stick / d-pad move, A jump, X attack, Y lance, B das
 - **Feedback everywhere.** Floating damage numbers, blocked-hit callouts, hit-stop, a vignette that bleeds red at low health, chamber title cards, and an end-of-run summary (time, kills, elites, best streak, damage, chambers).
 - **One pixel grid, all of it rendered.** The world draws at 640x360 and upscales 2x with nearest filtering. The environment is a Blender-rendered tileset and three seamless parallax layers (`tools/render_environment.py` + `tests/env_bake.gd`): bevelled stone bricks for platform tops, fills, broken ends, ledges and pillars; distant towers; an arcade of stone arches with glazed rose windows and banners; near buttresses with sconces. Every pixel is toned inside its material's ramp so the sheets share one palette with the creatures.
 - **Real 2D lighting.** An ambient tint per mood and point lights on the knight's flame, torches, braziers, the open rift, the boss, wisps and elites, with atmospheric haze between the parallax planes.
-- **The knight is rendered the same way as the creatures.** `tools/render_knight.py` models and poses the knight in Blender (fire crown, tunic and sash, cape, sword), renders 21 poses × 4 crown-flicker frames plus a material-ID pass, and `tests/knight_bake.gd` bakes `assets/knight/knight_sheet.png`. If a sheet is missing the game falls back to procedural drawing.
+- **Every character is Blender-rendered at full pixel detail.** `tools/render_creatures.py` models, poses and renders the whole cast (stalker, hopper, wisp, brute, bomber, and the Ember Warden in both phases; idle, windup, attack, stagger and death) and `tests/creature_bake.gd` bakes the sheets and `anim_manifest.json` into `assets/creatures`. Characters carry one-pixel detail over the two-pixel environment grid, the same split Dead Cells uses.
+- **The knight is rendered the same way.** `tools/render_knight.py` models and poses the knight in Blender (fire crown, tunic and sash, cape, sword), renders 21 poses × 4 crown-flicker frames plus a material-ID pass, and `tests/knight_bake.gd` bakes `assets/knight/knight_sheet.png`. If a sheet is missing the game falls back to procedural drawing. After any bake, run a headless import so Godot picks up the new textures.
 - **A keep that warms as you descend.** The palette blends from a cold, moonlit blue crypt through a forge to the crimson throne, tinting tiles, layers and light; chambers carry their own set dressing (candles, bone piles, gallows, gears and pipes, braziers, the Ember Throne).
 - **Procedural score.** Two seamless loops (an exploration bed and a boss theme) are synthesized from sine math on a worker thread at boot. There are no audio assets. Toggle music under Pause → Sound.
 - **Meta progression.** Cells persist between runs and buy permanent upgrades at the Forge.
@@ -59,9 +60,14 @@ godot4 --headless --path . --script res://tests/music_dump.gd -- /tmp/graveflame
 # Rebuild the environment art: render tiles + parallax layers in Blender, bake into assets/env
 blender -b --python tools/render_environment.py -- /tmp/graveflame-env-render
 godot4 --headless --path . --script res://tests/env_bake.gd -- /tmp/graveflame-env-render
+# Rebuild the creature family: render in Blender, then bake sheets + manifest into assets/creatures
+blender -b --python tools/render_creatures.py -- /tmp/graveflame-creature-render
+godot4 --headless --path . --script res://tests/creature_bake.gd -- /tmp/graveflame-creature-render
 # Rebuild the knight: render in Blender, then bake the sheet into assets/knight
 blender -b --python tools/render_knight.py -- /tmp/graveflame-knight-render
 godot4 --headless --path . --script res://tests/knight_bake.gd -- /tmp/graveflame-knight-render
+# Refresh Godot's import cache after any bake
+godot4 --headless --import --path .
 # Fallback tile compositor sheet (used only when assets/knight is absent)
 godot4 --headless --path . --script res://tests/knight_dump.gd -- /tmp/graveflame-knight
 # Drive a run and save 1280x720 screenshots of the key beats. Renders offscreen, so
@@ -73,7 +79,7 @@ Both tools and the runtime suite write to a scratch save file, never to the play
 
 ## Status
 
-Playable vertical slice. Visuals are procedural pixel art plus Blender-rendered sprite sheets (creature family and the knight); audio is synthesized at runtime.
+Playable vertical slice. Visuals are Blender-rendered sprite sheets (knight, creature family, environment tiles and parallax layers) over a procedural pixel pipeline; audio is synthesized at runtime.
 
 ## License
 

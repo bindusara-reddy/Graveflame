@@ -726,7 +726,7 @@ func _draw_title_masonry(ci: Control) -> void:
 	var pose := "idle%d" % (int(t * 1.6) % 2)
 	var tick := int(t * 9.0)
 	var frame := KnightArt.frame(pose, tick)
-	var px := KnightArt.PX * k_scale
+	var px := KnightArt.px() * k_scale
 	var fsize := frame.size * px
 	# Mirror about the knight's centre so the right-facing frame looks toward the title.
 	ci.draw_set_transform(Vector2(kx, 0.0), 0.0, Vector2(-1.0, 1.0))

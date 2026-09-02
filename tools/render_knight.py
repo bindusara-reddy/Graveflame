@@ -6,7 +6,7 @@ and each of the four fire-crown flicker frames, plus poses.json. The Godot
 bake step (tests/knight_bake.gd) turns those into the palette-quantized sheet.
 
 Units are art pixels. The knight faces +X, stands on z = 0 and is ~26 px tall;
-the camera frames x in [-20, 20], z in [0, 40] (a 40 x 40 art frame).
+the camera frames x in [-40, 40], z in [0, 80] (an 80 x 80 frame, 1 world px each).
 """
 import json
 import math
@@ -16,7 +16,7 @@ import sys
 import bpy
 from mathutils import Vector
 
-ART_W, ART_H = 40, 40
+ART_W, ART_H = 80, 80
 SUPER = 8  # render supersampling factor
 
 # --- palette-ish base colours (the bake step quantizes to the real palette) ---
@@ -197,6 +197,8 @@ class Knight:
         self.m = m
         # Joints
         self.root = empty("root", None, (0, 0, 0))
+        # Authored at 2 world px per unit; the frame is 1 world px per art pixel.
+        self.root.scale = (2.0, 2.0, 2.0)
         self.hips = empty("hips", self.root, (0, 0, 10.0))
         self.spine = empty("spine", self.hips, (0, 0, 0.5))
         self.neck = empty("neck", self.spine, (0.6, 0, 8.4))
@@ -254,7 +256,7 @@ class Knight:
             parent = seg
 
     def pose(self, p):
-        self.root.location = (0, 0, -p.get("bob", 0.0))
+        self.root.location = (0, 0, -p.get("bob", 0.0) * 2.0)
         self.spine.rotation_euler = (0, rad(p.get("torso", 0.0)), 0)
         self.neck.rotation_euler = (0, rad(p.get("head", 0.0)), 0)
         legs = p.get("legs", (0, 0, 0, 0))

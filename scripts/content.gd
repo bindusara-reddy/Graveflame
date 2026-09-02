@@ -15,9 +15,10 @@ const L_TRIGGER := 1 << 7
 # --- World / camera ---
 const VIEW_W := 1280
 const VIEW_H := 720
-## World pixels per rendered pixel. The creature sheets are drawn on a 2-pixel
-## grid, so the whole world renders at 640x360 and upscales with nearest filtering.
-const PIXEL_SCALE := 2.0
+## World pixels per rendered pixel. Environment art is authored on a 2-pixel
+## grid (its textures are drawn at 2x), while characters carry 1-pixel detail,
+## so the world renders at full resolution.
+const PIXEL_SCALE := 1.0
 const TILE := 64
 const FLOOR_Y := 600.0
 const ROOM_LEFT := -200.0

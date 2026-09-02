@@ -8,19 +8,19 @@ extends SceneTree
 
 ## Family -> [ID colour, ramp dark..light]
 const FAMILIES := {
-	"cloak": [Color(1, 0, 0), [Color("32111a"), Color("4a1a22"), Color("6f2a31")]],
-	"tunic": [Color(0, 1, 0), [Color("8e867a"), Color("bfb5a6"), Color("e8e0d0")]],
-	"dark": [Color(0, 0, 1), [Color("14101a"), Color("2a2236"), Color("3d3350")]],
+	"cloak": [Color(1, 0, 0), [Color("2a0d14"), Color("4a1a22"), Color("6f2a31"), Color("8e3a3f")]],
+	"tunic": [Color(0, 1, 0), [Color("7c7468"), Color("a89e90"), Color("cfc5b6"), Color("ece5d8")]],
+	"dark": [Color(0, 0, 1), [Color("14101a"), Color("221c2c"), Color("342b42")]],
 	"mask": [Color(0, 1, 1), [Color("a89e90"), Color("d8cfc0"), Color("f2ebe0")]],
-	"head": [Color(0.5, 0, 0.5), [Color("241b30"), Color("3a2d4c"), Color("54436b")]],
-	"steel": [Color(1, 0, 1), [Color("6e7887"), Color("aab4c4"), Color("e6ecf4")]],
-	"gold": [Color(1, 1, 0), [Color("9c7233"), Color("f0b45a"), Color("ffe6a8")]],
+	"steel": [Color(1, 0, 1), [Color("4e586a"), Color("7d8899"), Color("aab4c4"), Color("e6ecf4")]],
+	"gold": [Color(1, 1, 0), [Color("8a6228"), Color("c0903f"), Color("f0b45a"), Color("ffe6a8")]],
 	"sash": [Color(1, 0.5, 0), [Color("b8520c"), Color("ff7a18"), Color("ffa827")]],
-	"flame_outer": [Color(0.5, 0, 0), [Color("ff5a10")]],
-	"flame_inner": [Color(0, 0.5, 0), [Color("ffa827")]],
+	"flame_outer": [Color(0.5, 0, 0), [Color("e0400c"), Color("ff5a10")]],
+	"flame_inner": [Color(0, 0.5, 0), [Color("ff9a1a"), Color("ffb84a")]],
 	"flame_core": [Color(1, 1, 1), [Color("fff0d0")]],
 	"eye": [Color(0, 0, 0.5), [Color("ff7a18")]],
 	"outline": [Color(0, 0, 0), [Color("14101a")]],
+	"head": [Color(0.5, 0, 0.5), [Color("1e1628"), Color("2f2540"), Color("443658"), Color("5b4b74")]],
 }
 const COLS := 12
 
@@ -97,13 +97,18 @@ func _bake() -> void:
 			if entry == null: continue
 			if not lums.has(entry[0]): lums[entry[0]] = PackedFloat32Array()
 			lums[entry[0]].append(entry[1])
-	# Auto-level thresholds: split each family's luminance range at its 33rd/66th percentiles.
+	# Auto-level thresholds: split each family's luminance range into as many
+	# bands as its ramp has tones (slightly favouring the mid tones).
 	var thresholds := {}
 	for fam in lums:
 		var arr: PackedFloat32Array = lums[fam]
 		arr.sort()
 		var n := arr.size()
-		thresholds[fam] = [arr[int(n * 0.33)], arr[int(n * 0.70)]]
+		var ramp: Array = FAMILIES[fam][1]
+		var cuts: Array = []
+		for i in range(1, ramp.size()):
+			cuts.append(arr[mini(n - 1, int(n * float(i) / float(ramp.size())))])
+		thresholds[fam] = cuts
 	var rows := int(ceil(float(names.size()) / float(COLS)))
 	var sheet := Image.create(COLS * w, rows * h, false, Image.FORMAT_RGBA8)
 	sheet.fill(Color(0, 0, 0, 0))
@@ -122,12 +127,10 @@ func _bake() -> void:
 				var fam: String = entry[0]
 				var ramp: Array = FAMILIES[fam][1]
 				var tone := 0
-				if ramp.size() > 1:
-					var th: Array = thresholds[fam]
-					var l: float = entry[1]
-					tone = 0 if l < th[0] else (1 if l < th[1] else 2)
-					tone = mini(tone, ramp.size() - 1)
-				frame.set_pixel(x, y, ramp[tone])
+				for cut in thresholds[fam]:
+					if float(entry[1]) >= float(cut):
+						tone += 1
+				frame.set_pixel(x, y, ramp[mini(tone, ramp.size() - 1)])
 		# Silhouette edge: grow the shape by one pixel of outline colour so thin
 		# features (the blade) keep their own colour.
 		var outline: Color = FAMILIES["outline"][1][0]
@@ -145,12 +148,12 @@ func _bake() -> void:
 		i += 1
 	DirAccess.make_dir_recursive_absolute(ProjectSettings.globalize_path(out_dir))
 	sheet.save_png(out_dir.path_join("knight_sheet.png"))
-	var manifest := { "frame_w": w, "frame_h": h, "flicker": flicker, "poses": poses, "frames": frames }
+	var manifest := { "frame_w": w, "frame_h": h, "flicker": flicker, "px": 1.0, "poses": poses, "frames": frames }
 	var f := FileAccess.open(out_dir.path_join("knight_manifest.json"), FileAccess.WRITE)
 	f.store_string(JSON.stringify(manifest, "  "))
 	f.close()
 	var big: Image = sheet.duplicate()
-	big.resize(sheet.get_width() * 6, sheet.get_height() * 6, Image.INTERPOLATE_NEAREST)
+	big.resize(sheet.get_width() * 3, sheet.get_height() * 3, Image.INTERPOLATE_NEAREST)
 	var backed := Image.create(big.get_width(), big.get_height(), false, Image.FORMAT_RGBA8)
 	backed.fill(Color("2a2438"))
 	backed.blend_rect(big, Rect2i(Vector2i.ZERO, big.get_size()), Vector2i.ZERO)

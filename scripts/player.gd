@@ -792,7 +792,7 @@ func _build_body() -> void:
 	_knight.centered = true
 	_knight.offset = Vector2(0.0, -KnightArt.frame_size().y * 0.5)
 	_knight.position = Vector2(0.0, Content.P_BODY_H * 0.5)
-	_knight.scale = Vector2(KnightArt.PX, KnightArt.PX)
+	_knight.scale = Vector2(KnightArt.px(), KnightArt.px())
 	_knight.texture_filter = CanvasItem.TEXTURE_FILTER_NEAREST
 	_knight.show_behind_parent = true
 	_knight_flash = ShaderMaterial.new()
@@ -866,7 +866,7 @@ func _draw() -> void:
 		var fs := (1.35 if flame else 1.0) * (1.0 + air * 0.15)
 		_flame.scale = Vector2(fs, fs)
 		_flame.modulate = Color(1.25, 1.15, 1.05) if flame else Color.WHITE
-		_knight.scale = Vector2(KnightArt.PX * sc.x, KnightArt.PX * sc.y)
+		_knight.scale = Vector2(KnightArt.px() * sc.x, KnightArt.px() * sc.y)
 		_knight.rotation = lean
 		_knight_flash.set_shader_parameter("flash", 1.0 if _hurt_flash > 0.0 else 0.0)
 		var tint := Color.WHITE

@@ -26,6 +26,7 @@ var active_time_provider: Callable   ## optional: seconds the owner's ATTACK sta
 var size_mul := 1.0                  ## elite scale on top of SHEET_SCALE
 var elite_tint := Color.WHITE        ## gilding for elites, multiplied with the mood tint
 var _sheet := ""
+var _sheet_scale := SHEET_SCALE        ## world px per sheet px for the active sheet (manifest "scale")
 var _idle_t := 0.0
 var _stagger_total := 0.18
 var _last_state := -1
@@ -86,7 +87,8 @@ func _family() -> String:
 static func feet_offset(info: Dictionary, p_foot_y: float) -> Vector2:
 	var frame_h := float(info.get("frame_h", 96))
 	var feet := float(info.get("feet_y", frame_h - 1.0))
-	return Vector2(0.0, p_foot_y / SHEET_SCALE - (feet + 0.5 - frame_h * 0.5))
+	var sheet_scale := float(info.get("scale", SHEET_SCALE))
+	return Vector2(0.0, p_foot_y / sheet_scale - (feet + 0.5 - frame_h * 0.5))
 
 func _apply_sheet(state: String) -> void:
 	var fam := _family()
@@ -105,6 +107,7 @@ func _apply_sheet(state: String) -> void:
 	hframes = maxi(1, int(info.get("frames", 1)))
 	vframes = 1
 	frame = 0
+	_sheet_scale = float(info.get("scale", SHEET_SCALE))
 	offset = feet_offset(info, foot_y)
 
 func _frame_at(t: float) -> void:
@@ -127,7 +130,7 @@ func _process(delta: float) -> void:
 	var spawn := float(p.get("_spawn_anim"))
 	if spawn > 0.0:
 		pop = 1.0 - spawn / 0.4
-	scale = Vector2(SHEET_SCALE * pop * size_mul, SHEET_SCALE * pop * size_mul)
+	scale = Vector2(_sheet_scale * pop * size_mul, _sheet_scale * pop * size_mul)
 	_flash_material.set_shader_parameter("flash", 1.0 if float(p.get("_hurt_flash")) > 0.0 else 0.0)
 	var data: Dictionary = p.get("data")
 	var st_timer := float(p.get("st_timer"))
@@ -179,7 +182,8 @@ func _on_owner_died(_score: int = 0) -> void:
 	corpse.hframes = maxi(1, int(info.get("frames", 1)))
 	corpse.frame = 0
 	corpse.flip_h = flip_h
-	corpse.scale = Vector2(SHEET_SCALE * size_mul, SHEET_SCALE * size_mul)
+	var corpse_scale := float(info.get("scale", SHEET_SCALE))
+	corpse.scale = Vector2(corpse_scale * size_mul, corpse_scale * size_mul)
 	corpse.self_modulate = self_modulate
 	corpse.offset = feet_offset(info, foot_y)
 	host.add_child(corpse)
