@@ -61,8 +61,14 @@ func _ready() -> void:
 	_atk_area.set_meta("attack_kind", "melee")
 	_atk_area.set_meta("attack_active", false)
 	add_child(_atk_area)
+	_build_body()
+	_sprite.creature_provider = func() -> String: return "warden_phase2" if phase == BPhase.TWO else "warden"
+	_sprite.active_time_provider = func() -> float: return 0.22 if action_idx == 0 else 0.3
 	phase = BPhase.INTRO
 	state = EState.SEEK
+
+func _creature_name() -> String:
+	return "warden"
 
 func _physics_process(delta: float) -> void:
 	if dead: return
@@ -79,6 +85,8 @@ func _physics_process(delta: float) -> void:
 		_atk_area.set_meta("attack_active", false)
 	_hurt_flash = maxf(0.0, _hurt_flash - delta)
 	_wisp_t += delta  # reuse for aura pulsing
+	_air_time = 0.0 if is_on_floor() else minf(_air_time + delta, 1.0)
+	_anim_t += delta
 	queue_redraw()
 	if phase == BPhase.INTRO:
 		intro_t -= delta
@@ -268,62 +276,25 @@ func _die(_award_reward: bool = true) -> void:
 	emit_signal("died", 200)
 	emit_signal("died_boss")
 
-func _draw() -> void:
-	var col := Content.BOSS_COLOR
-	if _hurt_flash > 0.0: col = Color.WHITE
+## Under-pass beneath the sprite body: phase-2 aura and the contact shadow.
+func _draw_under() -> void:
 	var w := Content.BOSS_W
 	var h := Content.BOSS_H
-	# aura in phase 2
 	if phase == BPhase.TWO:
-		var pulse := 0.12 + sin(_wisp_t * 4.0) * 0.05
-		draw_circle(Vector2.ZERO, w * 0.8, Color(1.0, 0.3, 0.3, pulse))
-		draw_circle(Vector2.ZERO, w * 1.1, Color(1.0, 0.3, 0.3, pulse * 0.5))
-	# Floor shadow, torn mantle and plated silhouette.
-	draw_colored_polygon(PackedVector2Array([
-		Vector2(-48.0, h * 0.50), Vector2(48.0, h * 0.50),
-		Vector2(34.0, h * 0.59), Vector2(-34.0, h * 0.59),
-	]), Color(0.0, 0.0, 0.0, 0.34))
-	draw_colored_polygon(PackedVector2Array([
-		Vector2(-facing * 18.0, -h * 0.35),
-		Vector2(-facing * 58.0, -h * 0.05),
-		Vector2(-facing * 42.0, h * 0.42),
-		Vector2(-facing * 12.0, h * 0.27),
-	]), Color("421c2c"))
-	draw_line(Vector2(-18.0, h * 0.18), Vector2(-22.0, h * 0.48), Color("241a2b"), 16.0, true)
-	draw_line(Vector2(18.0, h * 0.18), Vector2(22.0, h * 0.48), Color("241a2b"), 16.0, true)
-	draw_colored_polygon(PackedVector2Array([
-		Vector2(-w * 0.48, -h * 0.34), Vector2(w * 0.48, -h * 0.34),
-		Vector2(w * 0.56, h * 0.22), Vector2(0.0, h * 0.40),
-		Vector2(-w * 0.56, h * 0.22),
-	]), col)
-	# Armor ribs and a furnace core make the boss legible at a glance.
-	for rib in range(3):
-		var ry := -h * 0.12 + float(rib) * 15.0
-		draw_line(Vector2(-w * 0.36, ry), Vector2(w * 0.36, ry + 3.0), col.lightened(0.18), 3.0, true)
-	var core_pulse := 0.85 + sin(_wisp_t * 6.0) * 0.12
-	draw_circle(Vector2(0.0, 6.0), 12.0 * core_pulse, Color(1.0, 0.25, 0.08, 0.24))
-	draw_circle(Vector2(0.0, 6.0), 6.0, Color("ff9d2e"))
-	# Mask and crown spikes.
-	draw_colored_polygon(PackedVector2Array([
-		Vector2(-w * 0.34, -h * 0.46), Vector2(w * 0.34, -h * 0.46),
-		Vector2(w * 0.28, -h * 0.18), Vector2(0.0, -h * 0.10),
-		Vector2(-w * 0.28, -h * 0.18),
-	]), Color("251823") if _hurt_flash <= 0.0 else Color.WHITE)
-	for i in range(5):
-		var x := lerpf(-w*0.4, w*0.4, float(i) / 4.0)
-		draw_colored_polygon(PackedVector2Array([
-			Vector2(x - 6, -h*0.5), Vector2(x + 6, -h*0.5), Vector2(x, -h*0.5 - 16)
-		]), col.lightened(float(i % 2) * 0.12))
-	# eyes
-	draw_line(Vector2(-13.0, -h * 0.31), Vector2(-3.0, -h * 0.28), Color("ffd23f"), 4.0, true)
-	draw_line(Vector2(13.0, -h * 0.31), Vector2(3.0, -h * 0.28), Color("ffd23f"), 4.0, true)
-	# Massive cleaver arm points toward the player.
-	draw_line(Vector2(facing * 24.0, -10.0), Vector2(facing * 55.0, 16.0), Color("918697"), 9.0, true)
-	draw_colored_polygon(PackedVector2Array([
-		Vector2(facing * 48.0, 8.0), Vector2(facing * 75.0, 20.0),
-		Vector2(facing * 58.0, 31.0), Vector2(facing * 40.0, 17.0),
-	]), Color("b8a9b8"))
-	# telegraph
+		var t := _anim_t if not Feedback.motion_reduced else 0.0
+		var pulse := 0.12 + sin(t * 4.0) * 0.05
+		_shadow.draw_circle(Vector2.ZERO, w * 0.8, Color(1.0, 0.25, 0.05, pulse))
+		_shadow.draw_circle(Vector2.ZERO, w * 1.1, Color(1.0, 0.25, 0.05, pulse * 0.5))
+	VFX.draw_contact_shadow(_shadow, Vector2(0.0, h * 0.5 + 2.0), 88.0, 16.0, clampf(_air_time / 0.3, 0.0, 1.0))
+
+func _draw() -> void:
+	# Overlays above the sprite body: windup telegraph on the true hitbox, burn flames.
+	var w := Content.BOSS_W
+	var h := Content.BOSS_H
 	if state == EState.WINDUP:
-		var t := 1.0 - st_timer / maxf(0.01, data.windup)
-		draw_rect(Rect2(-w*0.5, -h*0.5, w, h), Color(1.0, 0.2, 0.2, t * 0.4), false, 4.0)
+		var tw := clampf(1.0 - st_timer / maxf(0.01, float(data.windup)), 0.0, 1.0)
+		draw_rect(Rect2(-w * 0.5, -h * 0.5, w, h), Color(1.0, 0.35, 0.1, tw * 0.45), false, 3.0)
+	if burn_time > 0.0:
+		var t := _anim_t if not Feedback.motion_reduced else 0.0
+		for i in range(3):
+			VFX.draw_flame(self, Vector2(-w * 0.5 + float(i) * w * 0.5, -h * 0.44), 16.0, 9.0, t, float(i) * 2.3)

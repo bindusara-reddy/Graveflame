@@ -2,6 +2,8 @@ class_name UI
 extends CanvasLayer
 ## Responsive HUD and atmospheric screen overlays, built with Godot-native controls.
 
+const VFX := preload("res://scripts/vfx.gd")
+
 signal start_requested
 signal resume_requested
 signal restart_requested
@@ -22,7 +24,7 @@ const C_MUTED := Color("a99db2")
 const C_EMBER := Color("ff7a18")
 const C_EMBER_HI := Color("ffad4d")
 const C_GOLD := Color("ffd166")
-const C_MINT := Color("5fe8a8")
+const C_MINT := Color("2be4c8")
 const C_BLUE := Color("7fd4ff")
 const C_RED := Color("dc5962")
 
@@ -53,6 +55,10 @@ var _upgrade_row: HBoxContainer
 var _forge_rows: VBoxContainer
 var _reduced_motion_check: CheckBox
 var _reduced_flash_check: CheckBox
+
+var _title_top_label: Label
+var _title_embers: CPUParticles2D
+var _title_t := 0.0
 
 
 func _ready() -> void:
@@ -249,15 +255,14 @@ func _build_room_clear_banner() -> void:
 
 func _build_title() -> void:
 	var panel := _screen("title", true, C_EMBER)
+	_build_title_scene(panel)
 	var content := _dialog(panel, Vector2(920, 640), C_EMBER, 46, 40)
+	# Slightly translucent card so the furnace horizon bleeds through.
+	(panel.get_meta("dialog") as PanelContainer).add_theme_stylebox_override("panel", _panel_box(Color("14101cd2"), C_EMBER.darkened(0.35), 14, 1, 18))
 	content.add_theme_constant_override("separation", 10)
 
 	content.add_child(_make_label("AN ORIGINAL ACTION-ROGUELITE", 13, C_EMBER_HI, HorizontalAlignment.HORIZONTAL_ALIGNMENT_CENTER))
-	var title := _make_label("GRAVEFLAME", 74, C_TEXT, HorizontalAlignment.HORIZONTAL_ALIGNMENT_CENTER)
-	title.add_theme_color_override("font_shadow_color", Color("00000099"))
-	title.add_theme_constant_override("shadow_offset_x", 4)
-	title.add_theme_constant_override("shadow_offset_y", 5)
-	content.add_child(title)
+	content.add_child(_build_title_stack("GRAVEFLAME", 74))
 	content.add_child(_make_label("Descend. Adapt. Burn brighter.", 18, C_MUTED, HorizontalAlignment.HORIZONTAL_ALIGNMENT_CENTER))
 	content.add_child(_separator(C_EMBER))
 
@@ -452,6 +457,156 @@ func _build_forge() -> void:
 	back.pressed.connect(func(): emit_signal("back_from_forge_requested"))
 	footer.add_child(back)
 	panel.set_meta("back_button", back)
+
+
+# --- Title scene ---------------------------------------------------------------
+
+func _build_title_scene(panel: Control) -> void:
+	# Furnace horizon, silhouetted battlements and rising embers behind the dialog.
+	var scene := Control.new()
+	scene.name = "TitleScene"
+	scene.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	panel.add_child(scene)
+	scene.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+
+	var glow := Control.new()
+	glow.name = "FurnaceGlow"
+	glow.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	glow.material = VFX.radial_material()
+	scene.add_child(glow)
+	glow.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	glow.draw.connect(_draw_title_glow.bind(glow))
+	glow.resized.connect(glow.queue_redraw)
+
+	var masonry := Control.new()
+	masonry.name = "Battlements"
+	masonry.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	scene.add_child(masonry)
+	masonry.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	masonry.draw.connect(_draw_title_masonry.bind(masonry))
+	masonry.resized.connect(masonry.queue_redraw)
+
+	_title_embers = CPUParticles2D.new()
+	_title_embers.name = "TitleEmbers"
+	_title_embers.amount = 80
+	_title_embers.lifetime = 5.0
+	_title_embers.preprocess = 3.0
+	_title_embers.emission_shape = CPUParticles2D.EMISSION_SHAPE_RECTANGLE
+	_title_embers.local_coords = true
+	_title_embers.direction = Vector2(0.0, -1.0)
+	_title_embers.spread = 14.0
+	_title_embers.gravity = Vector2.ZERO
+	_title_embers.initial_velocity_min = 80.0
+	_title_embers.initial_velocity_max = 180.0
+	_title_embers.tangential_accel_min = -24.0
+	_title_embers.tangential_accel_max = 24.0
+	_title_embers.scale_amount_min = 2.0
+	_title_embers.scale_amount_max = 5.0
+	var ramp := Gradient.new()
+	ramp.offsets = PackedFloat32Array([0.0, 0.1, 0.55, 1.0])
+	ramp.colors = PackedColorArray([Color(VFX.GOLD, 0.0), Color(VFX.GOLD, 0.9), Color(VFX.ORANGE, 0.6), Color(VFX.EMBER, 0.0)])
+	_title_embers.color_ramp = ramp
+	_title_embers.material = VFX.additive_material()
+	scene.add_child(_title_embers)
+	scene.resized.connect(_fit_title_embers.bind(scene))
+	_fit_title_embers(scene)
+
+
+func _fit_title_embers(scene: Control) -> void:
+	var s := scene.size
+	_title_embers.position = Vector2(s.x * 0.5, s.y + 10.0)
+	_title_embers.emission_rect_extents = Vector2(maxf(s.x * 0.5, 1.0), 6.0)
+
+
+func _draw_title_glow(ci: Control) -> void:
+	# Horizon furnace: bottom-anchored radial stretched wide so it reads past the
+	# dialog card and above the battlement line.
+	var s := ci.size
+	var stretch := 2.4
+	ci.draw_set_transform(Vector2.ZERO, 0.0, Vector2(stretch, 1.0))
+	var origin := Vector2(s.x * 0.5 / stretch, s.y * 0.92)
+	VFX.draw_radial(ci, origin, maxf(s.y * 0.8, 580.0), Color(VFX.EMBER, 0.9))
+	VFX.draw_radial(ci, origin + Vector2(0.0, 30.0), s.y * 0.5, Color(VFX.ORANGE, 0.5))
+	ci.draw_set_transform(Vector2.ZERO, 0.0, Vector2.ONE)
+
+
+func _draw_title_masonry(ci: Control) -> void:
+	var s := ci.size
+	if s.x <= 0.0 or s.y <= 0.0:
+		return
+	# Midground pillars in mortar, then ruined battlements in void along the bottom.
+	var pillar := Color(VFX.MORTAR, 0.6)
+	var count := int(s.x / 150.0) + 1
+	for i in range(count):
+		var px := float(i) * 150.0 + 40.0 + VFX.hash01(i, 1) * 50.0
+		var top := s.y * (0.32 + VFX.hash01(i, 2) * 0.22)
+		ci.draw_rect(Rect2(px, top, 34.0, s.y - top), pillar)
+		ci.draw_rect(Rect2(px - 7.0, top, 48.0, 12.0), Color(VFX.MORTAR, 0.8))
+		ci.draw_line(Vector2(px + 34.0, top), Vector2(px + 34.0, s.y), Color(VFX.RIM, 0.25), 1.5)
+	var wall_top := s.y * 0.84
+	var pts := PackedVector2Array([Vector2(0.0, s.y + 2.0)])
+	var x := 0.0
+	var seg_i := 0
+	var up := true
+	while x < s.x:
+		var seg := 42.0 + VFX.hash01(seg_i, 3) * 34.0
+		var y := wall_top - (26.0 if up else 0.0) - VFX.hash01(seg_i, 4) * 10.0
+		pts.append(Vector2(x, y))
+		pts.append(Vector2(minf(x + seg, s.x), y))
+		x += seg
+		seg_i += 1
+		up = not up
+	pts.append(Vector2(s.x, s.y + 2.0))
+	ci.draw_colored_polygon(pts, VFX.VOID)
+	ci.draw_line(Vector2(0.0, wall_top + 1.0), Vector2(s.x, wall_top + 1.0), Color(VFX.RIM, 0.12), 1.0)
+
+
+func _build_title_stack(text: String, size: int) -> Control:
+	# Three stacked labels: void drop shadow, ember-rimmed orange core, gold face.
+	var stack := Control.new()
+	stack.name = "TitleStack"
+	stack.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	stack.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	var shadow := _make_label(text, size, VFX.VOID, HorizontalAlignment.HORIZONTAL_ALIGNMENT_CENTER)
+	shadow.add_theme_color_override("font_outline_color", VFX.VOID)
+	shadow.add_theme_constant_override("outline_size", 6)
+	var rim := _make_label(text, size, VFX.ORANGE, HorizontalAlignment.HORIZONTAL_ALIGNMENT_CENTER)
+	rim.add_theme_color_override("font_outline_color", VFX.EMBER)
+	rim.add_theme_constant_override("outline_size", 2)
+	var face := _make_label(text, size, VFX.GOLD, HorizontalAlignment.HORIZONTAL_ALIGNMENT_CENTER)
+	face.add_theme_constant_override("outline_size", 0)
+	var offsets := [8.0, 3.0, 0.0]
+	var layers := [shadow, rim, face]
+	for i in range(layers.size()):
+		var label: Label = layers[i]
+		stack.add_child(label)
+		label.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+		label.offset_top = offsets[i]
+		label.offset_bottom = offsets[i]
+	stack.custom_minimum_size = Vector2(0.0, maxf(face.get_minimum_size().y, float(size) * 1.2) + 8.0)
+	_title_top_label = face
+	return stack
+
+
+func _process(delta: float) -> void:
+	# Firelight wobble on the title face; frozen (and embers hidden) under reduced motion.
+	if _title_top_label == null:
+		return
+	var title_panel: Control = _panels.get("title", null)
+	if title_panel == null or not title_panel.visible:
+		return
+	var still := Feedback.motion_reduced
+	if _title_embers != null and _title_embers.visible == still:
+		_title_embers.visible = not still
+		_title_embers.emitting = not still
+	if still:
+		_title_top_label.add_theme_color_override("font_color", VFX.GOLD)
+		return
+	_title_t += delta
+	var wave := 0.5 + 0.5 * sin(_title_t * 2.6)
+	var flicker := 1.0 + sin(_title_t * 11.0) * 0.03 + sin(_title_t * 29.0) * 0.03
+	var col := VFX.GOLD.lerp(VFX.ORANGE, wave * 0.4)
+	_title_top_label.add_theme_color_override("font_color", Color(col.r * flicker, col.g * flicker, col.b * flicker, 1.0))
 
 
 # --- Responsive building blocks ---------------------------------------------

@@ -4,6 +4,8 @@ extends CharacterBody2D
 ## wall slide + wall jump, healing flask, hurt, custom drawing.
 ## A Dead Cells-inspired action-roguelite character. All art is drawn procedurally.
 
+const VFX := preload("res://scripts/vfx.gd")
+
 signal hp_changed(hp: float, max_hp: float)
 signal special_changed(value: float, maximum: float)
 signal projectile_requested(team: String, pos: Vector2, vel: Vector2, dmg: float, kb: float, pierce: int, life: float, color: Color)
@@ -73,6 +75,7 @@ var _heal_time := 0.0
 var _flame_time := 0.0
 var _anim_time := 0.0
 var _input_lock_frames := 0
+var _air_time := 0.0  # visual only: drives the contact shadow
 
 func setup(rm: RunModel) -> void:
 	_run_model = rm
@@ -174,6 +177,7 @@ func _physics_process(delta: float) -> void:
 		State.HURT: _step_hurt(delta)
 		State.DEAD: pass
 
+	_air_time = 0.0 if is_on_floor() else minf(_air_time + delta, 1.0)
 	queue_redraw()
 
 # --- Locomotion ---
@@ -357,6 +361,7 @@ func _activate_hitbox(def: Dictionary) -> void:
 	_attack_arc = def.arc
 	_attack_range = def.range
 	atk_hit.clear()
+	emit_signal("action_feedback", "swing_active", global_position)
 	if attack_index == Content.COMBO.size() - 1 and _flame_time > 0.0:
 		var wave_pos := global_position + Vector2(facing * 34.0, -8.0)
 		emit_signal("projectile_requested", "player", wave_pos, Vector2(facing * 560.0, 0.0), 18.0 * float(build.get("dmg_mul", 1.0)), 320.0, 2, 0.32, Content.PAL.player_accent)
@@ -667,13 +672,9 @@ func _draw() -> void:
 	var body_col: Color = Content.PAL.player if not flicker else Content.PAL.player_accent
 	if _hurt_flash > 0.0: body_col = Color.WHITE
 	if _flask_heal_flash > 0.0:
-		body_col = body_col.lerp(Color("5fe8a8"), 0.5)
-	# Grounding shadow and a compact, readable flame-headed silhouette.
-	if is_on_floor():
-		draw_colored_polygon(PackedVector2Array([
-			Vector2(-18, h * 0.52), Vector2(18, h * 0.52),
-			Vector2(12, h * 0.60), Vector2(-12, h * 0.60),
-		]), Color(0.0, 0.0, 0.0, 0.28))
+		body_col = body_col.lerp(VFX.TEAL, 0.5)
+	# Contact shadow (shrinks and fades with air time), then the flame-headed silhouette.
+	VFX.draw_contact_shadow(self, Vector2(0.0, h * 0.5 + 1.0), 36.0, 8.0, clampf(_air_time / 0.3, 0.0, 1.0))
 	var run_amount := clampf(absf(velocity.x) / Content.P_SPEED, 0.0, 1.0)
 	var bob := sin(_anim_time * 14.0) * 1.5 * run_amount if is_on_floor() else 0.0
 	var lean := clampf(velocity.x / 1800.0, -0.12, 0.12)
@@ -688,16 +689,19 @@ func _draw() -> void:
 	draw_line(Vector2(-7.0, h * 0.12), Vector2(-8.0 - facing * run_amount * 4.0, h * 0.48), Color("17131f"), 8.0, true)
 	draw_line(Vector2(7.0, h * 0.12), Vector2(8.0 + facing * run_amount * 4.0, h * 0.48), Color("221a2c"), 8.0, true)
 	# Asymmetric coat with a bright Graveflame sash.
-	draw_colored_polygon(PackedVector2Array([
+	var coat := PackedVector2Array([
 		Vector2(-w * 0.48, -h * 0.28), Vector2(w * 0.42, -h * 0.32),
 		Vector2(w * 0.52, h * 0.24), Vector2(0.0, h * 0.36),
 		Vector2(-w * 0.56, h * 0.20),
-	]), body_col)
+	])
+	VFX.draw_shaded_polygon(self, coat, body_col, _hurt_flash <= 0.0)
+	VFX.draw_rim(self, coat, facing, 1.25 if _flame_time > 0.0 else 1.0)
 	draw_line(Vector2(-facing * 7.0, -h * 0.24), Vector2(facing * 8.0, h * 0.24), Content.PAL.player_accent, 4.0, true)
 	# Dark mask under an animated, entirely procedural flame crown.
 	var head_pos := Vector2(0.0, -h * 0.52)
 	draw_circle(head_pos, w * 0.40, Color("211828"))
-	var flame_col := Color("ff7a18") if _flame_time <= 0.0 else Color("ffd23f")
+	VFX.draw_rim_circle(self, head_pos, w * 0.40, facing, 0.9)
+	var flame_col := Color("ff7a18") if _flame_time <= 0.0 else VFX.GOLD
 	for i in range(4):
 		var fx := -9.0 + float(i) * 6.0
 		var tip := 9.0 + sin(_anim_time * 10.0 + float(i) * 1.7) * 4.0
@@ -717,11 +721,13 @@ func _draw() -> void:
 		draw_arc(Vector2(0.0, -8.0), 30.0, 0.0, TAU, 32, Color(1.0, 0.55, 0.1, 0.45), 2.0)
 	if state == State.HEAL:
 		var heal_progress := clampf(1.0 - _heal_time / Content.P_HEAL_TIME, 0.0, 1.0)
-		draw_arc(Vector2.ZERO, 33.0, -PI * 0.5, -PI * 0.5 + TAU * heal_progress, 32, Color("5fe8a8"), 4.0)
+		draw_arc(Vector2.ZERO, 33.0, -PI * 0.5, -PI * 0.5 + TAU * heal_progress, 32, VFX.TEAL, 4.0)
 	# attack arc
 	if _draw_attack:
+		# Faint fan over the live hit area plus the white-gold-ember blade ribbon.
 		var origin := Vector2(facing * 8.0, -8.0)
-		_draw_arc(origin, _attack_range, _attack_arc, facing, Content.PAL.attack, 4.0)
+		_draw_arc(origin, _attack_range, _attack_arc, facing, Color(VFX.GOLD, 0.4), 1.0)
+		VFX.slash_ribbon(self, origin, _attack_range, _attack_arc, facing, 1.0, 11.0, 1.0)
 	# slam impact ring
 	if _draw_slam_impact > 0.0:
 		var rad: float = Content.P_SLAM_RADIUS + float(build.get("slam_radius_bonus", 0.0))
@@ -736,7 +742,7 @@ func _draw() -> void:
 	if _draw_parry > 0.0:
 		var pw: float = Content.PARRY_RANGE
 		var t: float = clampf(_draw_parry / Content.PARRY_WINDOW, 0.0, 1.0)
-		var col := Color("7fd4ff") if t > 0.3 else Color("ffd23f")
+		var col := VFX.TEAL if t > 0.3 else VFX.GOLD
 		# crescent in front
 		_draw_arc(Vector2(facing * 8.0, 0.0), pw * 0.9, 2.4, facing, col, 5.0)
 		# glow

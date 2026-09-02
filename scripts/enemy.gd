@@ -3,6 +3,9 @@ extends CharacterBody2D
 ## Compact state-machine enemy: STALKER (melee), HOPPER (leaping), WISP (ranged),
 ## BRUTE (shielded heavy), BOMBER (exploding kamikaze).
 
+const VFX := preload("res://scripts/vfx.gd")
+const CreatureSprite := preload("res://scripts/creature_sprite.gd")
+
 signal died(score: int)
 signal projectile_requested(team: String, pos: Vector2, vel: Vector2, dmg: float, kb: float, pierce: int, life: float, color: Color)
 signal exploded(pos: Vector2, radius: float, damage: float)
@@ -41,6 +44,10 @@ var _bomb_armed := false
 var burn_time := 0.0
 var burn_dps := 0.0
 var _ledge_ray: RayCast2D
+var _air_time := 0.0  # visual only: drives the contact shadow
+var _anim_t := 0.0  # visual only: idle motion clock
+var _sprite: Sprite2D
+var _shadow: Node2D
 
 func setup(p_kind: int, p_pos: Vector2) -> void:
 	kind = p_kind
@@ -107,8 +114,31 @@ func _ready() -> void:
 		_ledge_ray.enabled = true
 		_ledge_ray.target_position = Vector2(0.0, 42.0)
 		add_child(_ledge_ray)
+	_build_body()
 	state = EState.SEEK
 	_spawn_anim = 0.4
+
+## Visual only: a shadow pass and the sprite-sheet body, both drawn behind this
+## node so _draw() can paint gameplay overlays (shield, telegraphs, HP) on top.
+func _build_body() -> void:
+	_shadow = Node2D.new()
+	_shadow.name = "Shadow"
+	_shadow.show_behind_parent = true
+	_shadow.draw.connect(_draw_under)
+	add_child(_shadow)
+	_sprite = CreatureSprite.new()
+	_sprite.setup(_creature_name(), _foot_y())
+	_sprite.under = _shadow
+	add_child(_sprite)
+
+func _creature_name() -> String:
+	return ["stalker", "hopper", "wisp", "brute", "bomber"][clampi(kind, 0, 4)]
+
+## Where the sheet's feet row sits: the old vector art stood on h * 0.5.
+func _foot_y() -> float:
+	if kind == Kind.WISP:
+		return float(data.w) * 0.6
+	return float(data.h) * 0.5
 
 func _physics_process(delta: float) -> void:
 	if dead: return
@@ -126,6 +156,8 @@ func _physics_process(delta: float) -> void:
 	if global_position.y > Content.FLOOR_Y + 220.0:
 		_die(false)
 		return
+	_air_time = 0.0 if is_on_floor() else minf(_air_time + delta, 1.0)
+	_anim_t += delta
 	queue_redraw()
 	match state:
 		EState.SPAWN, EState.SEEK: _step_seek(delta)
@@ -399,115 +431,55 @@ func _get_player():
 	var g = get_tree().get_first_node_in_group("player")
 	return g
 
-func _draw() -> void:
-	var col: Color = data.color
-	if _hurt_flash > 0.0: col = Color.WHITE
+## Under-pass drawn beneath the sprite body: the contact shadow.
+func _draw_under() -> void:
 	var w: float = float(data.w)
 	var h: float = float(data.h)
-	# spawn pop
-	var s := 1.0
-	if _spawn_anim > 0.0: s = 1.0 - _spawn_anim / 0.4
-	draw_set_transform(Vector2.ZERO, 0.0, Vector2(s, s))
-	if kind != Kind.WISP:
-		draw_colored_polygon(PackedVector2Array([
-			Vector2(-w * 0.58, h * 0.51), Vector2(w * 0.58, h * 0.51),
-			Vector2(w * 0.38, h * 0.60), Vector2(-w * 0.38, h * 0.60),
-		]), Color(0.0, 0.0, 0.0, 0.30))
-	match kind:
-		Kind.STALKER:
-			# Hooked cloak, hood and a short cleaver.
-			draw_colored_polygon(PackedVector2Array([
-				Vector2(-w * 0.38, -h * 0.35), Vector2(w * 0.34, -h * 0.35),
-				Vector2(w * 0.52, h * 0.48), Vector2(0.0, h * 0.34),
-				Vector2(-w * 0.56, h * 0.48),
-			]), col)
-			var hood := Vector2(facing * 2.0, -h * 0.48)
-			draw_circle(hood, w * 0.34, col.darkened(0.15))
-			draw_circle(hood + Vector2(facing * 5.0, 0.0), 2.2, Color("ffd23f"))
-			draw_line(Vector2(facing * 8.0, -2.0), Vector2(facing * 24.0, 9.0), Color("b6a9a2"), 4.0, true)
-		Kind.HOPPER:
-			var pts := PackedVector2Array([
-				Vector2(0, -h*0.5), Vector2(w*0.5, h*0.3), Vector2(0, h*0.2), Vector2(-w*0.5, h*0.3)
-			])
-			draw_colored_polygon(pts, col)
-			draw_colored_polygon(PackedVector2Array([
-				Vector2(-w * 0.2, -h * 0.35), Vector2(0.0, -h * 0.72), Vector2(w * 0.14, -h * 0.30)
-			]), col.lightened(0.12))
-			draw_line(Vector2(-w * 0.3, h * 0.22), Vector2(-w * 0.55, h * 0.48), col.darkened(0.32), 5.0, true)
-			draw_line(Vector2(w * 0.3, h * 0.22), Vector2(w * 0.55, h * 0.48), col.darkened(0.32), 5.0, true)
-			draw_circle(Vector2(facing * 4.0, -h * 0.2), 2.5, Color("ffd23f"))
-		Kind.WISP:
-			var pulse := 0.9 + sin(_wisp_t * 5.0) * 0.1
-			draw_circle(Vector2.ZERO, w * 0.8 * pulse, Color(col.r, col.g, col.b, 0.12))
-			draw_colored_polygon(PackedVector2Array([
-				Vector2(0.0, -w * 0.62), Vector2(w * 0.52, 0.0),
-				Vector2(w * 0.18, w * 0.62), Vector2(0.0, w * 0.38),
-				Vector2(-w * 0.18, w * 0.62), Vector2(-w * 0.52, 0.0),
-			]), col)
-			draw_arc(Vector2.ZERO, w * 0.52, 0, TAU, 24, col.lightened(0.25), 2.0)
-			draw_circle(Vector2.ZERO, w * 0.20, Color("ffd23f"))
-		Kind.BRUTE:
-			# Squat plated body with oversized pauldrons.
-			draw_colored_polygon(PackedVector2Array([
-				Vector2(-w * 0.44, -h * 0.34), Vector2(w * 0.44, -h * 0.34),
-				Vector2(w * 0.50, h * 0.48), Vector2(-w * 0.50, h * 0.48),
-			]), col)
-			draw_circle(Vector2(-w * 0.44, -h * 0.24), 10.0, col.darkened(0.22))
-			draw_circle(Vector2(w * 0.44, -h * 0.24), 10.0, col.darkened(0.22))
-			draw_rect(Rect2(-w * 0.28, -h * 0.48, w * 0.56, 17.0), Color("29301f"))
-			draw_line(Vector2(-8.0, -h * 0.34), Vector2(8.0, -h * 0.34), Color("ff5a3d"), 3.0, true)
-		Kind.BOMBER:
-			# round body with a fuse spark on top
-			draw_circle(Vector2.ZERO, w * 0.54, col.darkened(0.28))
-			draw_circle(Vector2.ZERO, w * 0.43, col)
-			draw_arc(Vector2.ZERO, w * 0.28, 0.0, TAU, 18, Color("efb04f"), 3.0)
-			draw_line(Vector2(-6.0, 0.0), Vector2(6.0, 0.0), Color("efb04f"), 2.0)
-			draw_line(Vector2(0.0, -6.0), Vector2(0.0, 6.0), Color("efb04f"), 2.0)
-			# fuse spark pulsing when armed
-			if _bomb_armed:
-				var spark := 0.5 + sin(Time.get_ticks_msec() * 0.04) * 0.5
-				draw_circle(Vector2(0.0, -h*0.5 - 4.0), 3.0 + spark * 3.0, Color("ffd23f"))
-				draw_circle(Vector2(0.0, -h*0.5 - 4.0), 2.0, Color.WHITE)
-			else:
-				draw_circle(Vector2(0.0, -h*0.5 - 4.0), 2.0, Color("ffd23f"))
-	# Brute shield arc on facing side
+	if kind == Kind.WISP:
+		VFX.draw_contact_shadow(_shadow, Vector2(0.0, w * 1.1), w * 0.9, 6.0, 1.0)
+	else:
+		VFX.draw_contact_shadow(_shadow, Vector2(0.0, h * 0.5 + 1.0), w * 1.1, 8.0, clampf(_air_time / 0.3, 0.0, 1.0))
+
+func _draw() -> void:
+	# The sprite body draws behind this node; this pass is the gameplay-critical
+	# overlays: brute shield state, bomber blast ring, windup telegraph, active
+	# attack area, HP bar and burn flames.
+	var w: float = float(data.w)
+	var h: float = float(data.h)
+	var mid: Color = Color.WHITE if _hurt_flash > 0.0 else data.color
+	var t := _anim_t if not Feedback.motion_reduced else 0.0
 	if shield_active and kind == Kind.BRUTE:
-		var scol := Color("9ab0c4") if _shield_flash <= 0.0 else Color.WHITE
+		var scol := Color("6e6a7c") if _shield_flash <= 0.0 else Color.WHITE
+		var face := Color("9a94aa") if _shield_flash <= 0.0 else Color.WHITE
 		var sx: float = facing * w * 0.5
-		# shield as a rounded rect in front
-		draw_rect(Rect2(sx - 4.0, -h*0.4, 8.0, h*0.7), scol)
-		draw_arc(Vector2(sx, 0.0), 12.0, -PI*0.5, PI*0.5, 12, scol, 3.0)
-	# Bomber fuse telegraph: expanding ring toward blast radius
+		draw_rect(Rect2(sx - 5.0, -h * 0.4, 10.0, h * 0.76), scol)
+		draw_circle(Vector2(sx, -h * 0.4), 5.0, scol)
+		draw_rect(Rect2(sx + facing * 1.0 - 1.5, -h * 0.36, 3.0, h * 0.68), face)
+		for k in range(3):
+			draw_circle(Vector2(sx + facing * 2.0, -h * 0.3 + float(k) * h * 0.26), 1.4, Color("d8d2e0"))
 	if kind == Kind.BOMBER and _bomb_armed and _fuse_t > 0.0:
-		var t: float = 1.0 - _fuse_t / _fuse_total
-		var r := lerpf(12.0, _blast_radius, t)
-		var c := Color(1.0, 0.2, 0.2, 0.25 + t * 0.35)
-		draw_arc(Vector2.ZERO, r, 0, TAU, 28, c, 2.0)
-		# urgent flash near the end
-		if t > 0.7:
+		var ft: float = 1.0 - _fuse_t / _fuse_total
+		var r := lerpf(12.0, _blast_radius, ft)
+		draw_arc(Vector2.ZERO, r, 0, TAU, 28, Color(1.0, 0.3, 0.1, 0.25 + ft * 0.35), 2.0)
+		if ft > 0.7:
 			var pulse := 0.5 + sin(Time.get_ticks_msec() * 0.05) * 0.5
 			draw_circle(Vector2.ZERO, w * 0.5, Color(1.0, 0.3, 0.2, pulse * 0.4))
-	# telegraph during windup (non-bomber)
 	if state == EState.WINDUP and kind != Kind.BOMBER:
-		var tw: float = 1.0 - st_timer / float(data.windup)
-		draw_arc(Vector2(facing * w * 0.5, 0.0), 14.0, 0, TAU * tw, 16, Color("ff3d3d"), 3.0)
-	# attack lunge indicator
+		var tw: float = clampf(1.0 - st_timer / maxf(0.01, float(data.windup)), 0.0, 1.0)
+		if kind == Kind.WISP:
+			# Cast ring converging on the caster.
+			draw_arc(Vector2.ZERO, lerpf(w * 1.2, w * 0.5, tw), 0.0, TAU, 28, Color(1.0, 0.35, 0.2, 0.45 + tw * 0.4), 1.5 + tw * 2.0)
+		else:
+			draw_arc(Vector2(facing * w * 0.5, 0.0), 14.0, 0.0, TAU * tw, 16, Color("ff3d3d"), 3.0)
+	# Active melee area: the exact rectangle the hitbox covers.
 	if state == EState.ATTACK:
 		var off: float = 0.0 if facing >= 0.0 else 40.0
-		draw_rect(Rect2(facing * (w*0.5) - off, -h*0.5 - 5, 40, h + 10), Color(1, 0.2, 0.2, 0.3))
-	draw_set_transform(Vector2.ZERO, 0.0, Vector2.ONE)
+		draw_rect(Rect2(facing * (w * 0.5) - off, -h * 0.5 - 5, 40, h + 10), Color(1.0, 0.35, 0.1, 0.26))
 	if hp < float(data.hp):
 		var hp_width := maxf(30.0, w)
 		var hp_frac := clampf(hp / float(data.hp), 0.0, 1.0)
 		draw_rect(Rect2(-hp_width * 0.5, -h * 0.72 - 9.0, hp_width, 4.0), Color(0.08, 0.06, 0.10, 0.8))
-		draw_rect(Rect2(-hp_width * 0.5, -h * 0.72 - 9.0, hp_width * hp_frac, 4.0), col)
+		draw_rect(Rect2(-hp_width * 0.5, -h * 0.72 - 9.0, hp_width * hp_frac, 4.0), mid)
 	if burn_time > 0.0:
-		var flame_pulse := 0.75 + sin(Time.get_ticks_msec() * 0.02) * 0.2
 		for i in range(3):
-			var fx := -w * 0.28 + float(i) * w * 0.28
-			var fy := -h * 0.48 - float((i + int(Time.get_ticks_msec() / 120)) % 2) * 5.0
-			draw_colored_polygon(PackedVector2Array([
-				Vector2(fx - 4.0, fy + 10.0),
-				Vector2(fx, fy - 7.0 * flame_pulse),
-				Vector2(fx + 4.0, fy + 10.0),
-			]), Color(1.0, 0.35 + float(i) * 0.08, 0.08, 0.9))
+			VFX.draw_flame(self, Vector2(-w * 0.28 + float(i) * w * 0.28, -h * 0.4), 14.0, 8.0, t, float(i) * 2.1)
