@@ -1,6 +1,5 @@
 # Graveflame
 
-A dark 2D action-roguelite vertical slice built with Godot 4. Descend through eight chambers of a ruined keep, chain kills, draft synergy boons, and put down the Ember Warden.
 
 ![Graveflame title screen](docs/screenshots/title.png)
 
