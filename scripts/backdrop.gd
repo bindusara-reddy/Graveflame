@@ -1,6 +1,6 @@
 extends Node2D
-## Parallax crypt painter. Lives inside the pixel viewport so the backdrop lands
-## on the same 2-pixel grid as the sprites; the geometry itself is owned by Game.
+## Parallax crypt painter. Lives inside the world viewport; the geometry itself
+## is owned by Game.
 
 var game: Game
 

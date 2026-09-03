@@ -28,10 +28,11 @@ const HIT_STOP_TIME_SCALE := 0.06
 func _ready() -> void:
 	camera = Camera2D.new()
 	camera.enabled = true
-	# Frame the authored 1280x720 play space before the player-follow code takes over.
+	# Frame the authored 1280x720 play space, tightened by CAM_ZOOM so fighters
+	# read at the locked approval scale before the follow code takes over.
 	camera.position = Vector2(Content.VIEW_W, Content.VIEW_H) * 0.5
-	# The pixel viewport is 1/PIXEL_SCALE the authored size; zoom out to match.
-	camera.zoom = Vector2.ONE / Content.PIXEL_SCALE
+	# Vector-native viewport at full resolution; CAM_ZOOM is the only scaling.
+	camera.zoom = Vector2.ONE * Content.CAM_ZOOM / Content.PIXEL_SCALE
 	add_child(camera)
 	# Additive layer for pure-light effects: rings, parry halo, slash afterglow, flashes.
 	_glow = Node2D.new()

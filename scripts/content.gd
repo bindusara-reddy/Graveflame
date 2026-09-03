@@ -15,9 +15,11 @@ const L_TRIGGER := 1 << 7
 # --- World / camera ---
 const VIEW_W := 1280
 const VIEW_H := 720
-## World pixels per rendered pixel. Environment art is authored on a 2-pixel
-## grid (its textures are drawn at 2x), while characters carry 1-pixel detail,
-## so the world renders at full resolution.
+## Locked camera zoom for the approval frame: a ~15% tighter frame so the
+## fighters read at Blasphemous scale without losing duel spacing.
+const CAM_ZOOM := 1.15
+## World pixels per rendered pixel. The whole frame renders vector-native at
+## full resolution: no pixel grid, no nearest filtering, smooth sub-pixel art.
 const PIXEL_SCALE := 1.0
 const TILE := 64
 const FLOOR_Y := 600.0
@@ -43,8 +45,8 @@ const P_DASH_CD := 0.55
 const P_DASH_IFRAMES := 0.22
 const P_HURT_IFRAMES := 0.7
 const P_ATTACK_BUFFER := 0.18
-const P_BODY_W := 26.0
-const P_BODY_H := 54.0
+const P_BODY_W := 38.0
+const P_BODY_H := 76.0
 const P_SPECIAL_MAX := 100.0
 const P_SPECIAL_GAIN := 9.0
 const P_SPECIAL_COST := 40.0
@@ -90,11 +92,11 @@ const COMBO_RESET := 0.55
 # --- Enemy archetypes ---
 enum EnemyKind { STALKER, HOPPER, WISP, BRUTE, BOMBER }
 const ENEMY := {
-	EnemyKind.STALKER: { "hp": 40.0,  "speed": 150.0, "damage": 14.0, "knock": 240.0, "cd": 1.3, "windup": 0.45, "recover": 0.5,  "score": 12, "w": 34.0, "h": 46.0, "color": Color("c44b3f") },
-	EnemyKind.HOPPER:  { "hp": 28.0,  "speed": 210.0, "damage": 12.0, "knock": 200.0, "cd": 1.6, "windup": 0.30, "recover": 0.4,  "score": 14, "w": 32.0, "h": 38.0, "color": Color("d98c2b") },
-	EnemyKind.WISP:    { "hp": 20.0,  "speed": 120.0, "damage": 10.0, "knock": 160.0, "cd": 2.0, "windup": 0.55, "recover": 0.45, "score": 18, "w": 30.0, "h": 30.0, "color": Color("7b6bd1") },
-	EnemyKind.BRUTE:   { "hp": 80.0,  "speed": 95.0,  "damage": 20.0, "knock": 360.0, "cd": 1.8, "windup": 0.60, "recover": 0.65, "score": 24, "w": 48.0, "h": 58.0, "color": Color("5a7a3a"), "shielded": true, "shield_hp": 30.0 },
-	EnemyKind.BOMBER:  { "hp": 22.0,  "speed": 170.0, "damage": 26.0, "knock": 100.0, "cd": 1.4, "windup": 0.80, "recover": 0.0,  "score": 20, "w": 34.0, "h": 36.0, "color": Color("b85c2e"), "explodes": true, "fuse": 0.8, "blast_radius": 90.0 },
+	EnemyKind.STALKER: { "hp": 40.0,  "speed": 150.0, "damage": 14.0, "knock": 240.0, "cd": 1.3, "windup": 0.45, "recover": 0.5,  "score": 12, "w": 46.0, "h": 62.0, "color": Color("c44b3f") },
+	EnemyKind.HOPPER:  { "hp": 28.0,  "speed": 210.0, "damage": 12.0, "knock": 200.0, "cd": 1.6, "windup": 0.30, "recover": 0.4,  "score": 14, "w": 44.0, "h": 52.0, "color": Color("d98c2b") },
+	EnemyKind.WISP:    { "hp": 20.0,  "speed": 120.0, "damage": 10.0, "knock": 160.0, "cd": 2.0, "windup": 0.55, "recover": 0.45, "score": 18, "w": 40.0, "h": 40.0, "color": Color("7b6bd1") },
+	EnemyKind.BRUTE:   { "hp": 80.0,  "speed": 95.0, "damage": 20.0, "knock": 360.0, "cd": 1.8, "windup": 0.60, "recover": 0.65, "score": 24, "w": 64.0, "h": 78.0, "color": Color("5a7a3a"), "shielded": true, "shield_hp": 30.0 },
+	EnemyKind.BOMBER:  { "hp": 22.0,  "speed": 170.0, "damage": 26.0, "knock": 100.0, "cd": 1.4, "windup": 0.80, "recover": 0.0,  "score": 20, "w": 46.0, "h": 48.0, "color": Color("b85c2e"), "explodes": true, "fuse": 0.8, "blast_radius": 90.0 },
 }
 const ENEMY_RANGED := EnemyKind.WISP
 const WISP_SHOT_SPEED := 460.0
@@ -109,8 +111,8 @@ const BOSS_SPEED := 170.0
 const BOSS_CHARGE_SPEED := 980.0
 const BOSS_CHARGE_TIME := 0.5
 const BOSS_SUMMON_KIND := EnemyKind.WISP
-const BOSS_W := 70.0
-const BOSS_H := 96.0
+const BOSS_W := 84.0
+const BOSS_H := 118.0
 const BOSS_COLOR := Color("8a2f3d")
 const BOSS_SHOT_SPEED := 380.0
 const BOSS_SHOT_DAMAGE := 14.0

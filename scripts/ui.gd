@@ -59,6 +59,8 @@ var _streak_tween: Tween
 
 var _room_intro: Dictionary = {}
 var _boss_intro: Dictionary = {}
+var _boss_phase_tag: Label
+var _boss_phase_tween: Tween
 var _fade: ColorRect
 var _music_check: CheckBox
 
@@ -116,6 +118,7 @@ func _build_hud() -> void:
 	_build_streak_meter()
 	_build_run_status()
 	_build_boss_status()
+	_build_boss_phase_tag()
 	_build_room_clear_banner()
 	_room_intro = _build_banner("RoomIntro", 176.0, 258.0, Vector2(420, 70), 26, 11, C_EMBER, Color("14101ceb"))
 	_boss_intro = _build_banner("BossIntro", 236.0, 372.0, Vector2(620, 118), 40, 14, C_RED, Color("1a0c11f0"))
@@ -325,6 +328,19 @@ func _build_boss_status() -> void:
 	_boss_bar.value = Content.BOSS_HP
 	stack.add_child(_boss_bar)
 	_boss_panel.visible = false
+
+
+func _build_boss_phase_tag() -> void:
+	# Compact phase-2 callout pinned under the boss bar: never center-screen.
+	_boss_phase_tag = _make_label("", 13, Color("f2c3c6"), HorizontalAlignment.HORIZONTAL_ALIGNMENT_CENTER)
+	_boss_phase_tag.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_boss_phase_tag.set_anchors_and_offsets_preset(Control.PRESET_CENTER_TOP)
+	_boss_phase_tag.offset_left = -260.0
+	_boss_phase_tag.offset_right = 260.0
+	_boss_phase_tag.offset_top = 100.0
+	_boss_phase_tag.offset_bottom = 124.0
+	_boss_phase_tag.visible = false
+	_hud.add_child(_boss_phase_tag)
 
 
 func _build_room_clear_banner() -> void:
@@ -1008,6 +1024,10 @@ func hide_all_panels() -> void:
 
 
 func hide_banners() -> void:
+	if _boss_phase_tween != null and is_instance_valid(_boss_phase_tween):
+		(_boss_phase_tween as Tween).kill()
+	if _boss_phase_tag != null:
+		_boss_phase_tag.visible = false
 	for banner in [_room_intro, _boss_intro]:
 		if banner.is_empty():
 			continue
@@ -1054,6 +1074,21 @@ func hide_boss_bar() -> void:
 	_boss_panel.visible = false
 	_boss_bar.visible = false
 	_boss_label.visible = false
+
+
+## Phase-2 callout: a small tag under the boss bar that fades on its own.
+func flash_boss_phase(text: String, hold: float = 1.7) -> void:
+	if _boss_phase_tween != null and is_instance_valid(_boss_phase_tween):
+		(_boss_phase_tween as Tween).kill()
+	_boss_phase_tag.text = text
+	_boss_phase_tag.visible = true
+	_boss_phase_tag.modulate = Color(1.0, 1.0, 1.0, 0.0)
+	_boss_phase_tween = create_tween()
+	_boss_phase_tween.set_pause_mode(Tween.TWEEN_PAUSE_PROCESS)
+	_boss_phase_tween.tween_property(_boss_phase_tag, "modulate:a", 1.0, 0.18)
+	_boss_phase_tween.tween_interval(hold)
+	_boss_phase_tween.tween_property(_boss_phase_tag, "modulate:a", 0.0, 0.5)
+	_boss_phase_tween.tween_callback(func(): _boss_phase_tag.visible = false)
 
 
 func setup_upgrades(upgrades: Array) -> void:

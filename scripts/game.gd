@@ -41,8 +41,8 @@ const TORCH_Y := Content.FLOOR_Y - 200.0
 var _light_layer: Node2D
 var _atmosphere: Node2D
 var _vignette: CanvasLayer
-## The world renders into this low-resolution viewport and is upscaled with
-## nearest filtering, so vector art, sprites and lighting share one pixel grid.
+## The world renders vector-native at full resolution with linear filtering,
+## so actors, environment and lighting share one smooth coherent frame.
 var _pixel_container: SubViewportContainer
 var pixel_view: SubViewport
 var _backdrop: Node2D
@@ -60,15 +60,15 @@ func _ready() -> void:
 	_pixel_container.stretch_shrink = int(Content.PIXEL_SCALE)
 	_pixel_container.size = Vector2(Content.VIEW_W, Content.VIEW_H)
 	_pixel_container.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	_pixel_container.texture_filter = CanvasItem.TEXTURE_FILTER_NEAREST
+	_pixel_container.texture_filter = CanvasItem.TEXTURE_FILTER_LINEAR
 	add_child(_pixel_container)
 	pixel_view = SubViewport.new()
 	pixel_view.name = "Viewport"
 	pixel_view.disable_3d = true
 	pixel_view.handle_input_locally = false
 	pixel_view.gui_disable_input = true
-	pixel_view.canvas_item_default_texture_filter = Viewport.DEFAULT_CANVAS_ITEM_TEXTURE_FILTER_NEAREST
-	pixel_view.snap_2d_transforms_to_pixel = true
+	pixel_view.canvas_item_default_texture_filter = Viewport.DEFAULT_CANVAS_ITEM_TEXTURE_FILTER_LINEAR
+	pixel_view.snap_2d_transforms_to_pixel = false
 	_pixel_container.add_child(pixel_view)
 	_backdrop = BackdropPainter.new()
 	_backdrop.name = "Backdrop"
@@ -852,7 +852,9 @@ func _on_boss_phase(phase: int) -> void:
 	feedback.shake(10.0, 0.35)
 	feedback.play("boss")
 	if phase == 2:
-		ui.show_boss_intro("The Warden Ignites", "It calls the wisps to the throne", 1.7)
+		# Phase-2 callout renders as a compact floating tag above the boss bar,
+		# never as a center-screen card over the fighters.
+		ui.flash_boss_phase("THE WARDEN IGNITES")
 		feedback.hit_stop(0.1)
 		if is_instance_valid(room) and room.boss != null and is_instance_valid(room.boss):
 			feedback.blast(room.boss.global_position, 200.0)

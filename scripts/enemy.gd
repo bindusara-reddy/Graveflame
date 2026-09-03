@@ -533,10 +533,13 @@ func _draw() -> void:
 		if ft > 0.7:
 			var pulse := 0.5 + sin(Time.get_ticks_msec() * 0.05) * 0.5
 			draw_circle(Vector2.ZERO, w * 0.5, Color(1.0, 0.3, 0.2, pulse * 0.4))
-	# Active melee area: the exact rectangle the hitbox covers.
+	# Active melee reach: a ground arc under the true sweep, not a debug box.
 	if state == EState.ATTACK:
-		var off: float = 0.0 if facing >= 0.0 else 40.0
-		draw_rect(Rect2(facing * (w * 0.5) - off, -h * 0.5 - 5, 40, h + 10), Color(1.0, 0.35, 0.1, 0.26))
+		var reach := PackedVector2Array()
+		for i in range(17):
+			var u := float(i) / 16.0
+			reach.append(Vector2(facing * (w * 0.5 + u * 40.0), -h * 0.5 + sin(u * PI) * 10.0 - 5.0 + u * (h + 10.0)))
+		draw_polyline(reach, Color(1.0, 0.35, 0.1, 0.4), 3.0, true)
 	if hp < hp_max:
 		var hp_width := maxf(30.0, w)
 		var hp_frac := clampf(hp / hp_max, 0.0, 1.0)

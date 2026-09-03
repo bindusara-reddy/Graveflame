@@ -572,6 +572,12 @@ func _draw() -> void:
 		for i in range(3):
 			VFX.draw_flame(self, Vector2(-w * 0.5 + float(i) * w * 0.5, -h * 0.44), 16.0, 9.0, t, float(i) * 2.3)
 	draw_set_transform_matrix(Transform2D.IDENTITY)
-	# Telegraph: ember outline of the true hitbox.
+	# Telegraph: ember ground arc under the true hitbox, plus a rising edge glow.
 	if state == EState.WINDUP:
-		draw_rect(Rect2(-w * 0.5, -h * 0.5, w, h), Color(1.0, 0.35, 0.1, tw * 0.45), false, 3.0)
+		var tele := PackedVector2Array()
+		for i in range(17):
+			var u := float(i) / 16.0
+			tele.append(Vector2(lerpf(-w * 0.5, w * 0.5, u), h * 0.5 + 3.0 - sin(u * PI) * 6.0))
+		draw_polyline(tele, Color(1.0, 0.35, 0.1, tw * 0.8), 3.0, true)
+		draw_line(Vector2(-w * 0.5, h * 0.5 + 3.0), Vector2(-w * 0.5, -h * 0.5), Color(1.0, 0.35, 0.1, tw * 0.4), 2.0, true)
+		draw_line(Vector2(w * 0.5, h * 0.5 + 3.0), Vector2(w * 0.5, -h * 0.5), Color(1.0, 0.35, 0.1, tw * 0.4), 2.0, true)
