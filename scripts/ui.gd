@@ -3,7 +3,6 @@ extends CanvasLayer
 ## Responsive HUD and atmospheric screen overlays, built with Godot-native controls.
 
 const VFX := preload("res://scripts/vfx.gd")
-const KnightArt := preload("res://scripts/knight_art.gd")
 
 signal start_requested
 signal resume_requested
@@ -714,30 +713,6 @@ func _draw_title_masonry(ci: Control) -> void:
 	pts.append(Vector2(s.x, s.y + 2.0))
 	ci.draw_colored_polygon(pts, VFX.VOID)
 	ci.draw_line(Vector2(0.0, wall_top + 1.0), Vector2(s.x, wall_top + 1.0), Color(VFX.RIM, 0.12), 1.0)
-	# The knight, larger than life, watching the descent from the battlement.
-	var k_scale := clampf(s.y / 720.0, 0.6, 1.4) * 2.3
-	var feet_y := wall_top - 26.0
-	var kx := s.x * 0.915
-	ci.draw_set_transform(Vector2.ZERO, 0.0, Vector2(1.0, 0.35))
-	ci.draw_circle(Vector2(kx, (feet_y + 2.0) / 0.35), 30.0 * k_scale * 0.5, Color(0.0, 0.0, 0.0, 0.5))
-	ci.draw_set_transform(Vector2.ZERO, 0.0, Vector2.ONE)
-	for i in range(3, 0, -1):
-		ci.draw_circle(Vector2(kx, feet_y - 40.0 * k_scale * 0.5), 40.0 * k_scale * float(i) * 0.5, Color(VFX.ORANGE, 0.05))
-	var pose := "idle%d" % (int(t * 1.6) % 2)
-	var tick := int(t * 9.0)
-	var frame := KnightArt.frame(pose, tick)
-	var px := KnightArt.px() * k_scale
-	var fsize := frame.size * px
-	# Mirror about the knight's centre so the right-facing frame looks toward the title.
-	ci.draw_set_transform(Vector2(kx, 0.0), 0.0, Vector2(-1.0, 1.0))
-	var top_left := Vector2(-fsize.x * 0.5, feet_y - fsize.y)
-	ci.draw_texture_rect_region(KnightArt.texture(), Rect2(top_left, fsize), frame)
-	if not KnightArt.has_sheet():
-		var anchor := KnightArt.flame_anchor(pose)
-		var flame_size := Vector2(KnightArt.FLAME_W, KnightArt.FLAME_H) * px * 1.2
-		var flame_pos := top_left + Vector2(float(anchor.x) * px - flame_size.x * 0.5, float(anchor.y + 1) * px - flame_size.y)
-		ci.draw_texture_rect_region(KnightArt.flame_atlas(), Rect2(flame_pos, flame_size), KnightArt.flame_rect(tick))
-	ci.draw_set_transform(Vector2.ZERO, 0.0, Vector2.ONE)
 
 
 func _build_title_stack(text: String, size: int) -> Control:

@@ -244,73 +244,23 @@ const ATTACK_FRAMES := 8
 const ATTACK_MIN := -1.6
 const ATTACK_MAX := 1.6
 
-## Baked Blender sheet (tools/render_knight.py + tests/knight_bake.gd). When it
-## exists it replaces the tile compositor and carries the fire crown in-frame.
-const SHEET_PNG := "res://assets/knight/knight_sheet.png"
-const SHEET_JSON := "res://assets/knight/knight_manifest.json"
-static var _sheet: Texture2D
-static var _sheet_frames: Dictionary = {}
-static var _sheet_flicker := 4
-static var _sheet_px := 1.0
-static var _sheet_checked := false
+## Procedural tile compositor (in-house): the knight is drawn from authored tiles
+## plus the procedural fire crown. No baked sheets.
 
-static func _load_sheet() -> void:
-	if _sheet_checked:
-		return
-	_sheet_checked = true
-	if not FileAccess.file_exists(SHEET_JSON):
-		return
-	var meta = JSON.parse_string(FileAccess.get_file_as_string(SHEET_JSON))
-	if not (meta is Dictionary) or not meta.has("frames"):
-		return
-	var tex: Texture2D = null
-	if ResourceLoader.exists(SHEET_PNG):
-		tex = load(SHEET_PNG)
-	if tex == null and FileAccess.file_exists(SHEET_PNG):
-		var img := Image.load_from_file(SHEET_PNG)
-		if img != null:
-			tex = ImageTexture.create_from_image(img)
-	if tex == null:
-		return
-	_sheet = tex
-	_sheet_flicker = maxi(1, int(meta.get("flicker", 4)))
-	_sheet_px = float(meta.get("px", 1.0))
-	_sheet_frames.clear()
-	for name in meta.frames:
-		var r: Array = meta.frames[name]
-		_sheet_frames[name] = Rect2(float(r[0]), float(r[1]), float(r[2]), float(r[3]))
-
-## True when the baked sheet is in use (the crown is part of every frame).
-static func has_sheet() -> bool:
-	_load_sheet()
-	return _sheet != null
-
-## Texture holding the frames: the baked sheet, else the composited tiles.
+## Texture holding the frames: the procedurally composited tile atlas.
 static func texture() -> Texture2D:
-	if has_sheet():
-		return _sheet
 	return atlas()
 
 ## World pixels per texel for the active frames.
 static func px() -> float:
-	if has_sheet():
-		return _sheet_px
 	return PX
 
-## Art-pixel size of one frame (sheet frames may be larger than the tile frames).
+## Art-pixel size of one frame.
 static func frame_size() -> Vector2:
-	if has_sheet():
-		var any: Rect2 = _sheet_frames.get("idle0_f0", Rect2(0, 0, FRAME_W, FRAME_H))
-		return any.size
 	return Vector2(FRAME_W, FRAME_H)
 
-## Frame for a pose at an animation tick (drives the crown flicker on the sheet).
-static func frame(name: String, tick: int) -> Rect2:
-	if has_sheet():
-		var key := "%s_f%d" % [name, posmod(tick, _sheet_flicker)]
-		if _sheet_frames.has(key):
-			return _sheet_frames[key]
-		return _sheet_frames.get("idle0_f0", Rect2())
+## Frame for a pose at an animation tick.
+static func frame(name: String, _tick: int) -> Rect2:
 	return frame_rect(name)
 
 static var _atlas: ImageTexture

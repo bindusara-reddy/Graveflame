@@ -6,8 +6,6 @@ const VFX := preload("res://scripts/vfx.gd")
 const MusicSynth := preload("res://scripts/music.gd")
 const BackdropPainter := preload("res://scripts/backdrop.gd")
 const LightRig := preload("res://scripts/light_rig.gd")
-const EnvArt := preload("res://scripts/env_art.gd")
-const CreatureSpriteScript := preload("res://scripts/creature_sprite.gd")
 
 enum GState { TITLE, PLAYING, REWARD, GAME_OVER, VICTORY }
 
@@ -108,7 +106,6 @@ func _ready() -> void:
 	_lights.process_mode = Node.PROCESS_MODE_PAUSABLE
 	pixel_view.add_child(_lights)
 	_lights.set_ambient(mood.ambient)
-	CreatureSpriteScript.tint = (mood.ambient as Color).lerp(Color.WHITE, 0.55)
 	# Procedural score (always; keeps playing under pause menus)
 	music = MusicSynth.new()
 	music.name = "Music"
@@ -247,17 +244,6 @@ func _paint_backdrop(ci: CanvasItem) -> void:
 	var bloom := Vector2(_plane_x(0.1, 184.0), horizon - 60.0)
 	for i in range(4, 0, -1):
 		ci.draw_circle(bloom, 90.0 + float(i) * 72.0, Color(m.glow, (0.016 + float(5 - i) * 0.012) * (1.0 + seep)))
-	if EnvArt.has_env():
-		var tint: Color = m.get("layer_tint", Color.WHITE)
-		# Atmospheric perspective: each plane further back sinks toward the sky colour.
-		var haze: Color = m.bg_mid
-		_draw_layer(ci, "layer_far", 0.15, horizon, tint * Color(0.5, 0.55, 0.7))
-		_draw_layer(ci, "layer_mid", 0.35, horizon, tint * Color(0.66, 0.7, 0.84))
-		ci.draw_rect(Rect2(left, top, span, horizon + 60.0 - top), Color(haze, 0.22))
-		_draw_light_shafts(ci, top, horizon)
-		_draw_layer(ci, "layer_near", 0.65, horizon, tint)
-		_draw_sconce_flames(ci)
-	else:
 		_draw_spires(ci, horizon)
 		_draw_arches(ci, horizon)
 		_draw_light_shafts(ci, top, horizon)
@@ -279,24 +265,11 @@ func _plane_x(depth: float, layer_x: float) -> float:
 func torch_positions() -> PackedVector2Array:
 	var out := PackedVector2Array()
 	var r := _plane_range(0.65, 320.0, 160.0)
-	# Baked near layer: pilasters sit 160 world px into each 320 px period.
-	var shift := 160.0 if EnvArt.has_env() else 0.0
 	for k in range(r.x, r.y + 1):
-		out.append(Vector2(_plane_x(0.65, float(k) * 320.0 + shift), TORCH_Y - 12.0))
+		out.append(Vector2(_plane_x(0.65, float(k) * 320.0), TORCH_Y - 12.0))
 	return out
 
-## One baked parallax layer, tiled horizontally with its bottom on the pit lip.
-func _draw_layer(ci: CanvasItem, name: String, depth: float, horizon: float, tint: Color) -> void:
-	var t := EnvArt.tex(name)
-	if t == null:
-		return
-	var w := EnvArt.LAYER_W
-	var h := EnvArt.LAYER_H
-	var r := _plane_range(depth, w, w)
-	for k in range(r.x, r.y + 1):
-		ci.draw_texture_rect(t, Rect2(_plane_x(depth, float(k) * w), horizon + 60.0 - h, w, h), false, tint)
-
-## Animated flames over the baked sconces.
+## Animated flames over the buttress sconces.
 func _draw_sconce_flames(ci: CanvasItem) -> void:
 	var moving := not Feedback.motion_reduced
 	var t := _atmo_t if moving else 0.0
@@ -639,7 +612,6 @@ func _advance_room() -> void:
 	mood = Content.mood_for(float(run.room_index) / maxf(1.0, float(run.rooms_total() - 1)))
 	RenderingServer.set_default_clear_color(mood.bg_top)
 	_lights.set_ambient(mood.ambient)
-	CreatureSpriteScript.tint = (mood.ambient as Color).lerp(Color.WHITE, 0.55)
 	room = Room.new()
 	room.mood = mood
 	room.setup(tmpl, is_boss, player, run.rng.randi())
@@ -952,7 +924,6 @@ func _on_quit_to_title() -> void:
 	mood = Content.mood_for(0.0)
 	RenderingServer.set_default_clear_color(mood.bg_top)
 	_lights.set_ambient(mood.ambient)
-	CreatureSpriteScript.tint = (mood.ambient as Color).lerp(Color.WHITE, 0.55)
 	music.play_track("title")
 
 func _on_option_toggled(key: String, value: bool) -> void:

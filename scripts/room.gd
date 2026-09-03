@@ -3,7 +3,6 @@ extends Node2D
 ## Builds geometry from a template, spawns encounters, seals/unseals the exit.
 
 const VFX := preload("res://scripts/vfx.gd")
-const EnvArt := preload("res://scripts/env_art.gd")
 
 signal completed
 signal cleared(room_name: String)
@@ -326,10 +325,7 @@ func _draw() -> void:
 	var walls: Array = template.get("walls", [])
 	for wi in range(walls.size()):
 		var wr := Rect2(walls[wi].position, walls[wi].size)
-		if EnvArt.has_env():
-			_draw_pillar(wr, m)
-		else:
-			_draw_masonry(wr, accent, 40 + wi, m)
+		_draw_masonry(wr, accent, 40 + wi, m)
 		draw_line(Vector2(wr.position.x, wr.position.y), Vector2(wr.position.x, wr.end.y), Color(accent.r, accent.g, accent.b, 0.65), 3.0)
 	for hz in template.get("hazards", []):
 		_draw_hazard(Rect2(hz.position, hz.size), m)
@@ -343,9 +339,6 @@ func _draw() -> void:
 ## Stone courses with deterministic slab widths (48/64/80) so joints never line
 ## up between rows, a 6px trim, a 1.5px rim catch-light and a 12px occlusion band.
 func _draw_masonry(pr: Rect2, accent: Color, salt: int, m: Dictionary) -> void:
-	if EnvArt.has_env():
-		_draw_tiled_masonry(pr, accent, m)
-		return
 	var lip := 6.0
 	var stone: Color = m.stone
 	var base := stone.darkened(0.22)
@@ -388,49 +381,6 @@ func _draw_masonry(pr: Rect2, accent: Color, salt: int, m: Dictionary) -> void:
 	draw_line(Vector2(pr.position.x, pr.position.y + 0.75), Vector2(pr.end.x, pr.position.y + 0.75), VFX.RIM, 1.5)
 	draw_rect(Rect2(pr.position.x, pr.end.y - 2.0, pr.size.x, 2.0), VFX.JOINT)
 
-## Baked stone tiles: a coping course on top, brick fill below, broken end caps
-## on free edges. Thin platforms use the ledge tile. Tinted by the mood.
-func _draw_tiled_masonry(pr: Rect2, accent: Color, m: Dictionary) -> void:
-	var tint: Color = m.get("tile_tint", Color.WHITE)
-	var T := EnvArt.TILE
-	var free_l := pr.position.x > Content.ROOM_LEFT + 1.0
-	var free_r := pr.end.x < Content.ROOM_RIGHT - 1.0
-	if pr.size.y <= 48.0:
-		_tile_row(pr.position.x, pr.position.y, pr.size.x, minf(pr.size.y, 32.0), "tile_ledge", "", "", tint)
-		if pr.size.y > 32.0:
-			draw_rect(Rect2(pr.position.x, pr.position.y + 32.0, pr.size.x, pr.size.y - 32.0), Color("10131c"))
-		return
-	_tile_row(pr.position.x, pr.position.y, pr.size.x, minf(T, pr.size.y), "tile_top", "tile_top_l" if free_l else "", "tile_top_r" if free_r else "", tint)
-	var y := pr.position.y + T
-	while y < pr.end.y - 0.5:
-		_tile_row(pr.position.x, y, pr.size.x, minf(T, pr.end.y - y), "tile_fill", "tile_side_l" if free_l else "", "tile_side_r" if free_r else "", tint)
-		y += T
-	draw_rect(Rect2(pr.position.x, pr.position.y + 12.0, pr.size.x, 2.0), Color(accent, 0.22))
-
-func _tile_row(x0: float, y: float, width: float, h: float, mid: String, left: String, right: String, tint: Color) -> void:
-	var T := EnvArt.TILE
-	var n := int(ceil(width / T - 0.001))
-	for i in range(n):
-		var x := x0 + float(i) * T
-		var w := minf(T, x0 + width - x)
-		var name := mid
-		if i == 0 and left != "":
-			name = left
-		elif i == n - 1 and right != "":
-			name = right
-		EnvArt.draw_tile(self, name, Vector2(x, y), Vector2(w, h), tint)
-
-## Climbable wall block drawn as a capped stone column.
-func _draw_pillar(wr: Rect2, m: Dictionary) -> void:
-	var tint: Color = m.get("tile_tint", Color.WHITE)
-	var T := EnvArt.TILE
-	var x := wr.position.x + (wr.size.x - T) * 0.5
-	EnvArt.draw_tile(self, "tile_pillar_cap", Vector2(x, wr.position.y), Vector2(T, 32.0), tint)
-	var y := wr.position.y + 32.0
-	while y < wr.end.y - 0.5:
-		EnvArt.draw_tile(self, "tile_pillar", Vector2(x, y), Vector2(T, minf(T, wr.end.y - y)), tint)
-		y += T
-
 ## Broken ends, ash tufts, moss drips in the crypt, ember veins nearer the forge.
 func _draw_platform_dressing(pr: Rect2, m: Dictionary, salt: int) -> void:
 	var t := _ambient_t if not Feedback.motion_reduced else 0.0
@@ -440,7 +390,7 @@ func _draw_platform_dressing(pr: Rect2, m: Dictionary, salt: int) -> void:
 	# Jagged broken corners on ends that hang over a drop (the tiles carry their own).
 	for side: float in [-1.0, 1.0]:
 		var ex := pr.position.x if side < 0.0 else pr.end.x
-		if EnvArt.has_env() or ex <= Content.ROOM_LEFT + 1.0 or ex >= Content.ROOM_RIGHT - 1.0:
+		if ex <= Content.ROOM_LEFT + 1.0 or ex >= Content.ROOM_RIGHT - 1.0:
 			continue
 		var pts := PackedVector2Array([Vector2(ex, pr.position.y + 4.0)])
 		var depth := minf(pr.size.y, 70.0)

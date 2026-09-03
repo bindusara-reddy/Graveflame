@@ -5,7 +5,6 @@ extends CharacterBody2D
 ## A Dead Cells-inspired action-roguelite character. All art is drawn procedurally.
 
 const VFX := preload("res://scripts/vfx.gd")
-const KnightArt := preload("res://scripts/knight_art.gd")
 
 signal hp_changed(hp: float, max_hp: float)
 signal special_changed(value: float, maximum: float)
@@ -84,10 +83,6 @@ var _momentum_stacks := 0
 var _land_squash := 0.0
 var _was_on_floor := true
 var _prev_vy := 0.0
-# Pixel-art body (see knight_art.gd); _draw() paints the flame crown and overlays on top.
-var _knight: Sprite2D
-var _knight_flash: ShaderMaterial
-var _flame: Sprite2D
 
 func setup(rm: RunModel) -> void:
 	_run_model = rm
@@ -138,7 +133,6 @@ func _ready() -> void:
 	_parry_area.add_child(_parry_shape)
 	add_child(_parry_area)
 	jumps_left = Content.P_MAX_JUMPS
-	_build_body()
 	if build.is_empty():
 		build = {
 			"max_hp": Content.P_MAX_HP, "hp": Content.P_MAX_HP, "speed_mul": 1.0, "dmg_mul": 1.0,
@@ -759,130 +753,57 @@ func suppress_gameplay_input(frames: int = 2) -> void:
 
 # --- Drawing ---
 
-## Sword angle from the horizontal (positive = pointing down) for the current state.
-func _sword_angle(run_amount: float) -> float:
-	match state:
-		State.ATTACK:
-			var def: Dictionary = get_meta("atk_def", {})
-			if def.is_empty():
-				return 0.6
-			if atk_phase == "startup":
-				return lerpf(0.6, -1.5, 1.0 - atk_time / maxf(0.01, float(def.startup)))
-			if atk_phase == "active":
-				return lerpf(-_attack_arc * 0.5, _attack_arc * 0.5, 1.0 - atk_time / maxf(0.01, float(def.active)))
-			return lerpf(_attack_arc * 0.5 + 0.2, 0.6, 1.0 - atk_time / maxf(0.01, float(def.recover)))
-		State.SLAM: return 1.35
-		State.DASH: return 0.05
-		State.PARRY: return -1.35
-		State.HEAL: return 1.2
-		State.HURT: return -0.4
-		_:
-			if not is_on_floor():
-				return -0.25 if velocity.y < 0.0 else 0.9
-			return lerpf(0.6, 0.85, run_amount)
-
-## Sprite body: the authored pixel frames, pivoted on the feet so squash,
-## stretch and lean keep the knight planted.
-func _build_body() -> void:
-	_knight = Sprite2D.new()
-	_knight.name = "Body"
-	_knight.texture = KnightArt.texture()
-	_knight.region_enabled = true
-	_knight.region_rect = KnightArt.frame("idle0", 0)
-	_knight.centered = true
-	_knight.offset = Vector2(0.0, -KnightArt.frame_size().y * 0.5)
-	_knight.position = Vector2(0.0, Content.P_BODY_H * 0.5)
-	_knight.scale = Vector2(KnightArt.px(), KnightArt.px())
-	_knight.texture_filter = CanvasItem.TEXTURE_FILTER_NEAREST
-	_knight.show_behind_parent = true
-	_knight_flash = ShaderMaterial.new()
-	_knight_flash.shader = VFX.flash_shader()
-	_knight.material = _knight_flash
-	add_child(_knight)
-	# The burning head: a child of the body so it inherits squash, lean and scale.
-	_flame = Sprite2D.new()
-	_flame.name = "Flame"
-	_flame.texture = KnightArt.flame_atlas()
-	_flame.region_enabled = true
-	_flame.region_rect = KnightArt.flame_rect(0)
-	_flame.centered = true
-	_flame.offset = Vector2(0.0, -KnightArt.FLAME_H * 0.5)
-	_flame.texture_filter = CanvasItem.TEXTURE_FILTER_NEAREST
-	_flame.use_parent_material = true
-	_flame.visible = not KnightArt.has_sheet()
-	_knight.add_child(_flame)
-
-## Which authored frame the current state shows.
-func pose_name(run_amount: float) -> String:
-	match state:
-		State.ATTACK: return KnightArt.attack_frame(_sword_angle(run_amount))
-		State.SLAM: return "slam"
-		State.DASH: return "dash"
-		State.PARRY: return "parry"
-		State.HEAL: return "heal"
-		State.HURT: return "hurt"
-	if not is_on_floor():
-		return "jump" if velocity.y < 0.0 else "fall"
-	if run_amount > 0.15:
-		return "run%d" % (int(_anim_time * 10.0) % 4)
-	return "idle%d" % (int(_anim_time * 1.6) % 2)
-
 func _draw() -> void:
 	var w := Content.P_BODY_W
 	var h := Content.P_BODY_H
 	var flicker := iframes > 0.0 and fmod(iframes, 0.12) < 0.06
-	# Contact shadow (shrinks and fades with air time), then the knight.
-	var air := clampf(_air_time / 0.3, 0.0, 1.0)
-	VFX.draw_contact_shadow(self, Vector2(0.0, h * 0.5 + 1.0), 36.0, 8.0, air)
-	var run_amount := clampf(absf(velocity.x) / Content.P_SPEED, 0.0, 1.0) if is_on_floor() else 0.0
+	var body_col: Color = Content.PAL.player if not flicker else Content.PAL.player_accent
+	if _hurt_flash > 0.0: body_col = Color.WHITE
+	if _flask_heal_flash > 0.0:
+		body_col = body_col.lerp(VFX.TEAL, 0.5)
+	# Contact shadow (shrinks and fades with air time), then the flame-headed silhouette.
+	VFX.draw_contact_shadow(self, Vector2(0.0, h * 0.5 + 1.0), 36.0, 8.0, clampf(_air_time / 0.3, 0.0, 1.0))
+	var run_amount := clampf(absf(velocity.x) / Content.P_SPEED, 0.0, 1.0)
+	var bob := sin(_anim_time * 14.0) * 1.5 * run_amount if is_on_floor() else 0.0
 	var lean := clampf(velocity.x / 1800.0, -0.12, 0.12)
-	var sc := Vector2.ONE
-	match state:
-		State.DASH: sc = Vector2(1.18, 0.88)
-		State.ATTACK: lean += facing * 0.08
-		State.HURT: lean -= facing * 0.18
-		_:
-			if not is_on_floor():
-				if velocity.y < -200.0: sc = Vector2(0.94, 1.07)
-				elif velocity.y > 400.0: sc = Vector2(0.96, 1.05)
-	if _land_squash > 0.0:
-		var k := _land_squash / 0.12
-		sc = Vector2(1.0 + 0.16 * k, 1.0 - 0.16 * k)
-	var flame := _flame_time > 0.0
-	if _knight != null:
-		var pose := pose_name(run_amount)
-		var tick := int(_anim_time * (14.0 if flame else 9.0))
-		_knight.region_rect = KnightArt.frame(pose, tick)
-		_knight.flip_h = facing < 0.0
-		# Fire: 4-frame flicker, faster and larger when the Graveflame is lit.
-		var anchor := KnightArt.flame_anchor(pose)
-		var fsz := KnightArt.frame_size()
-		var local := Vector2(float(anchor.x) - fsz.x * 0.5, float(anchor.y) - fsz.y)
-		if facing < 0.0:
-			local.x = -local.x
-		_flame.position = local
-		_flame.flip_h = facing < 0.0
-		_flame.region_rect = KnightArt.flame_rect(tick)
-		var fs := (1.35 if flame else 1.0) * (1.0 + air * 0.15)
-		_flame.scale = Vector2(fs, fs)
-		_flame.modulate = Color(1.25, 1.15, 1.05) if flame else Color.WHITE
-		_knight.scale = Vector2(KnightArt.px() * sc.x, KnightArt.px() * sc.y)
-		_knight.rotation = lean
-		_knight_flash.set_shader_parameter("flash", 1.0 if _hurt_flash > 0.0 else 0.0)
-		var tint := Color.WHITE
-		if flicker:
-			tint = Color(1.0, 0.8, 0.6, 0.55)
-		if _flask_heal_flash > 0.0:
-			tint = tint.lerp(VFX.TEAL, 0.45)
-		if KnightArt.has_sheet() and flame:
-			tint = tint * Color(1.2, 1.1, 1.0)
-		_knight.modulate = tint
-	if state == State.DASH:
-		# Speed lines behind the dash.
-		for i in range(3):
-			var y := -h * 0.3 + float(i) * h * 0.25
-			draw_line(Vector2(-facing * 18.0, y), Vector2(-facing * (46.0 + float(i) * 10.0), y), Color(VFX.HOT, 0.35 - float(i) * 0.08), 2.0)
-	if flame:
+	draw_set_transform(Vector2(0.0, bob), lean, Vector2.ONE)
+	# Tattered scarf/cape trails opposite the facing direction.
+	draw_colored_polygon(PackedVector2Array([
+		Vector2(-facing * 7.0, -h * 0.3),
+		Vector2(-facing * (25.0 + run_amount * 9.0), -h * 0.08),
+		Vector2(-facing * 12.0, h * 0.24),
+	]), Color("c94a28"))
+	# Boots and legs.
+	draw_line(Vector2(-7.0, h * 0.12), Vector2(-8.0 - facing * run_amount * 4.0, h * 0.48), Color("17131f"), 8.0, true)
+	draw_line(Vector2(7.0, h * 0.12), Vector2(8.0 + facing * run_amount * 4.0, h * 0.48), Color("221a2c"), 8.0, true)
+	# Asymmetric coat with a bright Graveflame sash.
+	var coat := PackedVector2Array([
+		Vector2(-w * 0.48, -h * 0.28), Vector2(w * 0.42, -h * 0.32),
+		Vector2(w * 0.52, h * 0.24), Vector2(0.0, h * 0.36),
+		Vector2(-w * 0.56, h * 0.20),
+	])
+	VFX.draw_shaded_polygon(self, coat, body_col, _hurt_flash <= 0.0)
+	VFX.draw_rim(self, coat, facing, 1.25 if _flame_time > 0.0 else 1.0)
+	draw_line(Vector2(-facing * 7.0, -h * 0.24), Vector2(facing * 8.0, h * 0.24), Content.PAL.player_accent, 4.0, true)
+	# Dark mask under an animated, entirely procedural flame crown.
+	var head_pos := Vector2(0.0, -h * 0.52)
+	draw_circle(head_pos, w * 0.40, Color("211828"))
+	VFX.draw_rim_circle(self, head_pos, w * 0.40, facing, 0.9)
+	var flame_col := Color("ff7a18") if _flame_time <= 0.0 else VFX.GOLD
+	for i in range(4):
+		var fx := -9.0 + float(i) * 6.0
+		var tip := 9.0 + sin(_anim_time * 10.0 + float(i) * 1.7) * 4.0
+		draw_colored_polygon(PackedVector2Array([
+			head_pos + Vector2(fx - 4.0, -4.0),
+			head_pos + Vector2(fx, -tip - 7.0),
+			head_pos + Vector2(fx + 4.0, -3.0),
+		]), flame_col)
+	draw_circle(head_pos + Vector2(facing * 4.0, -1.0), 2.8, Color("ffe8a3"))
+	# Sword silhouette reads even when no attack arc is active.
+	draw_line(Vector2(facing * 10.0, -4.0), Vector2(facing * 25.0, 13.0), Color("aab4c4"), 3.0, true)
+	draw_line(Vector2(facing * 7.0, 0.0), Vector2(facing * 14.0, -7.0), Color("f0b45a"), 3.0, true)
+	draw_set_transform(Vector2.ZERO, 0.0, Vector2.ONE)
+	if _flame_time > 0.0:
 		var aura_alpha := 0.10 + sin(_anim_time * 8.0) * 0.035
 		draw_circle(Vector2(0.0, -8.0), 34.0, Color(1.0, 0.3, 0.05, aura_alpha))
 		draw_arc(Vector2(0.0, -8.0), 30.0, 0.0, TAU, 32, Color(1.0, 0.55, 0.1, 0.45), 2.0)
@@ -901,6 +822,7 @@ func _draw() -> void:
 		draw_rect(Rect2(fpos.x - 2.0, fpos.y - 8.0, 4.0, 4.0), Color("8a6a3a"))
 	# attack arc
 	if _draw_attack:
+		# Faint fan over the live hit area plus the white-gold-ember blade ribbon.
 		var origin := Vector2(facing * 8.0, -8.0)
 		_draw_arc(origin, _attack_range, _attack_arc, facing, Color(VFX.GOLD, 0.4), 1.0)
 		VFX.slash_ribbon(self, origin, _attack_range, _attack_arc, facing, 1.0, 11.0, 1.0)
@@ -914,14 +836,14 @@ func _draw() -> void:
 	# slam descent trail
 	if _slam_active:
 		draw_line(Vector2(0, 0), Vector2(0, 40), Color(1.0, 0.8, 0.3, 0.5), 3.0)
-		for i in range(3):
-			VFX.draw_flame(self, Vector2(-6.0 + float(i) * 6.0, -h * 0.3), 18.0, 6.0, _anim_time, float(i) * 2.0, Color(VFX.ORANGE, 0.6), Color(VFX.GOLD, 0.5))
 	# parry shield arc
 	if _draw_parry > 0.0:
 		var pw: float = Content.PARRY_RANGE
 		var t: float = clampf(_draw_parry / Content.PARRY_WINDOW, 0.0, 1.0)
 		var col := VFX.TEAL if t > 0.3 else VFX.GOLD
+		# crescent in front
 		_draw_arc(Vector2(facing * 8.0, 0.0), pw * 0.9, 2.4, facing, col, 5.0)
+		# glow
 		draw_circle(Vector2(facing * pw * 0.4, 0.0), pw * 0.3, Color(col.r, col.g, col.b, 0.15 * t))
 	# wall slide dust indicator
 	if wall_sliding:

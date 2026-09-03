@@ -7,3 +7,15 @@
 *.tmp
 .DS_Store
 Thumbs.db
+
+# Quarantined Blender-rendered family: backed-up assets, tools, bake scripts
+/assets/
+/tools/
+# Quarantined Blender bake scripts + sprite loaders (procedural route only)
+/tests/creature_bake.gd
+/tests/env_bake.gd
+/tests/knight_bake.gd
+/tests/knight_dump.gd
+/scripts/creature_sprite.gd
+/scripts/env_art.gd
+*.uid

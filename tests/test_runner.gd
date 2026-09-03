@@ -19,7 +19,6 @@ const PRODUCTION_SCRIPTS := [
 	"res://scripts/ui.gd",
 	"res://scripts/game.gd",
 	"res://scripts/music.gd",
-	"res://scripts/creature_sprite.gd",
 ]
 
 func _init() -> void:

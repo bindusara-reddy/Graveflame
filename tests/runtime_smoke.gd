@@ -337,7 +337,7 @@ func _test_enemy_scaling_and_elites() -> void:
 	check(enemy.elite, "elite flag is applied from spawn mods")
 	check(is_equal_approx(enemy.hp_max, float(base.hp) * 1.5 * Content.ELITE_HP_MUL), "elite hp stacks difficulty and elite multipliers")
 	check(is_equal_approx(enemy.attack_damage(), float(base.damage) * 1.2 * Content.ELITE_DMG_MUL), "elite damage stacks difficulty and elite multipliers")
-	check(is_equal_approx(enemy._sprite.size_mul, Content.ELITE_SCALE), "elite body is drawn larger")
+	check(is_equal_approx(enemy._elite_anim, 0.25), "elite body starts its scale-up pop")
 	var events: Array = []
 	enemy.damaged.connect(func(amount: float, _pos: Vector2, blocked: bool): events.append([amount, blocked]))
 	enemy.take_damage(10.0, Vector2.RIGHT, 0.0)
