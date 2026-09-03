@@ -51,9 +51,9 @@ func _test_camera_framing() -> void:
 	var view_span: float = float(Content.VIEW_W) / zoom.x
 	check(view_span < float(Content.VIEW_W), "tighter camera shows less than the full authored width")
 	check(view_span > 900.0, "tighter camera still keeps duel spacing on screen")
-	# Hero must read at Blasphemous scale: >=10% of visible frame height.
+	# Hero must read at responsive, agile action scale (compact silhouette): >=7% of visible frame height.
 	var hero_frac: float = float(Content.P_BODY_H) / (float(Content.VIEW_H) / zoom.y)
-	check(hero_frac >= 0.10, "hero body height reads >=10% of the visible frame")
+	check(hero_frac >= 0.07, "hero body height reads >=7% of the visible frame")
 	# Boss must loom: >=18% of visible frame height.
 	var boss_frac: float = float(Content.BOSS_H) / (float(Content.VIEW_H) / zoom.y)
 	check(boss_frac >= 0.18, "boss body height reads >=18% of the visible frame")

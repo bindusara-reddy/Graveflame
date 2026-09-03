@@ -333,20 +333,26 @@ func _die(_award_reward: bool = true) -> void:
 	emit_signal("died_boss")
 
 func _draw() -> void:
-	# The Ember Warden: a blackened-iron warden fused to its furnace. Values are
-	# iron base, ember-red plates, stone mantle, slate steel and gold/hot emissives.
-	# Geometry is authored facing right and mirrored by the pose transform.
+	# The Ember Warden: an imposing, towering gothic inquisitor/executioner fused
+	# to an ancient ember furnace. Redesigned from the ground up:
+	# - Tall, athletic, towering proportion (elevated shoulders, narrow waist, tattered battle skirt)
+	# - Elongated horned iron mitre / inquisitorial crown distinctly above the shoulders
+	# - Organic cathedral ribcage furnace (pointed arch with glowing vertical ribs & cinders)
+	# - Gothic flared pauldrons with hanging liturgical chains
+	# - Massive executioner's greatsword / jagged guillotine blade etched with hot ember runes
 	var flash := _hurt_flash > 0.0
 	var w := Content.BOSS_W
 	var h := Content.BOSS_H
 	var t := _anim_t if not Feedback.motion_reduced else 0.0
 	var p2 := phase == BPhase.TWO
-	var hot := 1.35 if p2 else 1.0
-	var iron := Color.WHITE if flash else Color("2b141d")
+	var hot := 1.45 if p2 else 1.0
+	var iron := Color.WHITE if flash else Color("1c131a")
+	var dark_iron := Color.WHITE if flash else Color("120b12")
 	var plate := Color.WHITE if flash else Content.BOSS_COLOR
-	var stone := Color.WHITE if flash else Color("4a3a4c")
-	var steel := Color("7a6f82")
-	# Windup / attack progress drive the anticipation poses.
+	var trim_gold := Color.WHITE if flash else Color("c98a3b")
+	var steel := Color("6d6575")
+
+	# Windup / attack progress drive anticipation and strike poses.
 	var tw := 0.0
 	if state == EState.WINDUP:
 		tw = clampf(1.0 - st_timer / maxf(0.01, float(data.windup)), 0.0, 1.0)
@@ -358,226 +364,340 @@ func _draw() -> void:
 		elif not action_idx == Action.LUNGE:
 			_active = 0.3
 		ta = clampf(1.0 - st_timer / _active, 0.0, 1.0)
+
 	var sy := 1.0
 	var lean := 0.0
 	match state:
 		EState.WINDUP:
 			match action_idx:
 				Action.LUNGE:
-					sy = 1.0 - 0.1 * tw
-					lean = -0.14 * tw
+					sy = 1.0 - 0.08 * tw
+					lean = -0.16 * tw
 				Action.FAN:
-					sy = 1.0 + 0.03 * tw
+					sy = 1.0 + 0.04 * tw
+					lean = -0.05 * tw
 				_:
 					sy = 1.0 + 0.06 * tw
-					lean = 0.05 * tw
+					lean = 0.06 * tw
 		EState.ATTACK:
 			if action_idx == Action.LUNGE:
-				lean = 0.18 * (1.0 - ta)
-				sy = 1.0 + 0.04 * (1.0 - ta)
+				lean = 0.20 * (1.0 - ta)
+				sy = 1.0 + 0.05 * (1.0 - ta)
 			else:
-				sy = 1.0 - 0.08 * (1.0 - ta)
+				sy = 1.0 - 0.06 * (1.0 - ta)
 		EState.STAGGER:
-			lean = -0.12 * clampf(stagger_t / 0.12, 0.0, 1.0)
+			lean = -0.14 * clampf(stagger_t / 0.12, 0.0, 1.0)
+
 	var air := clampf(_air_time / 0.3, 0.0, 1.0)
 	if p2:
-		var pulse := 0.12 + sin(t * 4.0) * 0.05
-		draw_circle(Vector2.ZERO, w * 0.8, Color(1.0, 0.25, 0.05, pulse))
-		draw_circle(Vector2.ZERO, w * 1.1, Color(1.0, 0.25, 0.05, pulse * 0.5))
-	VFX.draw_contact_shadow(self, Vector2(0.0, h * 0.5 + 2.0), 88.0, 16.0, air)
+		var pulse := 0.14 + sin(t * 4.5) * 0.06
+		draw_circle(Vector2.ZERO, w * 0.85, Color(1.0, 0.25, 0.05, pulse))
+		draw_circle(Vector2.ZERO, w * 1.25, Color(1.0, 0.25, 0.05, pulse * 0.4))
+	VFX.draw_contact_shadow(self, Vector2(0.0, h * 0.5 + 2.0), 92.0, 16.0, air)
 	VFX.set_pose(self, Vector2(0.0, h * 0.5), facing, Vector2(2.0 - sy, sy), lean)
-	# Mantle: two swaying layers, heavier on the back.
-	var sway := sin(t * 1.4) * 4.0
-	var sway2 := sin(t * 1.4 + 1.1) * 3.0
+
+	# 1. Flowing liturgical cape & tattered battle skirt (replaces stocky squat)
+	var sway := sin(t * 1.6) * 5.0
+	var sway2 := sin(t * 1.6 + 1.2) * 4.0
+	# Rear long cape
 	draw_colored_polygon(PackedVector2Array([
-		Vector2(-w * 0.9, -h * 0.4), Vector2(w * 0.3, -h * 0.4), Vector2(w * 0.22 + sway * 0.5, h * 0.2),
-		Vector2(w * 0.12, h * 0.5), Vector2(-w * 0.05, h * 0.36), Vector2(-w * 0.2, h * 0.55),
-		Vector2(-w * 0.5, h * 0.4), Vector2(-w * 0.8 - sway, h * 0.56), Vector2(-w * 0.98 - sway * 1.5, h * 0.1),
-	]), Color.WHITE if flash else Color("1c0b12"))
+		Vector2(-w * 0.45, -h * 0.35), Vector2(w * 0.15, -h * 0.35),
+		Vector2(w * 0.28 + sway * 0.4, h * 0.30), Vector2(w * 0.18 + sway, h * 0.54),
+		Vector2(-w * 0.1, h * 0.42), Vector2(-w * 0.35 - sway, h * 0.56),
+		Vector2(-w * 0.65 - sway * 1.4, h * 0.48), Vector2(-w * 0.75 - sway * 1.2, h * 0.05),
+	]), Color.WHITE if flash else Color("160810"))
+	# Front mid-layer mantle
 	draw_colored_polygon(PackedVector2Array([
-		Vector2(-w * 0.7, -h * 0.36), Vector2(w * 0.3, -h * 0.38), Vector2(w * 0.2 + sway2, h * 0.3),
-		Vector2(-w * 0.1, h * 0.44), Vector2(-w * 0.45 - sway2, h * 0.5), Vector2(-w * 0.78 - sway2 * 1.4, 0.0),
-	]), Color.WHITE if flash else Color("3a1520"))
-	# Chains from the pauldrons: long and slow, or snapped and thrashing in phase 2.
-	var chain_col := Color("5e5468")
+		Vector2(-w * 0.38, -h * 0.30), Vector2(w * 0.18, -h * 0.30),
+		Vector2(w * 0.15 + sway2, h * 0.22), Vector2(-w * 0.05, h * 0.48),
+		Vector2(-w * 0.40 - sway2, h * 0.52), Vector2(-w * 0.58 - sway2, h * 0.15),
+	]), Color.WHITE if flash else Color("320f1a"))
+
+	# 2. Hanging executioner's chains (longer, gothic, flaring during movement)
+	var chain_col := Color("5a5062")
 	for i in range(3):
 		var fi := float(i)
-		var anchor := Vector2(-w * 0.62 - fi * 9.0, -h * 0.3 + fi * 4.0)
+		var anchor := Vector2(-w * 0.42 - fi * 10.0, -h * 0.32 + fi * 6.0)
 		if p2:
-			VFX.draw_chain(self, anchor, 16.0 + fi * 5.0, sin(t * 7.0 + fi * 1.7) * 9.0, chain_col)
+			VFX.draw_chain(self, anchor, 24.0 + fi * 8.0, sin(t * 8.0 + fi * 1.9) * 12.0, chain_col)
 		else:
-			VFX.draw_chain(self, anchor, 46.0 + fi * 12.0, sin(t * 1.6 + fi) * 5.0, chain_col)
-	VFX.draw_chain(self, Vector2(w * 0.7, -h * 0.28), 14.0 if p2 else 36.0, sin(t * (6.0 if p2 else 1.5) + 2.0) * (8.0 if p2 else 4.0), chain_col)
-	# Greaves, boots and knee plates.
+			VFX.draw_chain(self, anchor, 56.0 + fi * 14.0, sin(t * 1.8 + fi * 1.2) * 6.0, chain_col)
+	VFX.draw_chain(self, Vector2(w * 0.46, -h * 0.28), 20.0 if p2 else 48.0, sin(t * (7.0 if p2 else 1.8) + 2.2) * (9.0 if p2 else 5.0), chain_col)
+
+	# 3. Tall greaves and armored legs (slender, upright, imposing)
 	for side: float in [-1.0, 1.0]:
-		var hipx := side * 15.0
-		var ankle := hipx + side * 6.0
-		draw_line(Vector2(hipx, h * 0.12), Vector2(ankle, h * 0.46), iron, 15.0, true)
-		draw_line(Vector2(hipx + 6.0, h * 0.14), Vector2(ankle + 6.0, h * 0.42), Color(VFX.RIM, 0.35), 2.0, true)
+		var hipx := side * 13.0
+		var ankle := hipx + side * 4.0
+		# Long thigh and calf lines
+		draw_line(Vector2(hipx, h * 0.05), Vector2(hipx + side * 2.0, h * 0.26), iron, 12.0, true)
+		draw_line(Vector2(hipx + side * 2.0, h * 0.26), Vector2(ankle, h * 0.47), dark_iron, 11.0, true)
+		# Flared gothic knee poleyn (pointed diamond)
 		draw_colored_polygon(PackedVector2Array([
-			Vector2(ankle - 11.0, h * 0.42), Vector2(ankle + 13.0, h * 0.42),
-			Vector2(ankle + 15.0, h * 0.5), Vector2(ankle - 11.0, h * 0.5),
-		]), iron if flash else iron.darkened(0.2))
+			Vector2(hipx + side * 2.0 - 6.0, h * 0.24), Vector2(hipx + side * 2.0, h * 0.18),
+			Vector2(hipx + side * 2.0 + 6.0, h * 0.24), Vector2(hipx + side * 2.0, h * 0.32),
+		]), plate if flash else plate.darkened(0.15))
+		draw_line(Vector2(hipx + side * 2.0, h * 0.18), Vector2(hipx + side * 2.0, h * 0.32), trim_gold, 1.5)
+		# Pointed gothic sabaton / foot
 		draw_colored_polygon(PackedVector2Array([
-			Vector2(hipx + side * 3.0 - 7.0, h * 0.24), Vector2(hipx + side * 3.0 + 7.0, h * 0.24), Vector2(hipx + side * 3.0, h * 0.34),
-		]), plate if flash else plate.darkened(0.2))
-	# Off-hand behind the body; it rises to conjure the projectile fan.
-	var b_sh := Vector2(-w * 0.4, -h * 0.3)
-	var b_rest := Vector2(-w * 0.62, h * 0.2)
+			Vector2(ankle - 8.0, h * 0.46), Vector2(ankle + 12.0, h * 0.46),
+			Vector2(ankle + 16.0, h * 0.50), Vector2(ankle - 8.0, h * 0.50),
+		]), iron)
+
+	# 4. Off-hand arm & conjuring gesture (raises for fan / slam)
+	var b_sh := Vector2(-w * 0.30, -h * 0.32)
+	var b_rest := Vector2(-w * 0.48, h * 0.15)
 	var b_hand := b_rest
 	if state == EState.WINDUP and action_idx == Action.FAN:
-		b_hand = b_rest.lerp(Vector2(-w * 0.6, -h * 0.66), tw)
+		b_hand = b_rest.lerp(Vector2(-w * 0.52, -h * 0.68), tw)
 	elif state == EState.WINDUP and action_idx == Action.SLAM:
-		b_hand = b_rest.lerp(Vector2(-w * 0.7, -h * 0.1), tw)
-	var b_el := (b_sh + b_hand) * 0.5 + Vector2(-10.0, 0.0)
-	draw_line(b_sh, b_el, iron, 12.0, true)
-	draw_line(b_el, b_hand, iron, 10.0, true)
-	draw_circle(b_hand, 9.0, iron if flash else iron.darkened(0.15))
-	draw_arc(b_hand, 9.0, -2.6, 0.6, 8, plate, 3.0)
+		b_hand = b_rest.lerp(Vector2(-w * 0.55, -h * 0.15), tw)
+	var b_el := (b_sh + b_hand) * 0.5 + Vector2(-8.0, 0.0)
+	draw_line(b_sh, b_el, iron, 10.0, true)
+	draw_line(b_el, b_hand, iron, 8.5, true)
+	draw_circle(b_hand, 7.5, iron if flash else iron.darkened(0.2))
+	draw_arc(b_hand, 7.5, -2.6, 0.6, 8, plate, 2.5)
 	if state == EState.WINDUP and action_idx == Action.FAN:
-		var palm := b_hand + Vector2(0.0, -10.0)
-		VFX.draw_ember_dot(self, palm, 3.0 + tw * 5.0, VFX.EMBER, 0.6 + tw)
-		for k in range(4):
-			var a := t * 9.0 + float(k) * TAU / 4.0
-			draw_circle(palm + Vector2(cos(a), sin(a)) * lerpf(26.0, 8.0, tw), 1.6, Color(VFX.HOT, 0.85))
-	# Torso barrel, red chest plates and belt.
+		var palm := b_hand + Vector2(0.0, -12.0)
+		VFX.draw_ember_dot(self, palm, 4.0 + tw * 6.0, VFX.EMBER, 0.7 + tw)
+		for k in range(5):
+			var a := t * 10.0 + float(k) * TAU / 5.0
+			draw_circle(palm + Vector2(cos(a), sin(a)) * lerpf(28.0, 6.0, tw), 1.8, Color(VFX.HOT, 0.9))
+
+	# 5. Torso: tapered gothic cuirass with waist cinch & ceremonial plate
 	var torso := PackedVector2Array([
-		Vector2(-w * 0.5, -h * 0.36), Vector2(w * 0.5, -h * 0.36), Vector2(w * 0.56, h * 0.04),
-		Vector2(w * 0.42, h * 0.32), Vector2(-w * 0.42, h * 0.32), Vector2(-w * 0.56, h * 0.04),
+		Vector2(-w * 0.38, -h * 0.38), Vector2(w * 0.38, -h * 0.38),
+		Vector2(w * 0.34, -h * 0.02), Vector2(w * 0.26, h * 0.16),
+		Vector2(-w * 0.26, h * 0.16), Vector2(-w * 0.34, -h * 0.02),
 	])
 	VFX.draw_shaded_polygon(self, torso, iron, not flash)
+	VFX.draw_rim(self, torso, 1.0, 1.1)
+
+	# Segmented fluted chest plates
 	for side: float in [-1.0, 1.0]:
 		var pl := PackedVector2Array([
-			Vector2(side * w * 0.18, -h * 0.33), Vector2(side * w * 0.47, -h * 0.33),
-			Vector2(side * w * 0.5, h * 0.02), Vector2(side * w * 0.38, h * 0.26), Vector2(side * w * 0.17, h * 0.22),
+			Vector2(side * w * 0.12, -h * 0.36), Vector2(side * w * 0.34, -h * 0.36),
+			Vector2(side * w * 0.30, -h * 0.06), Vector2(side * w * 0.22, h * 0.12),
+			Vector2(side * w * 0.10, h * 0.08),
 		])
 		VFX.draw_shaded_polygon(self, pl, plate, not flash)
-		VFX.draw_rim(self, pl, 1.0, 1.1)
-		for k in range(3):
-			draw_circle(Vector2(side * w * 0.42, -h * 0.26 + float(k) * h * 0.18), 1.6, steel)
-	if p2:
-		var glow := 0.55 + sin(t * 5.0) * 0.3
-		draw_polyline(PackedVector2Array([Vector2(w * 0.3, -h * 0.3), Vector2(w * 0.38, -h * 0.12), Vector2(w * 0.3, h * 0.04)]), Color(VFX.EMBER, glow), 1.5, true)
-		draw_polyline(PackedVector2Array([Vector2(-w * 0.34, -h * 0.2), Vector2(-w * 0.26, -h * 0.02), Vector2(-w * 0.36, h * 0.16)]), Color(VFX.EMBER, glow * 0.8), 1.5, true)
-	draw_rect(Rect2(-w * 0.44, h * 0.24, w * 0.88, 8.0), iron if flash else iron.darkened(0.25))
-	draw_rect(Rect2(-6.0, h * 0.23, 12.0, 10.0), steel)
-	# Furnace door: arched iron frame with live flames behind three bars. The light
-	# layer's 240px pulse is anchored here, so the door is the arena's light source.
-	var door_c := Vector2(0.0, -h * 0.02)
-	var door_w := 13.0
-	var door_top := door_c.y - 17.0
-	var door_bot := door_c.y + 17.0
-	var flare := 1.0 + (tw * 0.6 if state == EState.WINDUP and action_idx == Action.FAN else 0.0)
-	var heat := (0.85 + sin(t * 6.0) * 0.12) * hot * flare
-	draw_circle(door_c, 34.0 * heat, Color(VFX.ORANGE, 0.10 * heat))
-	draw_circle(door_c, 22.0 * heat, Color(VFX.ORANGE, 0.16 * heat))
-	var coals := VFX.EMBER.darkened(0.35)
-	draw_rect(Rect2(-door_w, door_top + door_w, door_w * 2.0, door_bot - door_top - door_w), coals)
-	draw_circle(Vector2(0.0, door_top + door_w), door_w, coals)
-	VFX.draw_flame(self, Vector2(-5.0, door_bot), 22.0 * heat, 12.0, t, 0.0)
-	VFX.draw_flame(self, Vector2(5.0, door_bot), 26.0 * heat, 12.0, t, 2.0)
-	if p2:
-		VFX.draw_flame(self, Vector2(0.0, door_bot), 30.0 * heat, 9.0, t, 4.0, VFX.GOLD, VFX.HOT)
-	for k in range(3):
-		var by := door_top + 9.0 + float(k) * 9.0
-		draw_line(Vector2(-door_w, by), Vector2(door_w, by), iron, 2.5)
-	draw_arc(Vector2(0.0, door_top + door_w), door_w + 1.5, PI, TAU, 14, steel, 3.0)
-	draw_line(Vector2(-door_w - 1.5, door_top + door_w), Vector2(-door_w - 1.5, door_bot), steel, 3.0)
-	draw_line(Vector2(door_w + 1.5, door_top + door_w), Vector2(door_w + 1.5, door_bot), steel, 3.0)
-	draw_line(Vector2(-door_w - 3.0, door_bot + 1.0), Vector2(door_w + 3.0, door_bot + 1.0), steel, 3.0)
-	for bolt: Vector2 in [Vector2(-door_w - 1.5, door_c.y - 4.0), Vector2(door_w + 1.5, door_c.y - 4.0), Vector2(-door_w - 1.5, door_bot - 4.0), Vector2(door_w + 1.5, door_bot - 4.0)]:
-		draw_circle(bolt, 1.8, Color("a89bb0"))
-	# Pauldrons: crenellated stone slabs with a red trim.
-	for side: float in [-1.0, 1.0]:
-		var pd := PackedVector2Array([
-			Vector2(side * w * 0.28, -h * 0.42), Vector2(side * w * 0.9, -h * 0.52),
-			Vector2(side * w * 0.96, -h * 0.28), Vector2(side * w * 0.5, -h * 0.2),
-		])
-		VFX.draw_shaded_polygon(self, pd, stone, not flash)
-		VFX.draw_rim(self, pd, 1.0, 0.9)
-		for k in range(2):
-			var top_pt := pd[0].lerp(pd[1], 0.35 + float(k) * 0.3)
-			draw_rect(Rect2(top_pt.x - 4.0, top_pt.y - 1.0, 8.0, 5.0), iron)
-		draw_line(pd[0], pd[3], plate if flash else plate.darkened(0.1), 2.5)
-	# Helm: dome, visor slit with ember eyes, nasal bar and a spiked crown that ignites in phase 2.
-	var head_y := -h * 0.5
-	var helm := PackedVector2Array([
-		Vector2(-17.0, head_y + 2.0), Vector2(-12.0, head_y - 12.0), Vector2(12.0, head_y - 12.0), Vector2(17.0, head_y + 2.0),
-		Vector2(19.0, head_y + 22.0), Vector2(12.0, head_y + 34.0), Vector2(-12.0, head_y + 34.0), Vector2(-19.0, head_y + 22.0),
+		VFX.draw_rim(self, pl, 1.0, 1.15)
+		draw_line(Vector2(side * w * 0.12, -h * 0.36), Vector2(side * w * 0.22, h * 0.12), trim_gold, 1.5)
+
+	# Capped iron belt and heraldic faulds
+	draw_rect(Rect2(-w * 0.28, h * 0.14, w * 0.56, 7.0), dark_iron)
+	draw_rect(Rect2(-w * 0.08, h * 0.13, w * 0.16, 9.0), trim_gold)
+
+	# 6. Furnace Core: Cathedral ribcage with glowing molten interior (replaces square stove door)
+	var core_c := Vector2(0.0, -h * 0.12)
+	var flare := 1.0 + (tw * 0.7 if state == EState.WINDUP and action_idx == Action.FAN else 0.0)
+	var heat := (0.9 + sin(t * 5.5) * 0.14) * hot * flare
+	# Ambient core aura
+	draw_circle(core_c, 36.0 * heat, Color(VFX.ORANGE, 0.12 * heat))
+	draw_circle(core_c, 22.0 * heat, Color(VFX.HOT, 0.20 * heat))
+	# Cathedral lancet-arch opening
+	var arch_h := 38.0
+	var arch_w := 12.0
+	var arch_pts := PackedVector2Array([
+		core_c + Vector2(-arch_w, arch_h * 0.5),
+		core_c + Vector2(-arch_w, -arch_h * 0.1),
+		core_c + Vector2(0.0, -arch_h * 0.55),
+		core_c + Vector2(arch_w, -arch_h * 0.1),
+		core_c + Vector2(arch_w, arch_h * 0.5),
 	])
-	VFX.draw_shaded_polygon(self, helm, iron, not flash)
-	VFX.draw_rim(self, helm, 1.0, 1.2)
-	draw_rect(Rect2(-14.0, head_y + 10.0, 28.0, 7.0), Color(0.03, 0.02, 0.03))
-	draw_line(Vector2(0.0, head_y + 6.0), Vector2(0.0, head_y + 30.0), steel, 3.0)
+	draw_colored_polygon(arch_pts, VFX.VOID)
+	# Burning interior hearth
+	draw_circle(core_c + Vector2(0.0, 4.0), 11.0, Color(VFX.EMBER, 0.85))
+	draw_circle(core_c + Vector2(0.0, 5.0), 7.0, Color(VFX.HOT, 0.95))
+	draw_circle(core_c + Vector2(0.0, 6.0), 3.5, Color.WHITE)
+	# Rising flames inside the ribcage
+	VFX.draw_flame(self, core_c + Vector2(-3.5, 12.0), 22.0 * heat, 9.0, t, 0.0, VFX.HOT, VFX.GOLD)
+	VFX.draw_flame(self, core_c + Vector2(3.5, 12.0), 26.0 * heat, 9.0, t, 2.3, VFX.HOT, VFX.GOLD)
+	if p2:
+		VFX.draw_flame(self, core_c + Vector2(0.0, 10.0), 32.0 * heat, 8.0, t, 4.1, Color.WHITE, VFX.HOT)
+	# Organic arched bone-iron ribs curving across the furnace
+	for r_idx in range(4):
+		var ry := core_c.y - arch_h * 0.3 + float(r_idx) * 9.5
+		var rib_curve := sin(float(r_idx) / 3.0 * PI) * 3.0
+		draw_line(Vector2(-arch_w - 2.0, ry), Vector2(-1.0, ry + rib_curve), dark_iron, 2.5)
+		draw_line(Vector2(arch_w + 2.0, ry), Vector2(1.0, ry + rib_curve), dark_iron, 2.5)
+		draw_line(Vector2(-arch_w - 1.0, ry), Vector2(-1.0, ry + rib_curve), trim_gold, 1.0)
+	# Outer gothic frame around the aperture
+	draw_polyline(arch_pts, trim_gold, 2.0, true)
+
+	# 7. Gothic Spired Pauldrons (tall, peaked upward, eliminating the flat hockey-pad line)
+	for side: float in [-1.0, 1.0]:
+		var pld := PackedVector2Array([
+			Vector2(side * w * 0.18, -h * 0.38),
+			Vector2(side * w * 0.36, -h * 0.52),  # high curved crest
+			Vector2(side * w * 0.52, -h * 0.56),  # upward sweeping gothic spike
+			Vector2(side * w * 0.56, -h * 0.34),  # tapering blade edge
+			Vector2(side * w * 0.40, -h * 0.22),
+			Vector2(side * w * 0.22, -h * 0.24),
+		])
+		VFX.draw_shaded_polygon(self, pld, iron, not flash)
+		VFX.draw_rim(self, pld, 1.0, 1.2)
+		draw_line(pld[0], pld[2], trim_gold, 2.0)
+		draw_line(pld[2], pld[4], plate if flash else plate.darkened(0.1), 2.0)
+		# Spire tip glow in phase 2
+		if p2:
+			VFX.draw_flame(self, pld[2], 14.0, 7.0, t, float(side) * 2.0, VFX.HOT, VFX.GOLD)
+
+	# 8. Head & Inquisitor's Mitre / Horned Crown (raised on an armored gorget neck)
+	var neck_y := -h * 0.38
+	# Armored neck gorget
+	draw_colored_polygon(PackedVector2Array([
+		Vector2(-9.0, neck_y), Vector2(9.0, neck_y),
+		Vector2(12.0, neck_y - 8.0), Vector2(-12.0, neck_y - 8.0),
+	]), dark_iron)
+	draw_line(Vector2(-12.0, neck_y - 8.0), Vector2(12.0, neck_y - 8.0), trim_gold, 2.0)
+
+	# Helm / Mitre: tall, pointed cathedral helmet
+	var head_center_y := neck_y - 20.0
+	var mitre := PackedVector2Array([
+		Vector2(-14.0, head_center_y + 12.0),
+		Vector2(-12.0, head_center_y - 6.0),
+		Vector2(-6.0, head_center_y - 26.0),   # tall steeple peak
+		Vector2(0.0, head_center_y - 34.0),    # mitre pinnacle
+		Vector2(6.0, head_center_y - 26.0),
+		Vector2(12.0, head_center_y - 6.0),
+		Vector2(14.0, head_center_y + 12.0),
+		Vector2(0.0, head_center_y + 16.0),
+	])
+	VFX.draw_shaded_polygon(self, mitre, iron, not flash)
+	VFX.draw_rim(self, mitre, 1.0, 1.3)
+	draw_line(Vector2(0.0, head_center_y - 34.0), Vector2(0.0, head_center_y + 16.0), trim_gold, 1.5)
+
+	# Crown horns flaring from the temple
+	for h_side: float in [-1.0, 1.0]:
+		var horn := PackedVector2Array([
+			Vector2(h_side * 10.0, head_center_y - 8.0),
+			Vector2(h_side * 22.0, head_center_y - 24.0),
+			Vector2(h_side * 18.0, head_center_y - 28.0),
+			Vector2(h_side * 8.0, head_center_y - 14.0),
+		])
+		draw_colored_polygon(horn, dark_iron)
+		draw_line(horn[0], horn[1], trim_gold, 1.5)
+		if p2:
+			VFX.draw_flame(self, horn[1], 16.0, 7.0, t, h_side * 1.5)
+
+	# Weeping flame eye slit (single horizontal slit with glowing tear lines)
+	draw_rect(Rect2(-9.0, head_center_y + 1.0, 18.0, 4.0), Color("080408"))
 	var eye_col := VFX.HOT if p2 else VFX.GOLD
-	var blink := 0.85 + sin(t * 7.0) * 0.15
-	VFX.draw_ember_dot(self, Vector2(-7.0, head_y + 13.5), 2.4 * (1.0 + tw * 0.4), eye_col, blink * hot)
-	VFX.draw_ember_dot(self, Vector2(7.0, head_y + 13.5), 2.4 * (1.0 + tw * 0.4), eye_col, blink * hot)
-	for i in range(5):
-		var sx := lerpf(-15.0, 15.0, float(i) / 4.0)
-		var spike := 14.0 if i == 2 else (10.0 if i % 2 == 1 else 7.0)
-		draw_colored_polygon(PackedVector2Array([
-			Vector2(sx - 4.0, head_y - 10.0), Vector2(sx + 4.0, head_y - 10.0), Vector2(sx, head_y - 10.0 - spike),
-		]), steel if i % 2 == 0 else plate)
-		if p2 and i % 2 == 0:
-			VFX.draw_flame(self, Vector2(sx, head_y - 8.0 - spike), 12.0 + (6.0 if i == 2 else 0.0), 7.0, t, float(i) * 1.3)
-	# Weapon arm and the notched cleaver. Lunge draws it back behind the head,
-	# slam hoists it overhead, attacks sweep it through.
-	var f_sh := Vector2(w * 0.42, -h * 0.28)
-	var rest := f_sh + Vector2(w * 0.16, h * 0.34)
-	var back := Vector2(-w * 0.05, -h * 0.68)
-	var overhead := Vector2(w * 0.3, -h * 0.9)
+	var eye_blink := 0.88 + sin(t * 6.5) * 0.12
+	VFX.draw_ember_dot(self, Vector2(-4.5, head_center_y + 3.0), 2.2 * (1.0 + tw * 0.4), eye_col, eye_blink * hot)
+	VFX.draw_ember_dot(self, Vector2(4.5, head_center_y + 3.0), 2.2 * (1.0 + tw * 0.4), eye_col, eye_blink * hot)
+	# Embers weeping down the visor
+	draw_line(Vector2(-4.5, head_center_y + 5.0), Vector2(-4.5, head_center_y + 12.0), Color(VFX.EMBER, 0.75 * hot), 1.5)
+	draw_line(Vector2(4.5, head_center_y + 5.0), Vector2(4.5, head_center_y + 12.0), Color(VFX.EMBER, 0.75 * hot), 1.5)
+
+	# Mitre pinnacle flame
+	VFX.draw_flame(self, Vector2(0.0, head_center_y - 32.0), 20.0 * (1.3 if p2 else 0.9), 9.0, t, 0.0, VFX.HOT, VFX.GOLD)
+
+	# 9. Weapon Arm & Executioner's Greatsword (massive, jagged guillotine blade, two-handed poise)
+	var f_sh := Vector2(w * 0.32, -h * 0.32)
+	var rest := f_sh + Vector2(w * 0.12, h * 0.28)
+	var back := Vector2(-w * 0.12, -h * 0.72)
+	var overhead := Vector2(w * 0.24, -h * 0.94)
 	var hand := rest
-	var blade_ang := -1.25
+	var blade_ang := -1.30
+
 	match state:
 		EState.WINDUP:
 			match action_idx:
 				Action.LUNGE:
 					hand = rest.lerp(back, tw)
-					blade_ang = lerpf(-1.25, -2.4, tw)
+					blade_ang = lerpf(-1.30, -2.45, tw)
 				Action.SLAM:
 					hand = rest.lerp(overhead, tw)
-					blade_ang = lerpf(-1.25, -1.5, tw)
+					blade_ang = lerpf(-1.30, -1.55, tw)
 				_:
-					hand = rest + Vector2(0.0, -tw * 6.0)
+					hand = rest + Vector2(0.0, -tw * 8.0)
 		EState.ATTACK:
 			if action_idx == Action.LUNGE:
 				var k := minf(1.0, ta * 1.6)
-				hand = back.lerp(f_sh + Vector2(w * 0.7, h * 0.1), k)
-				blade_ang = lerpf(-2.4, 0.15, k)
+				hand = back.lerp(f_sh + Vector2(w * 0.68, h * 0.08), k)
+				blade_ang = lerpf(-2.45, 0.20, k)
 			else:
 				var k := minf(1.0, ta * 1.8)
-				hand = overhead.lerp(f_sh + Vector2(w * 0.35, h * 0.55), k)
-				blade_ang = lerpf(-1.5, 1.2, k)
-	var f_el := (f_sh + hand) * 0.5 + Vector2(8.0, -6.0)
-	draw_line(f_sh, f_el, iron, 12.0, true)
-	draw_line(f_el, hand, iron, 10.0, true)
-	draw_circle(f_el, 6.5, plate if flash else plate.darkened(0.15))
+				hand = overhead.lerp(f_sh + Vector2(w * 0.30, h * 0.58), k)
+				blade_ang = lerpf(-1.55, 1.25, k)
+
+	# Arm segments
+	var f_el := (f_sh + hand) * 0.5 + Vector2(7.0, -5.0)
+	draw_line(f_sh, f_el, iron, 11.0, true)
+	draw_line(f_el, hand, iron, 9.5, true)
+	draw_circle(f_el, 6.0, plate if flash else plate.darkened(0.15))
+
+	# Massive executioner's two-handed greatsword / guillotine blade
+	# Pommel, long grip, cruciform guard
 	draw_colored_polygon(VFX.limb(PackedVector2Array([
-		Vector2(-12.0, -3.0), Vector2(4.0, -3.0), Vector2(4.0, 3.0), Vector2(-12.0, 3.0),
-	]), hand, blade_ang), iron if flash else iron.darkened(0.2))
-	var blade := VFX.limb(PackedVector2Array([
-		Vector2(2.0, -7.0), Vector2(40.0, -13.0), Vector2(56.0, -4.0), Vector2(54.0, 12.0), Vector2(38.0, 16.0),
-		Vector2(28.0, 13.0), Vector2(24.0, 7.0), Vector2(20.0, 13.0), Vector2(2.0, 9.0),
+		Vector2(-20.0, -3.0), Vector2(5.0, -3.0), Vector2(5.0, 3.0), Vector2(-20.0, 3.0),
+	]), hand, blade_ang), dark_iron)
+	draw_circle(hand + Vector2(-20.0, 0.0).rotated(blade_ang), 4.5, trim_gold)
+	# Crossguard (flared gothic quillons)
+	var guard_poly := VFX.limb(PackedVector2Array([
+		Vector2(4.0, -14.0), Vector2(8.0, -12.0), Vector2(8.0, 12.0), Vector2(4.0, 14.0),
+		Vector2(2.0, 0.0),
 	]), hand, blade_ang)
-	draw_colored_polygon(blade, Color("6f6579"))
-	draw_colored_polygon(VFX.limb(PackedVector2Array([
-		Vector2(4.0, -5.0), Vector2(40.0, -11.0), Vector2(53.0, -3.0), Vector2(50.0, 3.0), Vector2(4.0, 1.0),
-	]), hand, blade_ang), Color("9a90a2"))
-	var edge := PackedVector2Array([blade[2], blade[3], blade[4], blade[5], blade[6], blade[7], blade[8]])
-	draw_polyline(edge, Color(VFX.EMBER, 0.55 * hot), 5.0, true)
-	draw_polyline(edge, Color(VFX.HOT, 0.9), 2.0, true)
+	draw_colored_polygon(guard_poly, trim_gold)
+
+	# Blade: long, broad, jagged executioner guillotine (length 78px, width 18px)
+	var blade_pts := PackedVector2Array([
+		Vector2(8.0, -7.0),
+		Vector2(58.0, -9.0),
+		Vector2(82.0, -13.0),  # flared executioner tip
+		Vector2(84.0, 11.0),
+		Vector2(64.0, 10.0),
+		Vector2(48.0, 12.0),
+		Vector2(32.0, 8.0),
+		Vector2(8.0, 7.0),
+	])
+	var transformed_blade := VFX.limb(blade_pts, hand, blade_ang)
+	draw_colored_polygon(transformed_blade, Color("4a4252"))
+	# Chiseled blade fuller & inner steel
+	var inner_blade := VFX.limb(PackedVector2Array([
+		Vector2(10.0, -4.0), Vector2(60.0, -5.0), Vector2(78.0, -8.0),
+		Vector2(76.0, 4.0), Vector2(10.0, 3.0),
+	]), hand, blade_ang)
+	draw_colored_polygon(inner_blade, steel)
+
+	# Glowing ember runes carved along the blade fuller
+	var rune_start := hand + Vector2(16.0, 0.0).rotated(blade_ang)
+	var rune_end := hand + Vector2(70.0, -2.0).rotated(blade_ang)
+	draw_line(rune_start, rune_end, Color(VFX.EMBER, 0.8 * hot), 2.5)
+	draw_line(rune_start, rune_end, Color(VFX.HOT, 0.95), 1.0)
+
+	# Burning cutting edge
+	var cut_edge := PackedVector2Array([
+		transformed_blade[2], transformed_blade[3], transformed_blade[4],
+		transformed_blade[5], transformed_blade[6], transformed_blade[7],
+	])
+	draw_polyline(cut_edge, Color(VFX.EMBER, 0.7 * hot), 4.5, true)
+	draw_polyline(cut_edge, Color(VFX.HOT, 1.0), 2.0, true)
 	draw_circle(hand, 5.0, iron)
+
+	# Trailing blade flame & burning embers
+	if p2 or (state == EState.ATTACK):
+		var tip_pos := transformed_blade[2]
+		VFX.draw_flame(self, tip_pos, 24.0 * hot, 11.0, t, 1.5, VFX.HOT, VFX.GOLD)
+		for ep in range(3):
+			var u := 0.25 + float(ep) * 0.3
+			var e_pos := transformed_blade[0].lerp(transformed_blade[2], u)
+			VFX.draw_ember_dot(self, e_pos, 2.5 * hot, VFX.GOLD, 0.8)
+
 	if burn_time > 0.0:
 		for i in range(3):
-			VFX.draw_flame(self, Vector2(-w * 0.5 + float(i) * w * 0.5, -h * 0.44), 16.0, 9.0, t, float(i) * 2.3)
+			VFX.draw_flame(self, Vector2(-w * 0.4 + float(i) * w * 0.4, -h * 0.35), 18.0, 10.0, t, float(i) * 2.3)
+
 	draw_set_transform_matrix(Transform2D.IDENTITY)
-	# Telegraph: ember ground arc under the true hitbox, plus a rising edge glow.
+
+	# 10. Stylized in-world telegraphs (ground arc, never a raw debug rectangle)
 	if state == EState.WINDUP:
 		var tele := PackedVector2Array()
-		for i in range(17):
-			var u := float(i) / 16.0
-			tele.append(Vector2(lerpf(-w * 0.5, w * 0.5, u), h * 0.5 + 3.0 - sin(u * PI) * 6.0))
-		draw_polyline(tele, Color(1.0, 0.35, 0.1, tw * 0.8), 3.0, true)
-		draw_line(Vector2(-w * 0.5, h * 0.5 + 3.0), Vector2(-w * 0.5, -h * 0.5), Color(1.0, 0.35, 0.1, tw * 0.4), 2.0, true)
-		draw_line(Vector2(w * 0.5, h * 0.5 + 3.0), Vector2(w * 0.5, -h * 0.5), Color(1.0, 0.35, 0.1, tw * 0.4), 2.0, true)
+		for i in range(19):
+			var u := float(i) / 18.0
+			tele.append(Vector2(lerpf(-w * 0.55, w * 0.55, u), h * 0.5 + 4.0 - sin(u * PI) * 8.0))
+		draw_polyline(tele, Color(1.0, 0.35, 0.1, tw * 0.85), 3.5, true)
+		draw_line(Vector2(-w * 0.55, h * 0.5 + 4.0), Vector2(-w * 0.55, -h * 0.45), Color(1.0, 0.35, 0.1, tw * 0.4), 2.0, true)
+		draw_line(Vector2(w * 0.55, h * 0.5 + 4.0), Vector2(w * 0.55, -h * 0.45), Color(1.0, 0.35, 0.1, tw * 0.4), 2.0, true)
+

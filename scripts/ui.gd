@@ -74,6 +74,8 @@ var _title_top_label: Label
 var _title_embers: CPUParticles2D
 var _title_masonry: Control
 var _title_t := 0.0
+var _title_controls: Control
+var _title_controls_button: Button
 
 
 func _ready() -> void:
@@ -376,50 +378,123 @@ func _build_room_clear_banner() -> void:
 func _build_title() -> void:
 	var panel := _screen("title", true, C_EMBER)
 	_build_title_scene(panel)
-	var content := _dialog(panel, Vector2(920, 640), C_EMBER, 46, 40)
-	# Slightly translucent card so the furnace horizon bleeds through.
-	(panel.get_meta("dialog") as PanelContainer).add_theme_stylebox_override("panel", _panel_box(Color("14101cd2"), C_EMBER.darkened(0.35), 14, 1, 18))
-	content.add_theme_constant_override("separation", 10)
+	# No opaque modal card: a borderless, transparent holder lets the furnace
+	# horizon, battlements and rising embers breathe around the menu.
+	var content := _dialog(panel, Vector2(620, 0), C_EMBER, 24, 20)
+	var holder := panel.get_meta("dialog") as PanelContainer
+	holder.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	holder.add_theme_stylebox_override("panel", StyleBoxEmpty.new())
+	content.alignment = BoxContainer.ALIGNMENT_CENTER
+	content.add_theme_constant_override("separation", 8)
 
 	content.add_child(_make_label("AN ORIGINAL ACTION-ROGUELITE", 13, C_EMBER_HI, HorizontalAlignment.HORIZONTAL_ALIGNMENT_CENTER))
-	content.add_child(_build_title_stack("GRAVEFLAME", 74))
-	content.add_child(_make_label("Descend. Adapt. Burn brighter.", 18, C_MUTED, HorizontalAlignment.HORIZONTAL_ALIGNMENT_CENTER))
+	content.add_child(_build_title_stack("GRAVEFLAME", 72))
+	content.add_child(_make_label("Descend. Adapt. Burn brighter.", 18, C_GOLD, HorizontalAlignment.HORIZONTAL_ALIGNMENT_CENTER))
 	content.add_child(_separator(C_EMBER))
 
-	var lore := _make_label(
-		"Beneath the ruined keep, a borrowed flame refuses to die.\nCarve a path through the wardens and carry its memory home.",
-		16,
-		C_TEXT,
-		HorizontalAlignment.HORIZONTAL_ALIGNMENT_CENTER
-	)
-	lore.custom_minimum_size.y = 48.0
-	content.add_child(lore)
-
-	var keys := GridContainer.new()
-	keys.columns = 3
-	keys.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	keys.add_theme_constant_override("h_separation", 8)
-	keys.add_theme_constant_override("v_separation", 8)
-	content.add_child(keys)
-	_add_key_card(keys, "MOVE + JUMP", "A / D   |   W / SPACE")
-	_add_key_card(keys, "BLADE", "J")
-	_add_key_card(keys, "DASH", "SHIFT / L")
-	_add_key_card(keys, "GRAVEFLAME", "K LANCE  |  Q IGNITE")
-	_add_key_card(keys, "PARRY", "S")
-	_add_key_card(keys, "FLASK", "F")
-
-	var actions := HBoxContainer.new()
-	actions.alignment = BoxContainer.ALIGNMENT_CENTER
-	actions.add_theme_constant_override("separation", 12)
-	content.add_child(actions)
-	var start := _button("BEGIN DESCENT", "start", true, Vector2(260, 56))
+	# Clean vertical navigation: one focused column, no tutorial grid.
+	var nav := VBoxContainer.new()
+	nav.alignment = BoxContainer.ALIGNMENT_CENTER
+	nav.add_theme_constant_override("separation", 10)
+	content.add_child(nav)
+	var start := _button("BEGIN DESCENT", "start", true, Vector2(320, 56))
+	start.size_flags_horizontal = Control.SIZE_SHRINK_CENTER
 	start.pressed.connect(func(): emit_signal("start_requested"))
-	actions.add_child(start)
-	var forge := _button("THE FORGE", "forge", false, Vector2(220, 56))
+	nav.add_child(start)
+	var forge := _button("THE FORGE", "forge", false, Vector2(320, 56))
+	forge.size_flags_horizontal = Control.SIZE_SHRINK_CENTER
 	forge.pressed.connect(func(): emit_signal("forge_requested"))
-	actions.add_child(forge)
+	nav.add_child(forge)
+	_title_controls_button = _button("CONTROLS", "controls", false, Vector2(320, 56))
+	_title_controls_button.size_flags_horizontal = Control.SIZE_SHRINK_CENTER
+	_title_controls_button.pressed.connect(_toggle_title_controls)
+	nav.add_child(_title_controls_button)
 
-	content.add_child(_make_label("Wall-jump from vertical surfaces. Air-attack to slam. E / Up enters an unsealed rift.", 12, C_MUTED, HorizontalAlignment.HORIZONTAL_ALIGNMENT_CENTER))
+	# Discreet single-line footer; full bindings live behind CONTROLS.
+	var hint := _make_label("A / D MOVE  ·  SPACE JUMP  ·  J BLADE  ·  SHIFT DASH  ·  S PARRY  ·  F FLASK", 12, C_MUTED, HorizontalAlignment.HORIZONTAL_ALIGNMENT_CENTER)
+	hint.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	content.add_child(hint)
+
+	_build_title_controls_overlay(panel)
+
+
+## Compact CONTROLS overlay: hidden by default, toggled by the CONTROLS button.
+func _build_title_controls_overlay(panel: Control) -> void:
+	var overlay := Control.new()
+	overlay.name = "ControlsOverlay"
+	overlay.mouse_filter = Control.MOUSE_FILTER_STOP
+	panel.add_child(overlay)
+	overlay.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	overlay.visible = false
+	var dim := ColorRect.new()
+	dim.name = "Dim"
+	dim.mouse_filter = Control.MOUSE_FILTER_STOP
+	dim.color = Color(0.02, 0.015, 0.03, 0.72)
+	overlay.add_child(dim)
+	dim.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	var center := CenterContainer.new()
+	center.name = "ControlsCenter"
+	center.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	overlay.add_child(center)
+	center.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	center.offset_left = 24.0
+	center.offset_top = 20.0
+	center.offset_right = -24.0
+	center.offset_bottom = -20.0
+	var card := PanelContainer.new()
+	card.name = "ControlsCard"
+	card.custom_minimum_size = Vector2(460, 0)
+	card.add_theme_stylebox_override("panel", _panel_box(Color("100d18f2"), C_EDGE, 12, 1, 14))
+	center.add_child(card)
+	var margin := _margin_container(26, 26, 20, 20)
+	card.add_child(margin)
+	var stack := VBoxContainer.new()
+	stack.add_theme_constant_override("separation", 8)
+	margin.add_child(stack)
+	stack.add_child(_make_label("CONTROLS", 22, C_TEXT, HorizontalAlignment.HORIZONTAL_ALIGNMENT_CENTER))
+	stack.add_child(_separator(C_EDGE))
+	var rows := [
+		["MOVE", "A / D"],
+		["JUMP", "W / SPACE"],
+		["BLADE", "J"],
+		["DASH", "SHIFT / L"],
+		["LANCE", "K"],
+		["IGNITE", "Q"],
+		["PARRY", "S"],
+		["FLASK", "F"],
+		["ENTER RIFT", "E / UP"],
+		["PAUSE", "ESC"],
+	]
+	for row in rows:
+		var line := HBoxContainer.new()
+		line.mouse_filter = Control.MOUSE_FILTER_IGNORE
+		line.add_theme_constant_override("separation", 12)
+		stack.add_child(line)
+		line.add_child(_make_label(str(row[0]), 13, C_MUTED, HorizontalAlignment.HORIZONTAL_ALIGNMENT_LEFT))
+		line.add_child(_make_label(str(row[1]), 13, C_TEXT, HorizontalAlignment.HORIZONTAL_ALIGNMENT_RIGHT))
+	var close := _button("CLOSE", "close_controls", false, Vector2(200, 48))
+	close.size_flags_horizontal = Control.SIZE_SHRINK_CENTER
+	close.visible = false
+	close.pressed.connect(_toggle_title_controls)
+	stack.add_child(close)
+	overlay.set_meta("close_button", close)
+	_title_controls = overlay
+
+
+func _toggle_title_controls() -> void:
+	if _title_controls == null:
+		return
+	_title_controls.visible = not _title_controls.visible
+	var close := _title_controls.get_meta("close_button", null) as Button
+	if _title_controls.visible:
+		if close != null:
+			close.visible = true
+			close.grab_focus.call_deferred()
+	else:
+		if close != null:
+			close.visible = false
+		if is_instance_valid(_title_controls_button):
+			_title_controls_button.grab_focus.call_deferred()
 
 
 func _build_pause() -> void:
@@ -1007,6 +1082,8 @@ func show_panel(name: String) -> void:
 	var panel: Control = _panels[name]
 	panel.visible = true
 	panel.modulate = Color.WHITE
+	if name == "title" and _title_controls != null:
+		_title_controls.visible = false
 	if name != "pause":
 		hide_room_clear()
 	_focus_first_control(panel)
