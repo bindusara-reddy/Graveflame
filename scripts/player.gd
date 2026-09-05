@@ -37,6 +37,7 @@ var _dash_buffer := 0.0
 var dash_time := 0.0
 var _dash_echo_pos := Vector2.ZERO
 var iframes := 0.0
+var _hurt_started_airborne := false
 var special := 0.0
 var max_special := Content.P_SPECIAL_MAX
 var flask_charges := Content.FLASK_MAX
@@ -718,6 +719,7 @@ func take_damage(amount: float, from_dir: Vector2, kb: float) -> void:
 		_die()
 		return
 	state = State.HURT
+	_hurt_started_airborne = not is_on_floor()
 	iframes = Content.P_HURT_IFRAMES + float(build.get("iframes_bonus", 0.0))
 	var hit_dir := from_dir.normalized()
 	velocity = Vector2(hit_dir.x * kb, minf(-kb * 0.35, hit_dir.y * kb))
@@ -748,7 +750,10 @@ func _step_hurt(delta: float) -> void:
 	velocity.y += Content.GRAVITY * delta
 	velocity.x = _approach(velocity.x, 0.0, Content.P_FRICTION * 3.0 * delta)
 	move_and_slide()
-	if absf(velocity.x) < 30.0 and is_on_floor():
+	_floor_and_wall_tracking()
+	# Keep grounded knockback committed to landing. Airborne hits release only
+	# after the impulse settles and ascent ends, with contact bookkeeping current.
+	if absf(velocity.x) < 30.0 and (is_on_floor() or (_hurt_started_airborne and velocity.y >= 0.0)):
 		state = State.LOCOMOTION
 
 func _heal(amount: float) -> void:
