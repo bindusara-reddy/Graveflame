@@ -76,10 +76,12 @@ var _title_masonry: Control
 var _title_t := 0.0
 var _title_controls: Control
 var _title_controls_button: Button
+var _title_nav_buttons: Array = []
 
 
 func _ready() -> void:
 	layer = 50
+	_ensure_pad_menu_bindings()
 
 	_root = Control.new()
 	_root.name = "InterfaceRoot"
@@ -105,6 +107,25 @@ func _ready() -> void:
 
 	hide_all_panels()
 	show_panel("title")
+
+
+## Godot's built-in ui_accept / ui_cancel ship keyboard-only here, so a pad
+## could navigate menus but never activate or back out. Register A / B at
+## runtime without touching the project input map or any gameplay action.
+func _ensure_pad_menu_bindings() -> void:
+	for pair in [["ui_accept", JOY_BUTTON_A], ["ui_cancel", JOY_BUTTON_B]]:
+		var action: String = pair[0]
+		var button: int = pair[1]
+		if not InputMap.has_action(action):
+			continue
+		var bound := false
+		for event in InputMap.action_get_events(action):
+			if event is InputEventJoypadButton and (event as InputEventJoypadButton).button_index == button:
+				bound = true
+		if not bound:
+			var pad := InputEventJoypadButton.new()
+			pad.button_index = button as JoyButton
+			InputMap.action_add_event(action, pad)
 
 
 # --- HUD ---------------------------------------------------------------------
@@ -377,6 +398,12 @@ func _build_room_clear_banner() -> void:
 
 func _build_title() -> void:
 	var panel := _screen("title", true, C_EMBER)
+	# The title is a full-scene vista: drop the generic screen header band so
+	# the sky runs unbroken from the moon down to the furnace horizon.
+	for band_name in ["TopBand", "Horizon"]:
+		var band := panel.get_node_or_null(band_name)
+		if band != null:
+			band.visible = false
 	_build_title_scene(panel)
 	# No opaque modal card: a borderless, transparent holder lets the furnace
 	# horizon, battlements and rising embers breathe around the menu.
@@ -385,40 +412,55 @@ func _build_title() -> void:
 	holder.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	holder.add_theme_stylebox_override("panel", StyleBoxEmpty.new())
 	content.alignment = BoxContainer.ALIGNMENT_CENTER
-	content.add_theme_constant_override("separation", 8)
+	content.add_theme_constant_override("separation", 0)
 
-	content.add_child(_make_label("AN ORIGINAL ACTION-ROGUELITE", 13, C_EMBER_HI, HorizontalAlignment.HORIZONTAL_ALIGNMENT_CENTER))
-	content.add_child(_build_title_stack("GRAVEFLAME", 72))
-	content.add_child(_make_label("Descend. Adapt. Burn brighter.", 18, C_GOLD, HorizontalAlignment.HORIZONTAL_ALIGNMENT_CENTER))
-	content.add_child(_separator(C_EMBER))
+	# Wordmark alone carries the identity; bindings live behind CONTROLS.
+	content.add_child(_build_title_stack("GRAVEFLAME", 84))
+	var breath := Control.new()
+	breath.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	breath.custom_minimum_size = Vector2(0.0, 26.0)
+	content.add_child(breath)
 
-	# Clean vertical navigation: one focused column, no tutorial grid.
+	# One focused column: a single ember call to action over two quiet entries.
 	var nav := VBoxContainer.new()
+	nav.name = "TitleNav"
 	nav.alignment = BoxContainer.ALIGNMENT_CENTER
-	nav.add_theme_constant_override("separation", 10)
+	nav.add_theme_constant_override("separation", 8)
 	content.add_child(nav)
-	var start := _button("BEGIN DESCENT", "start", true, Vector2(320, 56))
+	var start := _button("BEGIN DESCENT", "start", true, Vector2(300, 54))
 	start.size_flags_horizontal = Control.SIZE_SHRINK_CENTER
 	start.pressed.connect(func(): emit_signal("start_requested"))
 	nav.add_child(start)
-	var forge := _button("THE FORGE", "forge", false, Vector2(320, 56))
+	var forge := _button("THE FORGE", "forge", false, Vector2(300, 46))
 	forge.size_flags_horizontal = Control.SIZE_SHRINK_CENTER
 	forge.pressed.connect(func(): emit_signal("forge_requested"))
+	_title_quiet_button(forge)
 	nav.add_child(forge)
-	_title_controls_button = _button("CONTROLS", "controls", false, Vector2(320, 56))
+	_title_controls_button = _button("CONTROLS", "controls", false, Vector2(300, 46))
 	_title_controls_button.size_flags_horizontal = Control.SIZE_SHRINK_CENTER
 	_title_controls_button.pressed.connect(_toggle_title_controls)
+	_title_quiet_button(_title_controls_button)
 	nav.add_child(_title_controls_button)
-
-	# Discreet single-line footer; full bindings live behind CONTROLS.
-	var hint := _make_label("A / D MOVE  ·  SPACE JUMP  ·  J BLADE  ·  SHIFT DASH  ·  S PARRY  ·  F FLASK", 12, C_MUTED, HorizontalAlignment.HORIZONTAL_ALIGNMENT_CENTER)
-	hint.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-	content.add_child(hint)
+	_title_nav_buttons = [start, forge, _title_controls_button]
 
 	_build_title_controls_overlay(panel)
 
 
-## Compact CONTROLS overlay: hidden by default, toggled by the CONTROLS button.
+## Title-only restyle: secondary entries sit on the vista as thin-edged glass so
+## the ember BEGIN button is the single bright element. Focus stays a gold ring.
+func _title_quiet_button(button: Button) -> void:
+	var glass := Color(C_INK.r, C_INK.g, C_INK.b, 0.42)
+	button.add_theme_font_size_override("font_size", 14)
+	button.add_theme_stylebox_override("normal", _button_box(glass, Color(C_EDGE, 0.7), 1))
+	button.add_theme_stylebox_override("hover", _button_box(Color(C_SURFACE_HI, 0.75), C_EMBER_HI, 1))
+	button.add_theme_stylebox_override("pressed", _button_box(Color(C_SURFACE_HI, 0.85), C_GOLD, 2))
+	button.add_theme_stylebox_override("focus", _button_box(Color(C_SURFACE_HI, 0.6), C_GOLD, 2))
+	button.add_theme_color_override("font_color", C_MUTED)
+
+
+## Compact CONTROLS overlay: hidden by default, toggled by the CONTROLS button,
+## closed by ui_cancel (Esc / pad B). While open it is modal: the title buttons
+## lose focus eligibility so keyboard and pad navigation cannot leave the card.
 func _build_title_controls_overlay(panel: Control) -> void:
 	var overlay := Control.new()
 	overlay.name = "ControlsOverlay"
@@ -443,41 +485,57 @@ func _build_title_controls_overlay(panel: Control) -> void:
 	center.offset_bottom = -20.0
 	var card := PanelContainer.new()
 	card.name = "ControlsCard"
-	card.custom_minimum_size = Vector2(460, 0)
+	card.custom_minimum_size = Vector2(520, 0)
 	card.add_theme_stylebox_override("panel", _panel_box(Color("100d18f2"), C_EDGE, 12, 1, 14))
 	center.add_child(card)
-	var margin := _margin_container(26, 26, 20, 20)
+	var margin := _margin_container(26, 26, 14, 14)
 	card.add_child(margin)
 	var stack := VBoxContainer.new()
-	stack.add_theme_constant_override("separation", 8)
+	stack.add_theme_constant_override("separation", 3)
 	margin.add_child(stack)
-	stack.add_child(_make_label("CONTROLS", 22, C_TEXT, HorizontalAlignment.HORIZONTAL_ALIGNMENT_CENTER))
+	stack.add_child(_make_label("CONTROLS", 20, C_TEXT, HorizontalAlignment.HORIZONTAL_ALIGNMENT_CENTER))
 	stack.add_child(_separator(C_EDGE))
+	# Real bindings from the project input map: action, keyboard, gamepad.
 	var rows := [
-		["MOVE", "A / D"],
-		["JUMP", "W / SPACE"],
-		["BLADE", "J"],
-		["AIR SLAM", "DOWN + J"],
-		["DASH", "SHIFT / L"],
-		["LANCE", "K"],
-		["IGNITE", "Q"],
-		["PARRY", "S"],
-		["FLASK", "F"],
-		["ENTER RIFT", "E / UP"],
-		["PAUSE", "ESC"],
+		["", "KEYBOARD", "GAMEPAD"],
+		["MOVE", "A / D", "STICK / D-PAD"],
+		["JUMP", "W / SPACE", "A"],
+		["BLADE", "J", "X"],
+		["AIR SLAM", "DOWN + J", "DOWN + X"],
+		["DASH", "SHIFT / L", "B"],
+		["LANCE", "K", "Y"],
+		["IGNITE", "Q", "RT"],
+		["PARRY", "S", "LB"],
+		["FLASK", "F", "D-PAD DOWN"],
+		["ENTER RIFT", "E / UP", "RB / D-PAD UP"],
+		["PAUSE", "ESC", "START"],
 	]
-	for row in rows:
+	for i in range(rows.size()):
+		var row: Array = rows[i]
+		var header := i == 0
 		var line := HBoxContainer.new()
 		line.mouse_filter = Control.MOUSE_FILTER_IGNORE
 		line.add_theme_constant_override("separation", 12)
 		stack.add_child(line)
-		line.add_child(_make_label(str(row[0]), 13, C_MUTED, HorizontalAlignment.HORIZONTAL_ALIGNMENT_LEFT))
-		line.add_child(_make_label(str(row[1]), 13, C_TEXT, HorizontalAlignment.HORIZONTAL_ALIGNMENT_RIGHT))
-	var close := _button("CLOSE", "close_controls", false, Vector2(200, 48))
+		var action := _make_label(str(row[0]), 12, C_MUTED, HorizontalAlignment.HORIZONTAL_ALIGNMENT_LEFT)
+		action.size_flags_stretch_ratio = 1.1
+		line.add_child(action)
+		for col in range(1, 3):
+			var cell := _make_label(str(row[col]), 11 if header else 12, C_EMBER_HI if header else C_TEXT, HorizontalAlignment.HORIZONTAL_ALIGNMENT_RIGHT)
+			line.add_child(cell)
+	var close := _button("CLOSE", "close_controls", false, Vector2(200, 46))
 	close.size_flags_horizontal = Control.SIZE_SHRINK_CENTER
 	close.visible = false
 	close.pressed.connect(_toggle_title_controls)
 	stack.add_child(close)
+	# Focus trap: every neighbour of CLOSE is CLOSE itself.
+	var self_path := close.get_path_to(close)
+	close.focus_neighbor_top = self_path
+	close.focus_neighbor_bottom = self_path
+	close.focus_neighbor_left = self_path
+	close.focus_neighbor_right = self_path
+	close.focus_next = self_path
+	close.focus_previous = self_path
 	overlay.set_meta("close_button", close)
 	_title_controls = overlay
 
@@ -485,17 +543,37 @@ func _build_title_controls_overlay(panel: Control) -> void:
 func _toggle_title_controls() -> void:
 	if _title_controls == null:
 		return
-	_title_controls.visible = not _title_controls.visible
+	_set_title_controls_open(not _title_controls.visible)
+
+
+func _set_title_controls_open(open: bool) -> void:
+	if _title_controls == null:
+		return
+	_title_controls.visible = open
 	var close := _title_controls.get_meta("close_button", null) as Button
-	if _title_controls.visible:
+	if close != null:
+		close.visible = open
+	for button in _title_nav_buttons:
+		if is_instance_valid(button):
+			(button as Button).focus_mode = Control.FOCUS_NONE if open else Control.FOCUS_ALL
+	if open:
 		if close != null:
-			close.visible = true
 			close.grab_focus.call_deferred()
-	else:
-		if close != null:
-			close.visible = false
-		if is_instance_valid(_title_controls_button):
-			_title_controls_button.grab_focus.call_deferred()
+	elif is_instance_valid(_title_controls_button):
+		_title_controls_button.grab_focus.call_deferred()
+
+
+func _unhandled_input(event: InputEvent) -> void:
+	# Esc / pad B closes the controls card and only that; the run never starts
+	# from a cancel, and focus returns to the CONTROLS entry.
+	if _title_controls == null or not _title_controls.visible:
+		return
+	var title_panel: Control = _panels.get("title", null)
+	if title_panel == null or not title_panel.visible:
+		return
+	if event.is_action_pressed("ui_cancel") and not event.is_echo():
+		_set_title_controls_open(false)
+		get_viewport().set_input_as_handled()
 
 
 func _build_pause() -> void:
@@ -723,8 +801,8 @@ func _build_title_scene(panel: Control) -> void:
 
 	_title_embers = CPUParticles2D.new()
 	_title_embers.name = "TitleEmbers"
-	_title_embers.amount = 80
-	_title_embers.lifetime = 5.0
+	_title_embers.amount = 56
+	_title_embers.lifetime = 6.0
 	_title_embers.preprocess = 3.0
 	_title_embers.emission_shape = CPUParticles2D.EMISSION_SHAPE_RECTANGLE
 	_title_embers.local_coords = true
@@ -735,8 +813,8 @@ func _build_title_scene(panel: Control) -> void:
 	_title_embers.initial_velocity_max = 180.0
 	_title_embers.tangential_accel_min = -24.0
 	_title_embers.tangential_accel_max = 24.0
-	_title_embers.scale_amount_min = 2.0
-	_title_embers.scale_amount_max = 5.0
+	_title_embers.scale_amount_min = 1.5
+	_title_embers.scale_amount_max = 3.5
 	var ramp := Gradient.new()
 	ramp.offsets = PackedFloat32Array([0.0, 0.1, 0.55, 1.0])
 	ramp.colors = PackedColorArray([Color(VFX.GOLD, 0.0), Color(VFX.GOLD, 0.9), Color(VFX.ORANGE, 0.6), Color(VFX.EMBER, 0.0)])
@@ -773,8 +851,8 @@ func _draw_title_masonry(ci: Control) -> void:
 	var t := 0.0 if still else _title_t
 	# A cold moon high on the left, behind everything.
 	var moon := Vector2(s.x * 0.075, s.y * 0.15)
-	for i in range(5, 0, -1):
-		ci.draw_circle(moon, 62.0 + float(i) * 30.0, Color("c9d2ee", 0.014 * float(6 - i)))
+	for i in range(14, 0, -1):
+		ci.draw_circle(moon, 62.0 + float(i) * 11.0, Color("c9d2ee", 0.006 * float(15 - i)))
 	ci.draw_circle(moon, 62.0, Color("c9d2ee", 0.9))
 	for i in range(5):
 		var off := Vector2(VFX.hash01(i, 61) - 0.5, VFX.hash01(i, 62) - 0.5) * 84.0
@@ -873,6 +951,7 @@ func _screen(name: String, opaque: bool, accent: Color) -> Control:
 	bg.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 
 	var top_band := ColorRect.new()
+	top_band.name = "TopBand"
 	top_band.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	top_band.color = Color(accent.r, accent.g, accent.b, 0.075 if opaque else 0.045)
 	screen.add_child(top_band)
@@ -880,6 +959,7 @@ func _screen(name: String, opaque: bool, accent: Color) -> Control:
 	top_band.offset_bottom = 150.0
 
 	var horizon := ColorRect.new()
+	horizon.name = "Horizon"
 	horizon.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	horizon.color = Color(accent.r, accent.g, accent.b, 0.42)
 	screen.add_child(horizon)
@@ -1084,7 +1164,7 @@ func show_panel(name: String) -> void:
 	panel.visible = true
 	panel.modulate = Color.WHITE
 	if name == "title" and _title_controls != null:
-		_title_controls.visible = false
+		_set_title_controls_open(false)
 	if name != "pause":
 		hide_room_clear()
 	_focus_first_control(panel)
