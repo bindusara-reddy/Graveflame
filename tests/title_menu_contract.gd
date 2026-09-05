@@ -101,11 +101,21 @@ func _set_viewport(size: Vector2i, fullscreen: bool) -> void:
 		DisplayServer.window_set_position(Vector2i(160, 120))
 		DisplayServer.window_set_size(size)
 	await _frames(8)
+	# Leaving fullscreen can hand back a maximised window; re-apply until it takes.
+	var tries := 0
+	while root.size != size and not fullscreen and tries < 6:
+		DisplayServer.window_set_mode(DisplayServer.WINDOW_MODE_WINDOWED)
+		DisplayServer.window_set_position(Vector2i(160, 120))
+		DisplayServer.window_set_size(size)
+		await _frames(10)
+		tries += 1
 	check(root.size == size, "presented viewport is %s (got %s)" % [size, root.size])
 
 
 func _check_layout(label: String) -> void:
-	var bounds := Rect2(Vector2.ZERO, Vector2(root.size))
+	# canvas_items stretch keeps the canvas at the design size and scales it to
+	# the window, so on-screen means inside the visible rect in canvas units.
+	var bounds := root.get_visible_rect()
 	var title: Control = ui._panels["title"]
 	var dialog: Control = title.get_meta("dialog")
 	check(_inside(dialog.get_global_rect(), bounds), "%s: title dialog on-screen" % label)

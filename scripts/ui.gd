@@ -3,6 +3,7 @@ extends CanvasLayer
 ## Responsive HUD and atmospheric screen overlays, built with Godot-native controls.
 
 const VFX := preload("res://scripts/vfx.gd")
+const TitleTableau := preload("res://scripts/title_tableau.gd")
 
 signal start_requested
 signal resume_requested
@@ -72,8 +73,10 @@ var _reduced_flash_check: CheckBox
 
 var _title_top_label: Label
 var _title_embers: CPUParticles2D
-var _title_masonry: Control
+var _title_tableau: Control
+var _title_holder: Control
 var _title_t := 0.0
+var _last_panel := ""
 var _title_controls: Control
 var _title_controls_button: Button
 var _title_nav_buttons: Array = []
@@ -407,15 +410,18 @@ func _build_title() -> void:
 	_build_title_scene(panel)
 	# No opaque modal card: a borderless, transparent holder lets the furnace
 	# horizon, battlements and rising embers breathe around the menu.
-	var content := _dialog(panel, Vector2(620, 0), C_EMBER, 24, 20)
+	var content := _dialog(panel, Vector2(440, 0), C_EMBER, 12, 20)
 	var holder := panel.get_meta("dialog") as PanelContainer
 	holder.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	holder.add_theme_stylebox_override("panel", StyleBoxEmpty.new())
+	# The wordmark and entries share the frame's centre line; the knight and
+	# landing sit in the left third, clear of the group.
+	_title_holder = holder
 	content.alignment = BoxContainer.ALIGNMENT_CENTER
 	content.add_theme_constant_override("separation", 0)
 
 	# Wordmark alone carries the identity; bindings live behind CONTROLS.
-	content.add_child(_build_title_stack("GRAVEFLAME", 84))
+	content.add_child(_build_title_stack("GRAVEFLAME", 70))
 	var breath := Control.new()
 	breath.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	breath.custom_minimum_size = Vector2(0.0, 26.0)
@@ -774,161 +780,82 @@ func _build_forge() -> void:
 # --- Title scene ---------------------------------------------------------------
 
 func _build_title_scene(panel: Control) -> void:
-	# Furnace horizon, silhouetted battlements and rising embers behind the dialog.
-	var scene := Control.new()
-	scene.name = "TitleScene"
-	scene.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	panel.add_child(scene)
-	scene.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
-
-	var glow := Control.new()
-	glow.name = "FurnaceGlow"
-	glow.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	glow.material = VFX.radial_material()
-	scene.add_child(glow)
-	glow.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
-	glow.draw.connect(_draw_title_glow.bind(glow))
-	glow.resized.connect(glow.queue_redraw)
-
-	var masonry := Control.new()
-	masonry.name = "Battlements"
-	masonry.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	scene.add_child(masonry)
-	masonry.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
-	masonry.draw.connect(_draw_title_masonry.bind(masonry))
-	masonry.resized.connect(masonry.queue_redraw)
-	_title_masonry = masonry
-
-	_title_embers = CPUParticles2D.new()
-	_title_embers.name = "TitleEmbers"
-	_title_embers.amount = 56
-	_title_embers.lifetime = 6.0
-	_title_embers.preprocess = 3.0
-	_title_embers.emission_shape = CPUParticles2D.EMISSION_SHAPE_RECTANGLE
-	_title_embers.local_coords = true
-	_title_embers.direction = Vector2(0.0, -1.0)
-	_title_embers.spread = 14.0
-	_title_embers.gravity = Vector2.ZERO
-	_title_embers.initial_velocity_min = 80.0
-	_title_embers.initial_velocity_max = 180.0
-	_title_embers.tangential_accel_min = -24.0
-	_title_embers.tangential_accel_max = 24.0
-	_title_embers.scale_amount_min = 1.5
-	_title_embers.scale_amount_max = 3.5
-	var ramp := Gradient.new()
-	ramp.offsets = PackedFloat32Array([0.0, 0.1, 0.55, 1.0])
-	ramp.colors = PackedColorArray([Color(VFX.GOLD, 0.0), Color(VFX.GOLD, 0.9), Color(VFX.ORANGE, 0.6), Color(VFX.EMBER, 0.0)])
-	_title_embers.color_ramp = ramp
-	_title_embers.material = VFX.additive_material()
-	scene.add_child(_title_embers)
-	scene.resized.connect(_fit_title_embers.bind(scene))
-	_fit_title_embers(scene)
+	# Original menu art: the Threshold of the Descent tableau (scripts/title_tableau.gd).
+	_title_tableau = TitleTableau.new()
+	panel.add_child(_title_tableau)
+	_title_embers = _title_tableau.get_node("Embers") as CPUParticles2D
 
 
-func _fit_title_embers(scene: Control) -> void:
-	var s := scene.size
-	_title_embers.position = Vector2(s.x * 0.5, s.y + 10.0)
-	_title_embers.emission_rect_extents = Vector2(maxf(s.x * 0.5, 1.0), 6.0)
+## Bundled title face: Noto Serif Display Bold (SIL OFL 1.1, fonts/), loaded
+## from the shipped file so the wordmark never depends on the machine's fonts.
+static var _wordmark_font: Font
 
 
-func _draw_title_glow(ci: Control) -> void:
-	# Horizon furnace: bottom-anchored radial stretched wide so it reads past the
-	# dialog card and above the battlement line.
-	var s := ci.size
-	var stretch := 2.4
-	ci.draw_set_transform(Vector2.ZERO, 0.0, Vector2(stretch, 1.0))
-	var origin := Vector2(s.x * 0.5 / stretch, s.y * 0.92)
-	VFX.draw_radial(ci, origin, maxf(s.y * 0.8, 580.0), Color(VFX.EMBER, 0.9))
-	VFX.draw_radial(ci, origin + Vector2(0.0, 30.0), s.y * 0.5, Color(VFX.ORANGE, 0.5))
-	ci.draw_set_transform(Vector2.ZERO, 0.0, Vector2.ONE)
-
-
-func _draw_title_masonry(ci: Control) -> void:
-	var s := ci.size
-	if s.x <= 0.0 or s.y <= 0.0:
-		return
-	var still := Feedback.motion_reduced
-	var t := 0.0 if still else _title_t
-	# A cold moon high on the left, behind everything.
-	var moon := Vector2(s.x * 0.075, s.y * 0.15)
-	for i in range(14, 0, -1):
-		ci.draw_circle(moon, 62.0 + float(i) * 11.0, Color("c9d2ee", 0.006 * float(15 - i)))
-	ci.draw_circle(moon, 62.0, Color("c9d2ee", 0.9))
-	for i in range(5):
-		var off := Vector2(VFX.hash01(i, 61) - 0.5, VFX.hash01(i, 62) - 0.5) * 84.0
-		ci.draw_circle(moon + off, 4.0 + VFX.hash01(i, 63) * 10.0, Color("9aa3c4", 0.5))
-	ci.draw_circle(moon + Vector2(30.0, -20.0), 58.0, Color(VFX.VOID, 0.88))
-	# Midground pillars in mortar, then ruined battlements in void along the bottom.
-	var pillar := Color(VFX.MORTAR, 0.6)
-	var count := int(s.x / 150.0) + 1
-	for i in range(count):
-		var px := float(i) * 150.0 + 40.0 + VFX.hash01(i, 1) * 50.0
-		var top := s.y * (0.32 + VFX.hash01(i, 2) * 0.22)
-		ci.draw_rect(Rect2(px, top, 34.0, s.y - top), pillar)
-		ci.draw_rect(Rect2(px - 7.0, top, 48.0, 12.0), Color(VFX.MORTAR, 0.8))
-		ci.draw_line(Vector2(px + 34.0, top), Vector2(px + 34.0, s.y), Color(VFX.RIM, 0.25), 1.5)
-	var wall_top := s.y * 0.84
-	var pts := PackedVector2Array([Vector2(0.0, s.y + 2.0)])
-	var x := 0.0
-	var seg_i := 0
-	var up := true
-	while x < s.x:
-		var seg := 42.0 + VFX.hash01(seg_i, 3) * 34.0
-		var y := wall_top - (26.0 if up else 0.0) - VFX.hash01(seg_i, 4) * 10.0
-		pts.append(Vector2(x, y))
-		pts.append(Vector2(minf(x + seg, s.x), y))
-		x += seg
-		seg_i += 1
-		up = not up
-	pts.append(Vector2(s.x, s.y + 2.0))
-	ci.draw_colored_polygon(pts, VFX.VOID)
-	ci.draw_line(Vector2(0.0, wall_top + 1.0), Vector2(s.x, wall_top + 1.0), Color(VFX.RIM, 0.12), 1.0)
+static func _title_font() -> Font:
+	if _wordmark_font == null:
+		var file := FontFile.new()
+		if file.load_dynamic_font("res://fonts/NotoSerifDisplay-Bold.ttf") == OK:
+			var tracked := FontVariation.new()
+			tracked.base_font = file
+			tracked.spacing_glyph = 3
+			_wordmark_font = tracked
+		else:
+			push_warning("Graveflame: wordmark font missing, using the theme font")
+			_wordmark_font = ThemeDB.fallback_font
+	return _wordmark_font
 
 
 func _build_title_stack(text: String, size: int) -> Control:
 	# Three stacked labels: void drop shadow, ember-rimmed orange core, gold face.
+	# The stack takes the lettering's real width: a bare Control never grows to
+	# its children, and an overflowing centred label would slide its text right.
 	var stack := Control.new()
 	stack.name = "TitleStack"
 	stack.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	stack.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	stack.size_flags_horizontal = Control.SIZE_SHRINK_CENTER
+	var font := _title_font()
 	var shadow := _make_label(text, size, VFX.VOID, HorizontalAlignment.HORIZONTAL_ALIGNMENT_CENTER)
 	shadow.add_theme_color_override("font_outline_color", VFX.VOID)
-	shadow.add_theme_constant_override("outline_size", 6)
+	shadow.add_theme_constant_override("outline_size", 4)
 	var rim := _make_label(text, size, VFX.ORANGE, HorizontalAlignment.HORIZONTAL_ALIGNMENT_CENTER)
 	rim.add_theme_color_override("font_outline_color", VFX.EMBER)
 	rim.add_theme_constant_override("outline_size", 2)
 	var face := _make_label(text, size, VFX.GOLD, HorizontalAlignment.HORIZONTAL_ALIGNMENT_CENTER)
 	face.add_theme_constant_override("outline_size", 0)
-	var offsets := [8.0, 3.0, 0.0]
+	var offsets := [5.0, 2.0, 0.0]
 	var layers := [shadow, rim, face]
 	for i in range(layers.size()):
 		var label: Label = layers[i]
+		label.add_theme_font_override("font", font)
 		stack.add_child(label)
 		label.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 		label.offset_top = offsets[i]
 		label.offset_bottom = offsets[i]
-	stack.custom_minimum_size = Vector2(0.0, maxf(face.get_minimum_size().y, float(size) * 1.2) + 8.0)
+	# Measure the run on the font itself: a label outside the tree has no theme
+	# context yet, so its minimum size cannot be trusted here.
+	var run := font.get_string_size(text, HorizontalAlignment.HORIZONTAL_ALIGNMENT_LEFT, -1.0, size)
+	stack.custom_minimum_size = Vector2(run.x + 8.0, maxf(font.get_height(size), float(size) * 1.2) + 8.0)
 	_title_top_label = face
 	return stack
 
 
 func _process(delta: float) -> void:
-	# Firelight wobble on the title face; frozen (and embers hidden) under reduced motion.
+	# Firelight wobble on the title face and the menu fade-up during the tableau
+	# reveal; both frozen under reduced motion (the tableau hides its own embers).
 	if _title_top_label == null:
 		return
 	var title_panel: Control = _panels.get("title", null)
 	if title_panel == null or not title_panel.visible:
 		return
 	var still := Feedback.motion_reduced
-	if _title_embers != null and _title_embers.visible == still:
-		_title_embers.visible = not still
-		_title_embers.emitting = not still
+	var reveal := 1.0 if _title_tableau == null else float(_title_tableau.reveal)
+	if _title_holder != null:
+		var fade := 1.0 if still else clampf(0.35 + 0.65 * (reveal - 0.2) / 0.7, 0.35, 1.0)
+		_title_holder.modulate = Color(1.0, 1.0, 1.0, fade)
 	if still:
 		_title_top_label.add_theme_color_override("font_color", VFX.GOLD)
 		return
 	_title_t += delta
-	if _title_masonry != null:
-		_title_masonry.queue_redraw()
 	var wave := 0.5 + 0.5 * sin(_title_t * 2.6)
 	var flicker := 1.0 + sin(_title_t * 11.0) * 0.03 + sin(_title_t * 29.0) * 0.03
 	var col := VFX.GOLD.lerp(VFX.ORANGE, wave * 0.4)
@@ -1165,6 +1092,9 @@ func show_panel(name: String) -> void:
 	panel.modulate = Color.WHITE
 	if name == "title" and _title_controls != null:
 		_set_title_controls_open(false)
+	if name == "title" and _title_tableau != null:
+		_title_tableau.arrive(_last_panel != "forge")
+	_last_panel = name
 	if name != "pause":
 		hide_room_clear()
 	_focus_first_control(panel)
