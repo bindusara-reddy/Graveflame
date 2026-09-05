@@ -63,6 +63,7 @@ func _init_audio() -> void:
 	_streams["swing"] = _make_sweep(820.0, 150.0, 0.10, 0.34, 0.55)
 	_streams["attack"] = _streams["swing"] # backwards-compatible cue name
 	_streams["parry"] = _make_metallic(920.0, 0.17, 0.42)
+	_streams["riposte"] = _make_sweep(1380.0, 180.0, 0.19, 0.42, 0.24)
 	_streams["heal"] = _make_sweep(330.0, 820.0, 0.32, 0.32, 0.03)
 	_streams["flame"] = _make_sweep(150.0, 560.0, 0.24, 0.38, 0.48)
 	_streams["land"] = _make_sweep(105.0, 48.0, 0.10, 0.44, 0.30)
@@ -71,6 +72,7 @@ func _init_audio() -> void:
 	_streams["streak"] = _make_blip(520.0, 0.12, 0.32)
 	_streams["second_wind"] = _make_sweep(200.0, 900.0, 0.6, 0.5, 0.1)
 	_streams["pyre"] = _make_noise(0.35, 0.6, true)
+	_streams["shatter"] = _make_sweep(420.0, 65.0, 0.14, 0.25, 0.85)
 	for i in range(8):
 		var p := AudioStreamPlayer.new()
 		p.bus = "Master"
@@ -298,6 +300,21 @@ func burst(pos: Vector2, count: int, color: Color, speed: float = 220.0) -> void
 func flash_hit(pos: Vector2) -> void:
 	impact(pos, Content.PAL.attack, false)
 
+## Ceramic/brass fragments follow the blow, with no loot or explosion flash.
+func shatter(pos: Vector2, force: Vector2, color: Color) -> void:
+	play("shatter")
+	var count := 3 if reduced_motion else 12
+	for i in range(count):
+		var speed := 0.18 if reduced_motion else 1.0
+		var size := randf_range(3.0, 7.0)
+		_push_particle({
+			"kind": "shard", "pos": pos + Vector2(randf_range(-10.0, 10.0), randf_range(-12.0, 10.0)),
+			"vel": (force * 0.45 + Vector2(randf_range(-100.0, 100.0), randf_range(-190.0, -60.0))) * speed,
+			"life": 0.5, "max": 0.5, "color": _accessible_color(color), "size": 1.0,
+			"shape": PackedVector2Array([Vector2(-size, 0.0), Vector2(0.0, -size), Vector2(size, size * 0.5)]),
+			"rot": randf() * TAU, "angvel": randf_range(-9.0, 9.0) * speed,
+		})
+
 func flash_hurt(pos: Vector2) -> void:
 	impact(pos, Color("ff6b6b"), true)
 
@@ -353,15 +370,22 @@ func slash_arc(origin: Vector2, facing: float, radius: float, arc: float, heavy:
 		"color": Color.WHITE, "size": 16.0 if heavy else 12.0, "radius": radius, "arc": arc, "facing": facing
 	})
 
+## Thin counterthrust silhouette, readable even with motion reduction enabled.
+func riposte_cut(origin: Vector2, facing: float, reach: float) -> void:
+	_push_particle({
+		"kind": "riposte", "pos": origin, "vel": Vector2.ZERO, "life": 0.22, "max": 0.22,
+		"color": _accessible_color(VFX.TEAL), "radius": reach, "facing": facing, "size": 1.0,
+	})
+
 ## Teal-to-gold dual ring for a successful deflect.
 func parry_flash(pos: Vector2) -> void:
 	var life := 0.16
 	_push_particle({
 		"kind": "parry_ring", "pos": pos, "vel": Vector2.ZERO, "life": life, "max": life,
 		"color": Color(VFX.TEAL, 0.22 if reduced_flash else 1.0), "size": 3.0,
-		"radius_from": 8.0, "radius_to": 48.0 if reduced_motion else 140.0
+		"radius_from": 8.0, "radius_to": 40.0 if reduced_motion else 78.0
 	})
-	burst_sparks(pos, 32, 380.0)
+	burst_sparks(pos, 12, 300.0)
 
 ## Explosion payoff: gold flash plus an ember ring out to the blast radius.
 func blast(pos: Vector2, radius: float) -> void:
@@ -400,7 +424,7 @@ func afterimage(pos: Vector2, facing: float, color: Color = Color("e8e0d0")) -> 
 	effect_color.a = minf(effect_color.a, 0.38 if not reduced_flash else 0.16)
 	_push_particle({
 		"kind": "afterimage", "pos": pos, "vel": Vector2(-facing * 28.0, 0.0),
-		"life": 0.16, "max": 0.16, "color": effect_color, "size": 1.0, "facing": facing
+		"life": 0.20, "max": 0.20, "color": effect_color, "size": 1.0, "facing": facing
 	})
 
 ## Stretched sparks plus a compact additive ring at the actual point of contact.
@@ -463,7 +487,7 @@ func _process(delta: float) -> void:
 		var kind := String(p.get("kind", "spark"))
 		p.pos += p.vel * delta
 		match kind:
-			"ring", "afterimage", "parry_ring", "ground_ring", "slash", "flash":
+			"ring", "afterimage", "parry_ring", "ground_ring", "slash", "flash", "riposte":
 				p.vel *= maxf(0.0, 1.0 - 3.0 * delta)
 			"shard":
 				p.vel *= maxf(0.0, 1.0 - 2.2 * delta)
@@ -504,6 +528,18 @@ func _draw() -> void:
 		var pos: Vector2 = p.get("pos", Vector2.ZERO)
 		var size := float(p.get("size", 3.0))
 		match String(p.get("kind", "spark")):
+			"riposte":
+				var face := float(p.facing)
+				var reach := float(p.radius)
+				var blade := PackedVector2Array([
+					pos + Vector2(face * 12.0, 0.0), pos + Vector2(face * reach * 0.64, -8.0 * a),
+					pos + Vector2(face * reach, 0.0), pos + Vector2(face * reach * 0.64, 8.0 * a),
+				])
+				draw_colored_polygon(blade, Color(c, c.a * 0.32))
+				draw_polyline(blade, c, 1.5, true)
+				draw_line(pos + Vector2(face * 20.0, 0.0), pos + Vector2(face * reach, 0.0), Color(VFX.HOT, c.a), 2.0, true)
+				for side in [-1.0, 1.0]:
+					draw_line(pos + Vector2(face * reach * 0.85, side * 14.0 * a), pos + Vector2(face * reach, 0.0), c, 1.5, true)
 			"streak":
 				var vel: Vector2 = p.get("vel", Vector2.RIGHT)
 				var tail := vel.normalized() * float(p.get("length", 18.0)) * a
@@ -541,8 +577,21 @@ func _draw() -> void:
 					draw_set_transform(Vector2.ZERO, 0.0, Vector2.ONE)
 			"afterimage":
 				var facing := float(p.get("facing", 1.0))
-				draw_rect(Rect2(pos - Vector2(13.0, 27.0), Vector2(26.0, 38.0)), c)
-				draw_circle(pos + Vector2(0.0, -33.0), 11.0, c)
+				# Echo the actual compact coat, scarf and crown, never a collision box.
+				var coat := PackedVector2Array([
+					pos + Vector2(-12.5, -15.0), pos + Vector2(11.0, -17.0),
+					pos + Vector2(13.5, 13.0), pos + Vector2(0.0, 19.0), pos + Vector2(-14.5, 11.0),
+				])
+				draw_colored_polygon(coat, c)
+				draw_colored_polygon(PackedVector2Array([
+					pos + Vector2(-facing * 7.0, -16.0), pos + Vector2(-facing * 34.0, -4.0), pos + Vector2(-facing * 12.0, 13.0),
+				]), Color(c, c.a * 0.6))
+				draw_circle(pos + Vector2(0.0, -28.0), 10.0, c)
+				for j in range(3):
+					var x := -6.0 + float(j) * 6.0
+					draw_colored_polygon(PackedVector2Array([
+						pos + Vector2(x - 4.0, -34.0), pos + Vector2(x, -47.0), pos + Vector2(x + 4.0, -33.0),
+					]), c)
 				draw_rect(Rect2(pos + Vector2(-13.0 - facing * 4.0, -27.0), Vector2(6.0, 32.0)), c)
 			"dust":
 				draw_circle(pos, maxf(0.8, size * a), c)

@@ -75,6 +75,13 @@ const PARRY_COOLDOWN := 0.5
 const PARRY_RANGE := 78.0
 const PARRY_DAMAGE := 18.0       # damage dealt to deflected melee enemy
 const PARRY_PROJECTILE_BOOST := 1.6  # deflected projectile damage multiplier
+## A confirmed deflection banks one short-lived, committed counterattack.
+const RIPOSTE_WINDOW := 1.2
+const RIPOSTE := {
+	"name": "riposte", "startup": 0.06, "active": 0.12, "recover": 0.24,
+	"damage": 34.0, "knock": 540.0, "range": 112.0, "arc": 1.4,
+	"window": 0.0, "lunge": 360.0,
+}
 
 # --- Healing flask (Dead Cells-style) ---
 const FLASK_MAX := 3

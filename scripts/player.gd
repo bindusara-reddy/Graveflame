@@ -34,6 +34,7 @@ var attack_buffer := 0.0
 var _queued_attack := false
 var dash_cd := 0.0
 var dash_time := 0.0
+var _dash_echo_pos := Vector2.ZERO
 var iframes := 0.0
 var special := 0.0
 var max_special := Content.P_SPECIAL_MAX
@@ -68,6 +69,8 @@ var _parry_shape: CollisionShape2D
 var _parry_rect := RectangleShape2D.new()
 var _parry_hit: Dictionary = {}
 var _parry_succeeded := false
+var riposte_time := 0.0
+var _riposte_attack := false
 # --- Flask heal visual ---
 var _flask_heal_flash := 0.0
 var _heal_time := 0.0
@@ -164,6 +167,7 @@ func _physics_process(delta: float) -> void:
 	else:
 		attack_buffer = maxf(0.0, attack_buffer - delta)
 	_flame_time = maxf(0.0, _flame_time - delta)
+	riposte_time = maxf(0.0, riposte_time - delta)
 	if _momentum_t > 0.0:
 		_momentum_t -= delta
 		if _momentum_t <= 0.0:
@@ -343,13 +347,17 @@ func momentum_stacks() -> int:
 
 # --- Attack combo ---
 func _begin_attack(force_chain: bool = false) -> void:
-	if force_chain and attack_index >= 0 and attack_index < Content.COMBO.size() - 1:
+	_riposte_attack = riposte_time > 0.0 and not force_chain
+	if _riposte_attack:
+		riposte_time = 0.0
+		attack_index = Content.COMBO.size() - 1
+	elif force_chain and attack_index >= 0 and attack_index < Content.COMBO.size() - 1:
 		attack_index += 1
 	elif combo_timer > 0.0 and attack_index >= 0 and attack_index < Content.COMBO.size() - 1:
 		attack_index += 1
 	else:
 		attack_index = 0
-	var def: Dictionary = Content.COMBO[attack_index]
+	var def: Dictionary = Content.RIPOSTE if _riposte_attack else Content.COMBO[attack_index]
 	attack_buffer = 0.0
 	_queued_attack = false
 	state = State.ATTACK
@@ -428,6 +436,9 @@ func _scan_attack_hits(def: Dictionary) -> void:
 		atk_hit[oid] = true
 		var tgt = area.get_meta("owner")
 		if tgt != null and is_instance_valid(tgt) and tgt.has_method("take_damage"):
+			if ateam == "scenery":
+				tgt.take_damage(float(def.damage), Vector2(facing, -0.3), float(def.knock))
+				continue # no meter, lifesteal, damage stats or hit-stop from props
 			var is_finisher := attack_index == Content.COMBO.size() - 1
 			var dmg: float = def.damage * _damage_mul(tgt)
 			if is_finisher:
@@ -473,6 +484,9 @@ func _do_slam_impact() -> void:
 	var base_dmg: float = Content.P_SLAM_DAMAGE * float(build.get("slam_mul", 1.0))
 	# AoE: damage all enemies overlapping a circle centered on player
 	var center := global_position + Vector2(0.0, 10.0)
+	for prop in get_tree().get_nodes_in_group("breakable_prop"):
+		if is_instance_valid(prop) and prop.global_position.distance_to(center) <= radius:
+			prop.take_damage(base_dmg, Vector2(signf(prop.global_position.x - center.x), -0.7), Content.P_SLAM_KNOCK)
 	# Use a temporary Area2D circle query
 	var hit_any := false
 	for area in get_tree().get_nodes_in_group("enemy_hurtbox"):
@@ -522,6 +536,8 @@ func _begin_dash() -> void:
 	iframes = maxf(iframes, Content.P_DASH_IFRAMES + float(build.get("dash_iframes_bonus", 0.0)))
 	var dir := Input.get_axis("move_left", "move_right")
 	if dir == 0.0: dir = facing
+	facing = signf(dir)
+	_dash_echo_pos = global_position
 	velocity = Vector2(dir * Content.P_DASH_SPEED, 0.0)
 	wall_sliding = false
 	emit_signal("action_feedback", "dash", global_position)
@@ -533,6 +549,9 @@ func _step_dash(delta: float) -> void:
 		state = State.LOCOMOTION
 		velocity.x *= 0.5
 	move_and_slide()
+	if global_position.distance_to(_dash_echo_pos) >= 24.0:
+		_dash_echo_pos = global_position
+		emit_signal("action_feedback", "dash_trail", global_position)
 
 # --- Parry ---
 func _begin_parry() -> void:
@@ -555,6 +574,12 @@ func _step_parry(delta: float) -> void:
 	velocity.x = _approach(velocity.x, 0.0, Content.P_FRICTION * delta)
 	parry_time -= delta
 	_scan_parry()
+	if _parry_succeeded and attack_buffer > 0.0:
+		_parry_shape.disabled = true
+		_parry_area.monitoring = false
+		_draw_parry = 0.0
+		_begin_attack()
+		return
 	if parry_time <= 0.0:
 		_parry_shape.disabled = true
 		_parry_area.monitoring = false
@@ -578,6 +603,7 @@ func _scan_parry() -> void:
 			area.reflect(Vector2(facing, -0.05), Content.PARRY_PROJECTILE_BOOST)
 			_parry_hit[oid] = true
 			_parry_succeeded = true
+			riposte_time = Content.RIPOSTE_WINDOW
 			emit_signal("parried", global_position + Vector2(facing * 40.0, 0.0), true)
 			_gain_special(Content.P_SPECIAL_GAIN * 2.5 + float(build.get("parry_special", 0.0)))
 			continue
@@ -590,6 +616,7 @@ func _scan_parry() -> void:
 				attacker.on_parried(Vector2(facing, -0.2))
 			_parry_hit[oid] = true
 			_parry_succeeded = true
+			riposte_time = Content.RIPOSTE_WINDOW
 			emit_signal("parried", global_position + Vector2(facing * 40.0, 0.0), true)
 			_gain_special(Content.P_SPECIAL_GAIN * 2.5 + float(build.get("parry_special", 0.0)))
 
@@ -639,6 +666,8 @@ func take_damage(amount: float, from_dir: Vector2, kb: float) -> void:
 		if _parry_hit.size() > parries_before:
 			return
 	var new_hp := float(build.hp) - amount
+	riposte_time = 0.0
+	_riposte_attack = false
 	if new_hp <= 0.0 and bool(build.get("second_wind", false)) and not bool(build.get("second_wind_used", false)):
 		# Second Wind: the flame refuses to go out, once.
 		build.second_wind_used = true
@@ -705,12 +734,16 @@ func _heal(amount: float) -> void:
 
 func _die() -> void:
 	dead = true
+	riposte_time = 0.0
+	_riposte_attack = false
 	state = State.DEAD
 	_deactivate_hitbox()
 	emit_signal("died")
 
 func respawn_at(pos: Vector2, reset_resources: bool = false) -> void:
 	_deactivate_hitbox()
+	riposte_time = 0.0
+	_riposte_attack = false
 	if _parry_shape != null:
 		_parry_shape.disabled = true
 	if _parry_area != null:
@@ -821,11 +854,22 @@ func _draw() -> void:
 		draw_rect(Rect2(fpos.x - 4.0, fpos.y - 4.0, 8.0, 10.0), Color(VFX.TEAL, 0.8))
 		draw_rect(Rect2(fpos.x - 2.0, fpos.y - 8.0, 4.0, 4.0), Color("8a6a3a"))
 	# attack arc
-	if _draw_attack:
+	if _draw_attack and _riposte_attack:
+		# Counterthrust: a narrow forward blade, not the normal circular sweep.
+		var tip := Vector2(facing * (_attack_range + 8.0), -8.0)
+		draw_line(Vector2(facing * 16.0, -4.0), tip, Color(VFX.TEAL, 0.7), 5.0, true)
+		draw_line(Vector2(facing * 22.0, -4.0), tip, Color(VFX.HOT, 0.9), 1.5, true)
+	elif _draw_attack:
 		# Faint fan over the live hit area plus the white-gold-ember blade ribbon.
 		var origin := Vector2(facing * 8.0, -8.0)
 		_draw_arc(origin, _attack_range, _attack_arc, facing, Color(VFX.GOLD, 0.4), 1.0)
 		VFX.slash_ribbon(self, origin, _attack_range, _attack_arc, facing, 1.0, 11.0, 1.0)
+	if riposte_time > 0.0:
+		# Diegetic cue stays with the fighter instead of adding another HUD panel.
+		var cue := Color(VFX.TEAL, 0.65 if Feedback.flash_reduced else 0.95)
+		draw_string_outline(ThemeDB.fallback_font, Vector2(-31.0, -72.0), "RIPOSTE", HORIZONTAL_ALIGNMENT_LEFT, -1, 12, 3, Color("100c1b"))
+		draw_string(ThemeDB.fallback_font, Vector2(-31.0, -72.0), "RIPOSTE", HORIZONTAL_ALIGNMENT_LEFT, -1, 12, cue)
+		draw_line(Vector2(-25.0, -65.0), Vector2(-25.0 + 50.0 * riposte_time / Content.RIPOSTE_WINDOW, -65.0), cue, 2.0, true)
 	# slam impact ring
 	if _draw_slam_impact > 0.0:
 		var rad: float = Content.P_SLAM_RADIUS + float(build.get("slam_radius_bonus", 0.0))

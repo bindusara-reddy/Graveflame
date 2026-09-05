@@ -92,11 +92,13 @@ func _ready() -> void:
 	pixel_view.add_child(world)
 	projectiles = Node2D.new()
 	projectiles.name = "Projectiles"
+	projectiles.z_index = 2
 	projectiles.process_mode = Node.PROCESS_MODE_PAUSABLE
 	world.add_child(projectiles)
 	# Feedback (pausable): camera, particles, audio.
 	feedback = Feedback.new()
 	feedback.name = "Feedback"
+	feedback.z_index = 3
 	feedback.process_mode = Node.PROCESS_MODE_PAUSABLE
 	pixel_view.add_child(feedback)
 	# Real 2D lights over everything in the pixel viewport.
@@ -244,10 +246,10 @@ func _paint_backdrop(ci: CanvasItem) -> void:
 	var bloom := Vector2(_plane_x(0.1, 184.0), horizon - 60.0)
 	for i in range(4, 0, -1):
 		ci.draw_circle(bloom, 90.0 + float(i) * 72.0, Color(m.glow, (0.016 + float(5 - i) * 0.012) * (1.0 + seep)))
-		_draw_spires(ci, horizon)
-		_draw_arches(ci, horizon)
-		_draw_light_shafts(ci, top, horizon)
-		_draw_buttresses(ci, horizon)
+	_draw_spires(ci, horizon)
+	_draw_arches(ci, horizon)
+	_draw_light_shafts(ci, top, horizon)
+	_draw_buttresses(ci, horizon)
 	_draw_rubble(ci, horizon)
 	_draw_undercroft(ci, horizon)
 	_draw_fog(ci, horizon)
@@ -577,6 +579,9 @@ func _begin_run() -> void:
 	run.build.special_start = float(meta.get("special_start", 0.0))
 	# create player
 	player = Player.new()
+	# Physics order is independent of painter order. The player processes first
+	# for parries, but must never disappear behind the throne or room props.
+	player.z_index = 1
 	player.add_to_group("player")
 	player.setup(run)
 	# Wire before entering the tree so _ready()'s initial resource signals are not lost.
@@ -627,6 +632,7 @@ func _advance_room() -> void:
 	room.boss_phase_changed.connect(_on_boss_phase)
 	room.enemy_exploded.connect(_on_enemy_exploded)
 	room.enemy_spawned.connect(_on_enemy_spawned)
+	room.prop_shattered.connect(feedback.shatter)
 	Enemy.pyre_damage = float(run.build.get("pyre_dmg", 0.0))
 	world.add_child(room)
 	# position player at entry
@@ -697,16 +703,22 @@ func _on_pyre_burst(pos: Vector2, radius: float) -> void:
 func _on_player_action(kind: String, pos: Vector2) -> void:
 	match kind:
 		"swing":
-			feedback.play("swing")
-			feedback.slash(pos + Vector2(player.facing * 28.0, -8.0), player.facing, Content.PAL.player_accent if player._flame_time > 0.0 else Content.PAL.attack, player.attack_index == Content.COMBO.size() - 1)
+			feedback.play("riposte" if player._riposte_attack else "swing")
+			if not player._riposte_attack:
+				feedback.slash(pos + Vector2(player.facing * 28.0, -8.0), player.facing, Content.PAL.player_accent if player._flame_time > 0.0 else Content.PAL.attack, player.attack_index == Content.COMBO.size() - 1)
 		"swing_active":
 			# Additive sweep afterglow matching the live hitbox arc.
-			var def: Dictionary = Content.COMBO[clampi(player.attack_index, 0, Content.COMBO.size() - 1)]
-			feedback.slash_arc(pos + Vector2(player.facing * 8.0, -8.0), player.facing, float(def.range), float(def.arc), player.attack_index == Content.COMBO.size() - 1)
+			var def: Dictionary = player.get_meta("atk_def")
+			if player._riposte_attack:
+				feedback.riposte_cut(pos + Vector2(player.facing * 8.0, -8.0), player.facing, float(def.range))
+			else:
+				feedback.slash_arc(pos + Vector2(player.facing * 8.0, -8.0), player.facing, float(def.range), float(def.arc), player.attack_index == Content.COMBO.size() - 1)
 		"jump": feedback.play("jump")
 		"dash":
 			feedback.play("dash")
 			feedback.afterimage(pos, player.facing, Content.PAL.player)
+		"dash_trail":
+			feedback.afterimage(pos, player.facing, Content.PAL.player_accent)
 		"parry_start": feedback.play("shield")
 		"heal":
 			feedback.play("heal")
@@ -867,7 +879,6 @@ func _on_slam_landed(pos: Vector2, radius: float) -> void:
 
 func _on_parried(pos: Vector2, success: bool) -> void:
 	if success:
-		feedback.impact(pos, Content.PAL.special, true)
 		feedback.parry_flash(pos)
 		feedback.hit_stop(0.065)
 		feedback.shake(4.0, 0.1)

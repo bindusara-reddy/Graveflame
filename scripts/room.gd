@@ -3,6 +3,7 @@ extends Node2D
 ## Builds geometry from a template, spawns encounters, seals/unseals the exit.
 
 const VFX := preload("res://scripts/vfx.gd")
+const CryptProp := preload("res://scripts/crypt_prop.gd")
 
 signal completed
 signal cleared(room_name: String)
@@ -16,9 +17,11 @@ signal boss_phase_changed(phase: int)
 signal enemy_exploded(pos: Vector2, radius: float, damage: float)
 signal pyre_burst(pos: Vector2, radius: float)
 signal enemy_spawned(pos: Vector2, color: Color)
+signal prop_shattered(pos: Vector2, force: Vector2, color: Color)
 
 var template: Dictionary = {}
 var enemies: Array[Node] = []
+var props: Array[Area2D] = []
 var boss: Boss = null
 var is_boss: bool = false
 var exit_open: bool = false
@@ -50,6 +53,7 @@ func _ready() -> void:
 	_build_boundaries()
 	_build_hazards()
 	_setup_exit()
+	_build_props()
 	_spawn_encounter()
 	set_process(true)
 
@@ -79,6 +83,32 @@ func _build_geometry() -> void:
 		sb.add_child(cs)
 		sb.position = Vector2(plat.position) + Vector2(plat.size) * 0.5
 		add_child(sb)
+
+## Geometry-derived, deterministic dressing uses no encounter RNG draws.
+func _build_props() -> void:
+	var entry: Vector2 = template.get("entry", Vector2.ZERO)
+	var exit: Vector2 = template.get("exit", Vector2.ZERO)
+	for platform: Rect2 in template.get("platforms", []):
+		if platform.size.x < 180.0 or platform.position.y > Content.FLOOR_Y:
+			continue
+		var count := clampi(int(platform.size.x / 240.0), 1, 6)
+		for i in range(count):
+			if props.size() >= 18: return
+			var point := Vector2(platform.position.x + platform.size.x * (float(i) + 0.5) / float(count), platform.position.y)
+			if absf(point.x - entry.x) < 85.0 or absf(point.x - exit.x) < 65.0:
+				continue
+			var blocked := false
+			for wall: Rect2 in template.get("walls", []):
+				if wall.grow(24.0).has_point(point + Vector2(0.0, -24.0)):
+					blocked = true
+			if blocked: continue
+			var prop := CryptProp.new()
+			prop.position = point
+			prop.kind = props.size() % 2
+			prop.z_index = 0
+			prop.shattered.connect(func(pos, force, color): prop_shattered.emit(pos, force, color))
+			add_child(prop)
+			props.append(prop)
 
 func _build_walls() -> void:
 	# Optional 'walls' array in template — climbable vertical surfaces for wall slide/jump.
@@ -305,6 +335,11 @@ func light_points() -> Array:
 			out.append({ "pos": Vector2(300.0, Content.FLOOR_Y - 58.0), "radius": 160.0, "color": torch, "alpha": 0.36, "rate": 8.0, "phase": 0.0 })
 			out.append({ "pos": Vector2(980.0, Content.FLOOR_Y - 58.0), "radius": 160.0, "color": torch, "alpha": 0.36, "rate": 8.0, "phase": 1.7 })
 			out.append({ "pos": Vector2(640.0, Content.FLOOR_Y - 150.0), "radius": 220.0, "color": m.glow, "alpha": 0.16, "rate": 3.0, "phase": 0.5 })
+	# Fixed room lights retain priority in the small PointLight pool. Every candle
+	# also gets its inexpensive halo from LightLayer, including those outside it.
+	for prop in props:
+		if is_instance_valid(prop) and prop.kind == 1 and not prop.broken:
+			out.append({ "pos": prop.global_position + Vector2(0.0, -49.0), "radius": 72.0, "color": Color("ffac67"), "alpha": 0.16, "rate": 8.0, "phase": prop.position.x })
 	return out
 
 func exit_center() -> Vector2:

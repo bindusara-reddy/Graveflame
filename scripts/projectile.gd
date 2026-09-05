@@ -133,6 +133,8 @@ func _try_hit(area: Area2D) -> void:
 	if tgt != null and is_instance_valid(tgt) and tgt.has_method("take_damage"):
 		var dir := vel.normalized() if vel.length() > 1.0 else Vector2.RIGHT
 		tgt.take_damage(damage, dir, knockback)
+	if ateam == "scenery":
+		return # Dressing shatters without consuming enemy penetration.
 	if pierce > 0:
 		pierce -= 1
 	else:
