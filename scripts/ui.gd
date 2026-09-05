@@ -457,6 +457,7 @@ func _build_title_controls_overlay(panel: Control) -> void:
 		["MOVE", "A / D"],
 		["JUMP", "W / SPACE"],
 		["BLADE", "J"],
+		["AIR SLAM", "DOWN + J"],
 		["DASH", "SHIFT / L"],
 		["LANCE", "K"],
 		["IGNITE", "Q"],

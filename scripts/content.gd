@@ -45,6 +45,7 @@ const P_DASH_CD := 0.55
 const P_DASH_IFRAMES := 0.22
 const P_HURT_IFRAMES := 0.7
 const P_ATTACK_BUFFER := 0.18
+const P_DASH_BUFFER := 0.12
 const P_BODY_W := 26.0
 const P_BODY_H := 54.0
 const P_SPECIAL_MAX := 100.0

@@ -56,23 +56,32 @@ func _reset_build() -> void:
 
 func generate_route() -> void:
 	route.clear()
-	# Intro room first, then shuffled combat rooms, then boss.
-	var pool: Array = Content.ROOM_TEMPLATES.duplicate()
-	pool = pool.filter(func(t): return t.tag != "intro")
-	# pick ROOMS_BEFORE_BOSS combat rooms, shuffled, allowing repeats only once
-	# every template has been used.
+	# Keep variation inside a learning curve, not an early wall-jump lottery.
+	var pool: Array = Content.ROOM_TEMPLATES.filter(func(t): return t.tag != "intro")
 	var order: Array = []
 	var idxs: Array = range(pool.size())
 	for i in range(Content.ROOMS_BEFORE_BOSS):
-		var pick: int = rng.randi_range(0, idxs.size() - 1)
-		order.append(idxs[pick])
-		idxs.remove_at(pick)
+		var first_band := 2
+		for idx in idxs:
+			first_band = mini(first_band, _room_pacing_band(str(pool[idx].tag)))
+		var candidates: Array = idxs.filter(func(idx):
+			return _room_pacing_band(str(pool[idx].tag)) == first_band
+		)
+		var pick: int = candidates[rng.randi_range(0, candidates.size() - 1)]
+		order.append(pick)
+		idxs.erase(pick)
 		if idxs.is_empty():
 			idxs = range(pool.size())
 	route.append(Content.ROOM_TEMPLATES[0])
 	for o in order:
 		route.append(pool[o])
 	route.append(Content.BOSS_TEMPLATE)
+
+static func _room_pacing_band(tag: String) -> int:
+	match tag:
+		"arena", "tiers": return 0
+		"gap", "platforms": return 1
+		_: return 2
 
 func current_room_template() -> Dictionary:
 	if room_index < 0 or room_index >= route.size():

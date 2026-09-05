@@ -33,6 +33,7 @@ var atk_hit: Dictionary = {}
 var attack_buffer := 0.0
 var _queued_attack := false
 var dash_cd := 0.0
+var _dash_buffer := 0.0
 var dash_time := 0.0
 var _dash_echo_pos := Vector2.ZERO
 var iframes := 0.0
@@ -159,6 +160,7 @@ func _physics_process(delta: float) -> void:
 		_input_lock_frames -= 1
 		attack_buffer = 0.0
 		jump_buffer = 0.0
+		_dash_buffer = 0.0
 	_anim_time += delta
 	_prev_vy = velocity.y
 	if _land_squash > 0.0: _land_squash -= delta
@@ -182,6 +184,11 @@ func _physics_process(delta: float) -> void:
 	if _slam_recover > 0.0: _slam_recover -= delta
 	coyote = maxf(0.0, coyote - delta)
 	jump_buffer = maxf(0.0, jump_buffer - delta)
+	_dash_buffer = maxf(0.0, _dash_buffer - delta)
+	if not controls_locked and Input.is_action_just_pressed("jump"):
+		jump_buffer = Content.P_JUMP_BUFFER
+	if not controls_locked and Input.is_action_just_pressed("dash"):
+		_dash_buffer = Content.P_DASH_BUFFER
 	combo_timer = maxf(0.0, combo_timer - delta)
 
 	match state:
@@ -214,18 +221,7 @@ func _step_locomotion(delta: float, controls_locked: bool = false) -> void:
 		velocity.y = minf(velocity.y, Content.P_WALL_SLIDE_SPEED)
 	velocity.y += grav * delta
 	# Jump
-	if not controls_locked and Input.is_action_just_pressed("jump"):
-		jump_buffer = Content.P_JUMP_BUFFER
-	# Wall jump takes priority over air jump when against a wall
-	if jump_buffer > 0.0 and _wall_dir != 0.0 and not is_on_floor():
-		_do_wall_jump()
-		jump_buffer = 0.0
-	elif jump_buffer > 0.0 and (is_on_floor() or coyote > 0.0 or jumps_left >= Content.P_MAX_JUMPS):
-		_do_jump(false)
-		jump_buffer = 0.0
-	elif jump_buffer > 0.0 and jumps_left > 0 and not is_on_floor() and jumps_left < Content.P_MAX_JUMPS:
-		_do_jump(true)
-		jump_buffer = 0.0
+	_try_buffered_jump()
 	# Variable jump cut
 	if not controls_locked and Input.is_action_just_released("jump") and velocity.y < 0.0:
 		velocity.y *= Content.P_JUMP_CUT
@@ -233,18 +229,17 @@ func _step_locomotion(delta: float, controls_locked: bool = false) -> void:
 	if dir == 0.0 and is_on_floor():
 		velocity.x = _approach(velocity.x, 0.0, Content.P_FRICTION * delta)
 	# Dash
-	if not controls_locked and Input.is_action_just_pressed("dash") and dash_cd <= 0.0:
+	if not controls_locked and _dash_buffer > 0.0 and dash_cd <= 0.0:
 		_begin_dash()
 		return
 	# Parry
 	if not controls_locked and Input.is_action_just_pressed("parry") and parry_cd <= 0.0:
 		_begin_parry()
 		return
-	# Buffered attack: real air slash while airborne, EXCEPT when already diving
-	# fast (committed fall -> down-slam). Grounded attacks unchanged.
+	# Falling never changes the player's intent: only Down + blade commits a slam.
 	if attack_buffer > 0.0:
 		attack_buffer = 0.0
-		if not is_on_floor() and velocity.y > 250.0:
+		if not is_on_floor() and Input.is_action_pressed("move_down"):
 			_begin_slam()
 			return
 		_begin_attack()
@@ -262,6 +257,22 @@ func _step_locomotion(delta: float, controls_locked: bool = false) -> void:
 		return
 	move_and_slide()
 	_floor_and_wall_tracking()
+
+## Shared by locomotion and attack recovery; consumes an existing jump, never
+## invents another air jump or removes startup/active-frame commitment.
+func _try_buffered_jump() -> bool:
+	if jump_buffer <= 0.0:
+		return false
+	if _wall_dir != 0.0 and not is_on_floor():
+		_do_wall_jump()
+	elif is_on_floor() or coyote > 0.0 or jumps_left >= Content.P_MAX_JUMPS:
+		_do_jump(false)
+	elif jumps_left > 0 and not is_on_floor():
+		_do_jump(true)
+	else:
+		return false
+	jump_buffer = 0.0
+	return true
 
 func _floor_and_wall_tracking() -> void:
 	if is_on_floor():
@@ -296,6 +307,8 @@ func _floor_and_wall_tracking() -> void:
 				wall_sliding = false
 
 func _do_jump(is_double: bool) -> void:
+	# Coyote time forgives a walked-off ledge; a deliberate jump consumes it.
+	coyote = 0.0
 	velocity.y = Content.P_DOUBLE_JUMP_VEL if is_double else Content.P_JUMP_VEL
 	jumps_left -= 1
 	if is_double: jumps_left = mini(jumps_left, Content.P_MAX_JUMPS - 1)
@@ -373,9 +386,17 @@ func _step_attack(delta: float) -> void:
 		attack_buffer = 0.0
 	# Recovery can be cancelled into a dash, keeping combat responsive without
 	# removing the commitment of startup and active frames.
-	if atk_phase == "recover" and Input.is_action_just_pressed("dash") and dash_cd <= 0.0:
+	if atk_phase == "recover" and _dash_buffer > 0.0 and dash_cd <= 0.0:
 		_deactivate_hitbox()
 		_begin_dash()
+		return
+	if atk_phase == "recover" and _try_buffered_jump():
+		_deactivate_hitbox()
+		atk_phase = "none"
+		_queued_attack = false
+		attack_index = -1
+		combo_timer = 0.0
+		state = State.LOCOMOTION
 		return
 	velocity.y += Content.GRAVITY * delta
 	var air_dir := Input.get_axis("move_left", "move_right")
@@ -530,6 +551,7 @@ func _gain_special(amount: float) -> void:
 
 # --- Dash ---
 func _begin_dash() -> void:
+	_dash_buffer = 0.0
 	state = State.DASH
 	dash_time = Content.P_DASH_TIME
 	dash_cd = Content.P_DASH_CD * float(build.get("dash_cd_mul", 1.0))
@@ -665,6 +687,7 @@ func take_damage(amount: float, from_dir: Vector2, kb: float) -> void:
 		_scan_parry()
 		if _parry_hit.size() > parries_before:
 			return
+	var dealt := minf(maxf(amount, 0.0), float(build.hp))
 	var new_hp := float(build.hp) - amount
 	riposte_time = 0.0
 	_riposte_attack = false
@@ -684,15 +707,16 @@ func take_damage(amount: float, from_dir: Vector2, kb: float) -> void:
 		_deactivate_hitbox()
 		wall_sliding = false
 		emit_signal("action_feedback", "second_wind", global_position)
+		emit_signal("hurt_taken", dealt, global_position)
 		return
 	build.hp = maxf(0.0, new_hp)
 	if _run_model: _run_model.build.hp = build.hp
 	emit_signal("hp_changed", float(build.hp), float(build.max_hp))
 	_hurt_flash = 0.12
+	emit_signal("hurt_taken", dealt, global_position)
 	if float(build.hp) <= 0.0:
 		_die()
 		return
-	emit_signal("hurt_taken", amount, global_position)
 	state = State.HURT
 	iframes = Content.P_HURT_IFRAMES + float(build.get("iframes_bonus", 0.0))
 	var hit_dir := from_dir.normalized()
@@ -756,6 +780,8 @@ func respawn_at(pos: Vector2, reset_resources: bool = false) -> void:
 	attack_buffer = 0.0
 	_queued_attack = false
 	attack_index = -1
+	jump_buffer = 0.0
+	_dash_buffer = 0.0
 	combo_timer = 0.0
 	atk_phase = "none"
 	atk_time = 0.0
@@ -783,6 +809,8 @@ func respawn_at(pos: Vector2, reset_resources: bool = false) -> void:
 
 func suppress_gameplay_input(frames: int = 2) -> void:
 	_input_lock_frames = maxi(_input_lock_frames, frames)
+	jump_buffer = 0.0
+	_dash_buffer = 0.0
 
 # --- Drawing ---
 

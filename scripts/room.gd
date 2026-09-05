@@ -157,7 +157,8 @@ func _build_hazards() -> void:
 
 func _on_hazard_body(body: Node) -> void:
 	if body is Player:
-		body.take_damage(18.0, Vector2(0.0, -1.0), 260.0)
+		# Damage cancels combat hitboxes; defer it until physics queries finish.
+		body.take_damage.call_deferred(18.0, Vector2(0.0, -1.0), 260.0)
 
 func _setup_exit() -> void:
 	var ex: Vector2 = template.get("exit", Vector2(1180, Content.FLOOR_Y - 80))
