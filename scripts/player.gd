@@ -756,6 +756,19 @@ func _heal(amount: float) -> void:
 	if _run_model: _run_model.build.hp = build.hp
 	emit_signal("hp_changed", float(build.hp), float(build.max_hp))
 
+## Crossing the world boundary is terminal, not a parryable or survivable hit.
+## Dash immunity and Second Wind still apply to ordinary combat and hazards.
+func fall_out_of_world() -> void:
+	if dead: return
+	# Signals are synchronous: guard terminal re-entry before notifying listeners.
+	dead = true
+	var lost := maxf(0.0, float(build.hp))
+	build.hp = 0.0
+	if _run_model: _run_model.build.hp = 0.0
+	emit_signal("hp_changed", 0.0, float(build.max_hp))
+	emit_signal("hurt_taken", lost, global_position)
+	_die()
+
 func _die() -> void:
 	dead = true
 	riposte_time = 0.0

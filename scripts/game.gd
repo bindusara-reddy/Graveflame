@@ -172,7 +172,7 @@ func _process(delta: float) -> void:
 			ui.update_boss_bar(room.boss.hp)
 		# Check player death handled by signal; check fall off world
 		if player.global_position.y > Content.FLOOR_Y + 240:
-			player.take_damage(9999.0, Vector2.UP, 0.0)
+			player.fall_out_of_world()
 		if not get_tree().paused:
 			_stats.time += delta
 			_tick_streak(delta)
