@@ -165,7 +165,10 @@ func _run() -> void:
 	overlay_texts.clear()
 	_labels(overlay, overlay_texts)
 	check(overlay_texts.has("KEYBOARD") and overlay_texts.has("GAMEPAD"), "controls overlay lists keyboard and gamepad columns")
-	check(overlay_texts.has("START") and overlay_texts.has("ESC"), "controls overlay shows real pause bindings")
+	# Asserted against the live map rather than a hand-typed abbreviation, so the
+	# check stays about "shows real bindings" and not about exact wording.
+	var pause_key := str(UI._binding_text("pause")["key"])
+	check(overlay_texts.has("START") and overlay_texts.has(pause_key), "controls overlay shows real pause bindings (looked for %s)" % pause_key)
 	ui._toggle_title_controls()
 	await _frames(2)
 

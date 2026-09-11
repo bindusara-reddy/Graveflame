@@ -14,6 +14,16 @@ signal option_toggled(key: String, value: bool)
 signal forge_requested
 signal buy_meta_requested(idx: int)
 signal back_from_forge_requested
+## Menu feedback. Resolved to a synthesized cue by the game, so the UI never
+## names a sound directly.
+signal cue(kind: String)
+signal options_requested
+signal back_from_options_requested
+## Continuous controls (volumes) report here; toggles keep option_toggled.
+signal option_value_changed(key: String, value: float)
+signal keys_requested
+signal back_from_keys_requested
+signal binding_changed(action: String, keycode: int)
 
 const C_VOID := Color("09070f")
 const C_INK := Color("100d18")
@@ -37,6 +47,7 @@ var _hp_value_label: Label
 var _special_bar: ProgressBar
 var _special_value_label: Label
 var _room_label: Label
+var _wave_label: Label
 var _score_label: Label
 var _boss_panel: Control
 var _boss_bar: ProgressBar
@@ -60,6 +71,10 @@ var _streak_tween: Tween
 
 var _room_intro: Dictionary = {}
 var _boss_intro: Dictionary = {}
+## One-time contextual lesson, shown low and out of the play space.
+var _hint_panel: Control
+var _hint_label: Label
+var _hint_tween: Tween
 var _boss_phase_tag: Label
 var _boss_phase_tween: Tween
 var _fade: ColorRect
@@ -70,6 +85,13 @@ var _upgrade_row: HBoxContainer
 var _forge_rows: VBoxContainer
 var _reduced_motion_check: CheckBox
 var _reduced_flash_check: CheckBox
+var _fullscreen_check: CheckBox
+## key -> { slider, readout } for every volume control on the options screen.
+var _option_sliders: Dictionary = {}
+## Rebinding: the rows container and whichever action is awaiting a keypress.
+var _key_rows: VBoxContainer
+var _listening_action := ""
+var _listening_button: Button
 
 var _title_top_label: Label
 var _title_embers: CPUParticles2D
@@ -107,6 +129,8 @@ func _ready() -> void:
 	_build_game_over()
 	_build_victory()
 	_build_forge()
+	_build_options()
+	_build_keys()
 
 	hide_all_panels()
 	show_panel("title")
@@ -148,6 +172,31 @@ func _build_hud() -> void:
 	_build_room_clear_banner()
 	_room_intro = _build_banner("RoomIntro", 176.0, 258.0, Vector2(420, 70), 26, 11, C_EMBER, Color("14101ceb"))
 	_boss_intro = _build_banner("BossIntro", 236.0, 372.0, Vector2(620, 118), 40, 14, C_RED, Color("1a0c11f0"))
+	_build_hint()
+
+
+## Teaching prompt: sits below the fight, clear of the fighters and the HUD.
+func _build_hint() -> void:
+	var center := CenterContainer.new()
+	center.name = "HintBanner"
+	center.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_hud.add_child(center)
+	center.set_anchors_and_offsets_preset(Control.PRESET_BOTTOM_WIDE)
+	center.offset_top = -112.0
+	center.offset_bottom = -54.0
+	var panel := PanelContainer.new()
+	panel.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	panel.add_theme_stylebox_override("panel", _panel_box(Color("0f0b16f2"), C_EMBER, 10, 1, 10))
+	center.add_child(panel)
+	var margin := _margin_container(26, 26, 9, 9)
+	margin.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	panel.add_child(margin)
+	# This is the one line a new player must read, so it is set a step larger
+	# than the ambient HUD text rather than matching it.
+	_hint_label = _make_label("", 16, C_TEXT, HorizontalAlignment.HORIZONTAL_ALIGNMENT_CENTER)
+	panel.add_child(_hint_label)
+	_hint_panel = center
+	_hint_panel.visible = false
 
 
 func _build_streak_meter() -> void:
@@ -300,7 +349,7 @@ func _build_run_status() -> void:
 	panel.offset_left = -226.0
 	panel.offset_top = 14.0
 	panel.offset_right = -16.0
-	panel.offset_bottom = 112.0
+	panel.offset_bottom = 132.0
 
 	var margin := _margin_container(12, 12, 8, 8)
 	margin.mouse_filter = Control.MOUSE_FILTER_IGNORE
@@ -312,6 +361,9 @@ func _build_run_status() -> void:
 
 	_room_label = _make_label("ROOM 01 / 06", 12, C_EMBER_HI, HorizontalAlignment.HORIZONTAL_ALIGNMENT_RIGHT)
 	stack.add_child(_room_label)
+	_wave_label = _make_label("", 11, C_MUTED, HorizontalAlignment.HORIZONTAL_ALIGNMENT_RIGHT)
+	_wave_label.visible = false
+	stack.add_child(_wave_label)
 	stack.add_child(_separator(C_EDGE))
 	_score_label = _make_stat_line(stack, "RUN SCORE", "0", C_TEXT)
 	_cells_label = _make_stat_line(stack, "CELLS", "0", C_GOLD)
@@ -447,7 +499,13 @@ func _build_title() -> void:
 	_title_controls_button.pressed.connect(_toggle_title_controls)
 	_title_quiet_button(_title_controls_button)
 	nav.add_child(_title_controls_button)
-	_title_nav_buttons = [start, forge, _title_controls_button]
+	# Appended after CONTROLS so the existing pad focus chain is untouched.
+	var options_button := _button("OPTIONS", "options", false, Vector2(300, 46))
+	options_button.size_flags_horizontal = Control.SIZE_SHRINK_CENTER
+	options_button.pressed.connect(func(): emit_signal("options_requested"))
+	_title_quiet_button(options_button)
+	nav.add_child(options_button)
+	_title_nav_buttons = [start, forge, _title_controls_button, options_button]
 
 	_build_title_controls_overlay(panel)
 
@@ -501,34 +559,34 @@ func _build_title_controls_overlay(panel: Control) -> void:
 	margin.add_child(stack)
 	stack.add_child(_make_label("CONTROLS", 20, C_TEXT, HorizontalAlignment.HORIZONTAL_ALIGNMENT_CENTER))
 	stack.add_child(_separator(C_EDGE))
-	# Real bindings from the project input map: action, keyboard, gamepad.
-	var rows := [
-		["", "KEYBOARD", "GAMEPAD"],
-		["MOVE", "A / D", "STICK / D-PAD"],
-		["JUMP", "W / SPACE", "A"],
-		["BLADE", "J", "X"],
-		["AIR SLAM", "DOWN + J", "DOWN + X"],
-		["DASH", "SHIFT / L", "B"],
-		["LANCE", "K", "Y"],
-		["IGNITE", "Q", "RT"],
-		["PARRY", "S", "LB"],
-		["FLASK", "F", "D-PAD DOWN"],
-		["ENTER RIFT", "E / UP", "RB / D-PAD UP"],
-		["PAUSE", "ESC", "START"],
-	]
-	for i in range(rows.size()):
-		var row: Array = rows[i]
-		var header := i == 0
+	# Rendered from the LIVE input map, so this screen can never disagree with
+	# what the game actually does -- including after a rebind.
+	var header := HBoxContainer.new()
+	header.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	header.add_theme_constant_override("separation", 12)
+	stack.add_child(header)
+	var corner := _make_label("", 11, C_EMBER_HI, HorizontalAlignment.HORIZONTAL_ALIGNMENT_LEFT)
+	corner.size_flags_stretch_ratio = 1.1
+	header.add_child(corner)
+	for caption in ["KEYBOARD", "GAMEPAD"]:
+		header.add_child(_make_label(caption, 11, C_EMBER_HI, HorizontalAlignment.HORIZONTAL_ALIGNMENT_RIGHT))
+	var cells := {}
+	for row in Content.CONTROLS_ROWS:
+		var action := str(row.action)
 		var line := HBoxContainer.new()
 		line.mouse_filter = Control.MOUSE_FILTER_IGNORE
 		line.add_theme_constant_override("separation", 12)
 		stack.add_child(line)
-		var action := _make_label(str(row[0]), 12, C_MUTED, HorizontalAlignment.HORIZONTAL_ALIGNMENT_LEFT)
-		action.size_flags_stretch_ratio = 1.1
-		line.add_child(action)
-		for col in range(1, 3):
-			var cell := _make_label(str(row[col]), 11 if header else 12, C_EMBER_HI if header else C_TEXT, HorizontalAlignment.HORIZONTAL_ALIGNMENT_RIGHT)
-			line.add_child(cell)
+		var name_label := _make_label(str(row.label), 12, C_MUTED, HorizontalAlignment.HORIZONTAL_ALIGNMENT_LEFT)
+		name_label.size_flags_stretch_ratio = 1.1
+		line.add_child(name_label)
+		var key_label := _make_label("", 12, C_TEXT, HorizontalAlignment.HORIZONTAL_ALIGNMENT_RIGHT)
+		line.add_child(key_label)
+		var pad_label := _make_label("", 12, C_TEXT, HorizontalAlignment.HORIZONTAL_ALIGNMENT_RIGHT)
+		line.add_child(pad_label)
+		cells[action] = { "key": key_label, "pad": pad_label }
+	stack.add_child(_make_label(Content.CONTROLS_HINTS, 11, C_MUTED, HorizontalAlignment.HORIZONTAL_ALIGNMENT_CENTER))
+	overlay.set_meta("control_cells", cells)
 	var close := _button("CLOSE", "close_controls", false, Vector2(200, 46))
 	close.size_flags_horizontal = Control.SIZE_SHRINK_CENTER
 	close.visible = false
@@ -544,6 +602,75 @@ func _build_title_controls_overlay(panel: Control) -> void:
 	close.focus_previous = self_path
 	overlay.set_meta("close_button", close)
 	_title_controls = overlay
+	# Assigned before syncing: the refresh reads the cells off the overlay meta.
+	sync_controls()
+
+
+## Godot 4 exposes no joypad-to-string API (only OS.get_keycode_string for keys),
+## so pad names are mapped explicitly. These match the vocabulary the controls
+## screen has always shown.
+static func _pad_button_name(index: int) -> String:
+	match index:
+		JOY_BUTTON_A: return "A"
+		JOY_BUTTON_B: return "B"
+		JOY_BUTTON_X: return "X"
+		JOY_BUTTON_Y: return "Y"
+		JOY_BUTTON_BACK: return "BACK"
+		JOY_BUTTON_START: return "START"
+		JOY_BUTTON_LEFT_SHOULDER: return "LB"
+		JOY_BUTTON_RIGHT_SHOULDER: return "RB"
+		JOY_BUTTON_DPAD_UP: return "D-PAD UP"
+		JOY_BUTTON_DPAD_DOWN: return "D-PAD DOWN"
+		JOY_BUTTON_DPAD_LEFT: return "D-PAD LEFT"
+		JOY_BUTTON_DPAD_RIGHT: return "D-PAD RIGHT"
+	return "PAD %d" % index
+
+
+static func _pad_axis_name(axis: int, value: float) -> String:
+	match axis:
+		JOY_AXIS_LEFT_X: return "STICK RIGHT" if value > 0.0 else "STICK LEFT"
+		JOY_AXIS_LEFT_Y: return "STICK DOWN" if value > 0.0 else "STICK UP"
+		JOY_AXIS_RIGHT_X: return "R-STICK RIGHT" if value > 0.0 else "R-STICK LEFT"
+		JOY_AXIS_RIGHT_Y: return "R-STICK DOWN" if value > 0.0 else "R-STICK UP"
+		JOY_AXIS_TRIGGER_LEFT: return "LT"
+		JOY_AXIS_TRIGGER_RIGHT: return "RT"
+	return "AXIS %d" % axis
+
+
+## Human-readable text for an action's live bindings, split by device.
+static func _binding_text(action: String) -> Dictionary:
+	var keys: Array = []
+	var pads: Array = []
+	if InputMap.has_action(action):
+		for event in InputMap.action_get_events(action):
+			if event is InputEventKey:
+				var key := event as InputEventKey
+				var code := int(key.physical_keycode)
+				if code == 0:
+					code = int(key.keycode)
+				if code != 0:
+					keys.append(OS.get_keycode_string(code))
+			elif event is InputEventJoypadButton:
+				pads.append(_pad_button_name((event as InputEventJoypadButton).button_index))
+			elif event is InputEventJoypadMotion:
+				var motion := event as InputEventJoypadMotion
+				pads.append(_pad_axis_name(motion.axis, motion.axis_value))
+	return { "key": " / ".join(keys), "pad": " / ".join(pads) }
+
+
+## Repaint the controls card from the live input map. Called whenever a binding
+## changes, so the reference screen is never stale.
+func sync_controls() -> void:
+	if _title_controls == null:
+		return
+	var cells = _title_controls.get_meta("control_cells", null)
+	if not (cells is Dictionary):
+		return
+	for action in cells:
+		var text := _binding_text(str(action))
+		var pair: Dictionary = cells[action]
+		(pair["key"] as Label).text = str(text["key"])
+		(pair["pad"] as Label).text = str(text["pad"])
 
 
 func _toggle_title_controls() -> void:
@@ -569,7 +696,40 @@ func _set_title_controls_open(open: bool) -> void:
 		_title_controls_button.grab_focus.call_deferred()
 
 
+## 1..9 select the matching boon card; anything else returns -1.
+static func _boon_index_for_key(keycode: int) -> int:
+	if keycode >= KEY_1 and keycode <= KEY_9:
+		return keycode - KEY_1
+	return -1
+
+
 func _unhandled_input(event: InputEvent) -> void:
+	# A pending rebind consumes the very next keypress, whatever it is.
+	if not _listening_action.is_empty():
+		if event is InputEventKey and event.pressed and not (event as InputEventKey).echo:
+			var key := event as InputEventKey
+			var code := int(key.physical_keycode)
+			if code == 0:
+				code = int(key.keycode)
+			if code == KEY_ESCAPE:
+				_cancel_rebind()
+			elif code != 0:
+				var action := _listening_action
+				_listening_action = ""
+				_listening_button = null
+				emit_signal("binding_changed", action, code)
+			get_viewport().set_input_as_handled()
+		return
+	# Boon cards print their index, so the number keys have to actually pick one.
+	if event is InputEventKey and event.pressed and not event.echo:
+		var reward: Control = _panels.get("reward", null)
+		if reward != null and reward.visible:
+			var index := _boon_index_for_key((event as InputEventKey).keycode)
+			var buttons = reward.get_meta("buttons", [])
+			if index >= 0 and index < buttons.size():
+				(buttons[index] as Button).pressed.emit()
+				get_viewport().set_input_as_handled()
+				return
 	# Esc / pad B closes the controls card and only that; the run never starts
 	# from a cancel, and focus returns to the CONTROLS entry.
 	if _title_controls == null or not _title_controls.visible:
@@ -602,6 +762,9 @@ func _build_pause() -> void:
 	var quit := _button("QUIT TO TITLE", "quit", false, Vector2(230, 54))
 	quit.pressed.connect(func(): emit_signal("quit_to_title_requested"))
 	actions.add_child(quit)
+	var options_button := _button("OPTIONS", "pause_options", false, Vector2(230, 54))
+	options_button.pressed.connect(func(): emit_signal("options_requested"))
+	actions.add_child(options_button)
 
 	var options_panel := PanelContainer.new()
 	options_panel.add_theme_stylebox_override("panel", _panel_box(C_INK, C_EDGE, 10, 1, 0))
@@ -629,7 +792,7 @@ func _build_pause() -> void:
 
 func _build_reward() -> void:
 	var panel := _screen("reward", false, C_GOLD)
-	var content := _dialog(panel, Vector2(1140, 520), C_GOLD, 38, 34)
+	var content := _dialog(panel, Vector2(1140, 580), C_GOLD, 38, 34)
 	content.add_theme_constant_override("separation", 11)
 
 	content.add_child(_make_label("ROOM CLEARED", 13, C_MINT, HorizontalAlignment.HORIZONTAL_ALIGNMENT_CENTER))
@@ -652,13 +815,14 @@ func _build_reward() -> void:
 
 func _build_game_over() -> void:
 	var panel := _screen("gameover", true, C_RED)
-	var content := _dialog(panel, Vector2(760, 520), C_RED, 48, 30)
+	var content := _dialog(panel, Vector2(760, 620), C_RED, 48, 30)
 	content.add_theme_constant_override("separation", 10)
 
 	content.add_child(_make_label("RUN ENDED", 13, C_RED, HorizontalAlignment.HORIZONTAL_ALIGNMENT_CENTER))
 	content.add_child(_make_label("THE FLAME FADES", 54, C_TEXT, HorizontalAlignment.HORIZONTAL_ALIGNMENT_CENTER))
 	content.add_child(_make_label("Ash remembers every attempt.", 18, C_MUTED, HorizontalAlignment.HORIZONTAL_ALIGNMENT_CENTER))
 	content.add_child(_separator(Color("75414b")))
+	_build_run_result(content, panel)
 	var cells := _make_label("CELLS SECURED  +0", 20, C_GOLD, HorizontalAlignment.HORIZONTAL_ALIGNMENT_CENTER)
 	cells.visible = false
 	content.add_child(cells)
@@ -680,13 +844,14 @@ func _build_game_over() -> void:
 
 func _build_victory() -> void:
 	var panel := _screen("victory", true, C_MINT)
-	var content := _dialog(panel, Vector2(760, 540), C_MINT, 48, 30)
+	var content := _dialog(panel, Vector2(760, 640), C_MINT, 48, 30)
 	content.add_theme_constant_override("separation", 10)
 
 	content.add_child(_make_label("WARDEN DEFEATED", 13, C_MINT, HorizontalAlignment.HORIZONTAL_ALIGNMENT_CENTER))
 	content.add_child(_make_label("GRAVEFLAME ENDURES", 50, C_TEXT, HorizontalAlignment.HORIZONTAL_ALIGNMENT_CENTER))
 	content.add_child(_make_label("The keep falls silent, but the descent is never the same twice.", 17, C_MUTED, HorizontalAlignment.HORIZONTAL_ALIGNMENT_CENTER))
 	content.add_child(_separator(C_MINT))
+	_build_run_result(content, panel)
 	var cells := _make_label("CELLS SECURED  +0", 20, C_GOLD, HorizontalAlignment.HORIZONTAL_ALIGNMENT_CENTER)
 	cells.visible = false
 	content.add_child(cells)
@@ -704,6 +869,19 @@ func _build_victory() -> void:
 	var title := _button("RETURN TO TITLE", "title", false, Vector2(230, 56))
 	title.pressed.connect(func(): emit_signal("quit_to_title_requested"))
 	actions.add_child(title)
+
+
+## Headline result: the score leads the screen and the standing best gives it
+## context, so a personal record is obvious at a glance instead of buried in
+## the grid with six equally weighted tiles.
+func _build_run_result(content: VBoxContainer, panel: Control) -> void:
+	content.add_child(_make_label("RUN SCORE", 11, C_MUTED, HorizontalAlignment.HORIZONTAL_ALIGNMENT_CENTER))
+	var score := _make_label("0", 44, C_TEXT, HorizontalAlignment.HORIZONTAL_ALIGNMENT_CENTER)
+	content.add_child(score)
+	var best := _make_label("BEST  0", 12, C_MUTED, HorizontalAlignment.HORIZONTAL_ALIGNMENT_CENTER)
+	content.add_child(best)
+	panel.set_meta("score_label", score)
+	panel.set_meta("best_label", best)
 
 
 ## Six run statistics in a compact grid; filled by show_run_summary.
@@ -771,10 +949,179 @@ func _build_forge() -> void:
 	var footer := HBoxContainer.new()
 	footer.alignment = BoxContainer.ALIGNMENT_CENTER
 	content.add_child(footer)
-	var back := _button("BACK", "back", false, Vector2(220, 50))
+	var back := _button("BACK", "back", false, Vector2(220, 50), "ui_back")
 	back.pressed.connect(func(): emit_signal("back_from_forge_requested"))
 	footer.add_child(back)
 	panel.set_meta("back_button", back)
+
+
+## Volume row: a caption, a live percentage readout and the slider itself.
+## Registered by key so sync_options can restore it without emitting signals.
+func _slider_row(parent: VBoxContainer, title: String, key: String, value: float) -> void:
+	var row := VBoxContainer.new()
+	row.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	row.add_theme_constant_override("separation", 1)
+	parent.add_child(row)
+	var head := HBoxContainer.new()
+	head.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	row.add_child(head)
+	head.add_child(_make_label(title, 14, C_TEXT, HorizontalAlignment.HORIZONTAL_ALIGNMENT_LEFT))
+	var readout := _make_label("%d%%" % roundi(value * 100.0), 12, C_MUTED, HorizontalAlignment.HORIZONTAL_ALIGNMENT_RIGHT)
+	readout.size_flags_horizontal = Control.SIZE_SHRINK_END
+	head.add_child(readout)
+	var slider := HSlider.new()
+	slider.name = "Opt_%s" % key
+	slider.min_value = 0.0
+	slider.max_value = 1.0
+	slider.step = 0.05
+	slider.value = value
+	slider.custom_minimum_size = Vector2(0, 20)
+	slider.focus_mode = Control.FOCUS_ALL
+	slider.mouse_default_cursor_shape = Control.CURSOR_POINTING_HAND
+	row.add_child(slider)
+	slider.value_changed.connect(func(v: float):
+		readout.text = "%d%%" % roundi(v * 100.0)
+		emit_signal("option_value_changed", key, v)
+	)
+	_option_sliders[key] = { "slider": slider, "readout": readout }
+
+
+## Settings screen: reachable from the title and from the pause menu, so audio
+## and accessibility are not locked behind starting a run.
+func _build_options() -> void:
+	var panel := _screen("options", true, C_EMBER)
+	var content := _dialog(panel, Vector2(680, 620), C_EMBER, 48, 30)
+	content.add_theme_constant_override("separation", 8)
+
+	content.add_child(_make_label("SETTINGS", 12, C_EMBER_HI, HorizontalAlignment.HORIZONTAL_ALIGNMENT_CENTER))
+	content.add_child(_make_label("OPTIONS", 44, C_TEXT, HorizontalAlignment.HORIZONTAL_ALIGNMENT_CENTER))
+	content.add_child(_separator(C_EDGE))
+
+	content.add_child(_make_label("AUDIO", 12, C_EMBER_HI, HorizontalAlignment.HORIZONTAL_ALIGNMENT_LEFT))
+	_slider_row(content, "Master volume", "master", 0.9)
+	_slider_row(content, "Music", "music", 0.75)
+	_slider_row(content, "Effects", "sfx", 0.9)
+
+	content.add_child(_make_label("DISPLAY", 12, C_EMBER_HI, HorizontalAlignment.HORIZONTAL_ALIGNMENT_LEFT))
+	_fullscreen_check = _check("Fullscreen", "Fill the display instead of running in a window.")
+	content.add_child(_fullscreen_check)
+	_fullscreen_check.toggled.connect(func(value: bool): emit_signal("option_toggled", "fullscreen", value))
+
+	content.add_child(_make_label("ACCESSIBILITY", 12, C_EMBER_HI, HorizontalAlignment.HORIZONTAL_ALIGNMENT_LEFT))
+	_reduced_motion_check = _check("Reduced motion", "Disables camera shake and softens particles.")
+	_reduced_flash_check = _check("Reduced flash", "Reduces high-contrast impact flashes.")
+	content.add_child(_reduced_motion_check)
+	content.add_child(_reduced_flash_check)
+	_reduced_motion_check.toggled.connect(func(value: bool): emit_signal("option_toggled", "reduced_motion", value))
+	_reduced_flash_check.toggled.connect(func(value: bool): emit_signal("option_toggled", "reduced_flash", value))
+
+	var footer := HBoxContainer.new()
+	footer.alignment = BoxContainer.ALIGNMENT_CENTER
+	footer.add_theme_constant_override("separation", 12)
+	content.add_child(footer)
+	var keys := _button("KEYS", "options_keys", false, Vector2(200, 50))
+	keys.pressed.connect(func(): emit_signal("keys_requested"))
+	footer.add_child(keys)
+	var back := _button("BACK", "options_back", false, Vector2(200, 50), "ui_back")
+	back.pressed.connect(func(): emit_signal("back_from_options_requested"))
+	footer.add_child(back)
+	panel.set_meta("back_button", back)
+
+
+## Reflect the persisted options onto the controls without re-emitting signals,
+## so opening the screen can never overwrite a setting with a stale widget.
+func sync_options(opts: Dictionary) -> void:
+	for key in _option_sliders:
+		var entry: Dictionary = _option_sliders[key]
+		var slider: HSlider = entry["slider"]
+		var value := clampf(float(opts.get(key, slider.value)), 0.0, 1.0)
+		slider.set_value_no_signal(value)
+		(entry["readout"] as Label).text = "%d%%" % roundi(value * 100.0)
+	if _fullscreen_check != null:
+		_fullscreen_check.set_pressed_no_signal(bool(opts.get("fullscreen", false)))
+	if _reduced_motion_check != null:
+		_reduced_motion_check.set_pressed_no_signal(bool(opts.get("reduced_motion", false)))
+	if _reduced_flash_check != null:
+		_reduced_flash_check.set_pressed_no_signal(bool(opts.get("reduced_flash", false)))
+	if _music_check != null:
+		_music_check.set_pressed_no_signal(bool(opts.get("music_on", true)))
+
+
+## Keyboard text for one action, or a dash when nothing is bound.
+static func _key_text_for(action: String) -> String:
+	var text := str(_binding_text(action)["key"])
+	return text if not text.is_empty() else "—"
+
+
+## Rebinding screen. Rows come from Content.CONTROLS_ROWS so this list and the
+## controls reference can never disagree about what is rebindable.
+func _build_keys() -> void:
+	var panel := _screen("keys", true, C_EMBER)
+	var content := _dialog(panel, Vector2(720, 660), C_EMBER, 44, 28)
+	content.add_theme_constant_override("separation", 8)
+
+	content.add_child(_make_label("SETTINGS", 12, C_EMBER_HI, HorizontalAlignment.HORIZONTAL_ALIGNMENT_CENTER))
+	content.add_child(_make_label("KEY BINDINGS", 42, C_TEXT, HorizontalAlignment.HORIZONTAL_ALIGNMENT_CENTER))
+	content.add_child(_make_label("Choose a key, then press the one you want.  ESC cancels.", 13, C_MUTED, HorizontalAlignment.HORIZONTAL_ALIGNMENT_CENTER))
+	content.add_child(_separator(C_EDGE))
+
+	var scroll := ScrollContainer.new()
+	scroll.name = "KeysScroll"
+	scroll.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	scroll.custom_minimum_size.y = 300.0
+	scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
+	content.add_child(scroll)
+	_key_rows = VBoxContainer.new()
+	_key_rows.name = "KeyRows"
+	_key_rows.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	_key_rows.add_theme_constant_override("separation", 5)
+	scroll.add_child(_key_rows)
+
+	content.add_child(_make_label("Gamepad bindings are fixed and always live.", 12, C_MUTED, HorizontalAlignment.HORIZONTAL_ALIGNMENT_CENTER))
+	var footer := HBoxContainer.new()
+	footer.alignment = BoxContainer.ALIGNMENT_CENTER
+	content.add_child(footer)
+	var back := _button("BACK", "keys_back", false, Vector2(220, 50), "ui_back")
+	back.pressed.connect(func():
+		_cancel_rebind()
+		emit_signal("back_from_keys_requested")
+	)
+	footer.add_child(back)
+	panel.set_meta("back_button", back)
+
+
+## Rebuild the rebinding rows against the live input map.
+func sync_keys(_bindings: Dictionary) -> void:
+	if _key_rows == null:
+		return
+	_cancel_rebind()
+	_clear_children(_key_rows)
+	for row in Content.CONTROLS_ROWS:
+		var action := str(row.action)
+		var line := HBoxContainer.new()
+		line.add_theme_constant_override("separation", 12)
+		_key_rows.add_child(line)
+		var label := _make_label(str(row.label), 14, C_TEXT, HorizontalAlignment.HORIZONTAL_ALIGNMENT_LEFT)
+		line.add_child(label)
+		# Empty cue kind: the label changing to "PRESS A KEY" is the feedback, and
+		# a confirm blip here would imply a commit that has not happened yet.
+		var button := _button(_key_text_for(action), "Key_%s" % action, false, Vector2(200, 40), "")
+		button.pressed.connect(_begin_rebind.bind(action, button))
+		line.add_child(button)
+
+
+func _begin_rebind(action: String, button: Button) -> void:
+	_cancel_rebind()
+	_listening_action = action
+	_listening_button = button
+	button.text = "PRESS A KEY…"
+
+
+func _cancel_rebind() -> void:
+	if not _listening_action.is_empty() and _listening_button != null and is_instance_valid(_listening_button):
+		_listening_button.text = _key_text_for(_listening_action)
+	_listening_action = ""
+	_listening_button = null
 
 
 # --- Title scene ---------------------------------------------------------------
@@ -1034,7 +1381,7 @@ func _add_key_card(parent: GridContainer, title: String, key: String) -> void:
 	stack.add_child(_make_label(key, 13, C_TEXT, HorizontalAlignment.HORIZONTAL_ALIGNMENT_CENTER))
 
 
-func _button(text: String, node_name: String, primary: bool, minimum: Vector2) -> Button:
+func _button(text: String, node_name: String, primary: bool, minimum: Vector2, cue_kind: String = "ui_confirm") -> Button:
 	var button := Button.new()
 	button.name = node_name
 	button.text = text
@@ -1044,6 +1391,8 @@ func _button(text: String, node_name: String, primary: bool, minimum: Vector2) -
 	button.add_theme_font_size_override("font_size", 15)
 	button.add_theme_constant_override("outline_size", 1)
 	button.add_theme_color_override("font_outline_color", Color("00000080"))
+	if not cue_kind.is_empty():
+		button.pressed.connect(func(): emit_signal("cue", cue_kind))
 
 	var normal_bg := C_EMBER if primary else C_SURFACE_HI
 	var normal_border := C_EMBER_HI if primary else C_EDGE
@@ -1070,6 +1419,46 @@ func _button_box(background: Color, border: Color, border_width: int) -> StyleBo
 	return box
 
 
+## Toggle glyphs, drawn procedurally like the rest of the game's art.
+## The default theme's unchecked icon renders at the panel's own luminance
+## (measured 0.088 against a 0.086 panel), so an OFF toggle showed as blank space
+## and the player could not see it, or that the row was interactive at all.
+## These carry explicit contrast in both states.
+static var _toggle_icon_cache: Dictionary = {}
+
+static func _toggle_icons() -> Dictionary:
+	if not _toggle_icon_cache.is_empty():
+		return _toggle_icon_cache
+	_toggle_icon_cache = {
+		"unchecked": ImageTexture.create_from_image(_toggle_image(false)),
+		"checked": ImageTexture.create_from_image(_toggle_image(true)),
+	}
+	return _toggle_icon_cache
+
+
+static func _toggle_image(is_on: bool) -> Image:
+	var size := 22
+	var img := Image.create_empty(size, size, false, Image.FORMAT_RGBA8)
+	img.fill(Color(0, 0, 0, 0))
+	var edge := Color("c99a5e") if is_on else Color("a494bc")
+	var fill := Color("ff7a18") if is_on else Color("1c1726")
+	for y in range(size):
+		for x in range(size):
+			var on_border := x < 2 or y < 2 or x >= size - 2 or y >= size - 2
+			img.set_pixel(x, y, edge if on_border else fill)
+	if is_on:
+		# A check stroke: a short arm down into a valley, then a long rise. The
+		# two arms must meet at the bottom, or it reads as a chevron instead.
+		var ink := Color("1a1010")
+		for i in range(5):
+			for w in range(2):
+				img.set_pixel(5 + i + w, 8 + i, ink)
+		for i in range(8):
+			for w in range(2):
+				img.set_pixel(9 + i + w, 12 - i, ink)
+	return img
+
+
 func _check(title: String, description: String) -> CheckBox:
 	var check := CheckBox.new()
 	check.text = "%s\n%s" % [title, description]
@@ -1079,6 +1468,14 @@ func _check(title: String, description: String) -> CheckBox:
 	check.add_theme_color_override("font_color", C_TEXT)
 	check.add_theme_color_override("font_hover_color", C_EMBER_HI)
 	check.add_theme_color_override("font_focus_color", C_GOLD)
+	var icons := _toggle_icons()
+	check.add_theme_icon_override("checked", icons["checked"])
+	check.add_theme_icon_override("unchecked", icons["unchecked"])
+	check.add_theme_icon_override("checked_disabled", icons["unchecked"])
+	check.add_theme_icon_override("unchecked_disabled", icons["unchecked"])
+	check.add_theme_constant_override("h_separation", 10)
+	check.add_theme_constant_override("icon_max_width", 22)
+	check.toggled.connect(func(_on: bool): emit_signal("cue", "ui_confirm"))
 	return check
 
 
@@ -1111,11 +1508,38 @@ func hide_all_panels() -> void:
 	hide_room_clear()
 
 
+## Show a one-time lesson. Re-showing replaces the current one rather than
+## stacking, so two triggers in the same second cannot queue up noise.
+func show_hint(text: String, hold: float = 4.5) -> void:
+	if _hint_panel == null:
+		return
+	_hint_label.text = text
+	if _hint_tween != null and is_instance_valid(_hint_tween):
+		_hint_tween.kill()
+	_hint_panel.visible = true
+	_hint_panel.modulate = Color(1.0, 1.0, 1.0, 0.0)
+	var tween := create_tween()
+	tween.set_pause_mode(Tween.TWEEN_PAUSE_PROCESS)
+	tween.tween_property(_hint_panel, "modulate:a", 1.0, 0.25)
+	tween.tween_interval(hold)
+	tween.tween_property(_hint_panel, "modulate:a", 0.0, 0.5)
+	tween.tween_callback(func(): _hint_panel.visible = false)
+	_hint_tween = tween
+
+
+func hide_hint() -> void:
+	if _hint_tween != null and is_instance_valid(_hint_tween):
+		_hint_tween.kill()
+	if _hint_panel != null:
+		_hint_panel.visible = false
+
+
 func hide_banners() -> void:
 	if _boss_phase_tween != null and is_instance_valid(_boss_phase_tween):
 		(_boss_phase_tween as Tween).kill()
 	if _boss_phase_tag != null:
 		_boss_phase_tag.visible = false
+	hide_hint()
 	for banner in [_room_intro, _boss_intro]:
 		if banner.is_empty():
 			continue
@@ -1138,6 +1562,16 @@ func set_special(value: float, maximum: float) -> void:
 
 func set_room(idx: int, total: int) -> void:
 	_room_label.text = "ROOM %02d / %02d" % [idx + 1, total]
+
+
+## Waves remaining in the current chamber, so the fight has a visible end.
+func set_wave(current: int, total: int) -> void:
+	_wave_label.text = "WAVE %d / %d" % [current, total]
+	_wave_label.visible = true
+
+
+func hide_wave() -> void:
+	_wave_label.visible = false
 
 
 func set_score(score: int) -> void:
@@ -1179,6 +1613,89 @@ func flash_boss_phase(text: String, hold: float = 1.7) -> void:
 	_boss_phase_tween.tween_callback(func(): _boss_phase_tag.visible = false)
 
 
+## Draws one boon sigil. A Control so it lays out inside a card; the drawing
+## itself lives in BoonArt with every other procedural art in the game.
+class BoonSigil extends Control:
+	var boon_id := ""
+	var tint := Color.WHITE
+
+	## `box` is the minimum size: a wide band on a boon card, a square in a row.
+	## It must be set here rather than by the caller, or setup() would overwrite a
+	## caller-assigned size and draw the sigil at zero width.
+	func setup(p_id: String, p_tint: Color, box: Vector2 = Vector2(0.0, 58.0)) -> void:
+		boon_id = p_id
+		tint = p_tint
+		mouse_filter = Control.MOUSE_FILTER_IGNORE
+		custom_minimum_size = box
+		# The sigil is sized from the control's box, so it must repaint when the
+		# card is laid out or resized rather than only when setup() runs.
+		if not resized.is_connected(queue_redraw):
+			resized.connect(queue_redraw)
+		queue_redraw()
+
+	func _draw() -> void:
+		BoonArt.draw(self, boon_id, size * 0.5, minf(size.x, size.y) * 0.46, tint)
+
+
+## One boon card. The Button IS the card frame, so focus, hover and click stay a
+## single control; the children are plain labels. Rarity is carried by border
+## weight, frame tint and a coloured chip rather than by text alone, which was
+## invisible at a 5% tint on a 1280x720 frame.
+func _upgrade_card(index: int, upgrade: Dictionary, rarity: String, rc: Color) -> Button:
+	var epic := rarity == "epic"
+	var edge_w := 3 if epic else 2
+	var tint := Color(rc.r, rc.g, rc.b, 0.22 if epic else (0.14 if rarity == "rare" else 0.07))
+	var button := Button.new()
+	button.custom_minimum_size = Vector2(0, 220)
+	button.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	button.focus_mode = Control.FOCUS_ALL
+	button.mouse_default_cursor_shape = Control.CURSOR_POINTING_HAND
+	button.add_theme_stylebox_override("normal", _card_box(C_SURFACE.blend(tint), rc.darkened(0.2), edge_w))
+	button.add_theme_stylebox_override("hover", _card_box(C_SURFACE_HI.blend(tint), rc, edge_w + 1))
+	button.add_theme_stylebox_override("focus", _card_box(C_SURFACE_HI.blend(tint), rc.lightened(0.3), edge_w + 1))
+	button.add_theme_stylebox_override("pressed", _card_box(Color("332333"), C_GOLD, edge_w + 1))
+
+	var margin := _margin_container(18, 18, 16, 16)
+	margin.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	margin.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	button.add_child(margin)
+	var stack := VBoxContainer.new()
+	stack.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	stack.add_theme_constant_override("separation", 10)
+	margin.add_child(stack)
+
+	var head := HBoxContainer.new()
+	head.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	stack.add_child(head)
+	var chip := _make_label(rarity.to_upper(), 12, rc, HorizontalAlignment.HORIZONTAL_ALIGNMENT_LEFT)
+	chip.size_flags_horizontal = Control.SIZE_SHRINK_BEGIN
+	head.add_child(chip)
+	var gap := Control.new()
+	gap.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	gap.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	head.add_child(gap)
+	if bool(upgrade.get("unique", false)):
+		var once := _make_label("ONCE PER RUN", 10, C_GOLD, HorizontalAlignment.HORIZONTAL_ALIGNMENT_RIGHT)
+		once.size_flags_horizontal = Control.SIZE_SHRINK_END
+		head.add_child(once)
+	# The index is a live keyboard shortcut, so printing it is not decoration.
+	var key := _make_label("[%d]" % (index + 1), 11, C_MUTED, HorizontalAlignment.HORIZONTAL_ALIGNMENT_RIGHT)
+	key.size_flags_horizontal = Control.SIZE_SHRINK_END
+	head.add_child(key)
+
+	var sigil := BoonSigil.new()
+	sigil.setup(str(upgrade.get("id", "")), rc)
+	stack.add_child(sigil)
+
+	var title := _make_label(str(upgrade.get("title", "UNKNOWN BOON")).to_upper(), 21, C_TEXT, HorizontalAlignment.HORIZONTAL_ALIGNMENT_LEFT)
+	stack.add_child(title)
+	var desc := _make_label(str(upgrade.get("desc", "")), 13, C_MUTED, HorizontalAlignment.HORIZONTAL_ALIGNMENT_LEFT)
+	desc.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	desc.vertical_alignment = VerticalAlignment.VERTICAL_ALIGNMENT_TOP
+	stack.add_child(desc)
+	return button
+
+
 func setup_upgrades(upgrades: Array) -> void:
 	if _upgrade_row == null:
 		return
@@ -1187,31 +1704,10 @@ func setup_upgrades(upgrades: Array) -> void:
 	var count := upgrades.size()
 	for i in range(count):
 		var upgrade: Dictionary = upgrades[i]
-		var title := str(upgrade.get("title", "UNKNOWN BOON"))
-		var description := str(upgrade.get("desc", ""))
 		var rarity := Content.upgrade_rarity(upgrade)
 		var rc: Color = Content.rarity_color(rarity)
-		var tag := rarity.to_upper()
-		if bool(upgrade.get("unique", false)):
-			tag += "  \u00b7  ONCE PER RUN"
-		var button := _button(
-			"%s\n\n%02d  %s\n\n%s" % [tag, i + 1, title.to_upper(), description],
-			"Boon%d" % i,
-			false,
-			Vector2(0, 200)
-		)
-		button.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-		button.alignment = HorizontalAlignment.HORIZONTAL_ALIGNMENT_CENTER
-		button.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-		button.add_theme_font_size_override("font_size", 16)
-		var edge_w := 2 if rarity == "epic" else 1
-		var tint := Color(rc.r, rc.g, rc.b, 0.10 if rarity == "epic" else 0.05)
-		button.add_theme_stylebox_override("normal", _upgrade_box(C_SURFACE.blend(tint), rc.darkened(0.25), edge_w))
-		button.add_theme_stylebox_override("hover", _upgrade_box(C_SURFACE_HI.blend(tint), rc, 2))
-		button.add_theme_stylebox_override("pressed", _upgrade_box(Color("332333"), C_GOLD, 2))
-		button.add_theme_stylebox_override("focus", _upgrade_box(Color("302337").blend(tint), rc.lightened(0.2), 2))
-		button.add_theme_color_override("font_hover_color", rc.lightened(0.2))
-		button.add_theme_color_override("font_focus_color", C_TEXT)
+		var button := _upgrade_card(i, upgrade, rarity, rc)
+		button.name = "Boon%d" % i
 		button.pressed.connect(_on_upgrade_pressed.bind(i))
 		_upgrade_row.add_child(button)
 		buttons.append(button)
@@ -1264,6 +1760,11 @@ func setup_forge(cells: int) -> void:
 		line.add_theme_constant_override("separation", 14)
 		margin.add_child(line)
 
+		var sigil := BoonSigil.new()
+		# Forge rows are shorter than cards, so the sigil takes a fixed square.
+		sigil.setup(str(upgrade.get("id", "")), C_GOLD if owned else C_EMBER_HI, Vector2(46.0, 46.0))
+		line.add_child(sigil)
+
 		var copy := VBoxContainer.new()
 		copy.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 		copy.add_theme_constant_override("separation", 1)
@@ -1271,7 +1772,7 @@ func setup_forge(cells: int) -> void:
 		copy.add_child(_make_label(str(upgrade.get("title", "Upgrade")).to_upper(), 14, C_TEXT, HorizontalAlignment.HORIZONTAL_ALIGNMENT_LEFT))
 		copy.add_child(_make_label(str(upgrade.get("desc", "")), 12, C_MUTED, HorizontalAlignment.HORIZONTAL_ALIGNMENT_LEFT))
 
-		var buy := _button("OWNED" if owned else "%d CELLS" % int(upgrade.get("cost", 0)), "Buy%d" % i, false, Vector2(132, 44))
+		var buy := _button("OWNED" if owned else "%d CELLS" % int(upgrade.get("cost", 0)), "Buy%d" % i, false, Vector2(132, 44), "")
 		buy.disabled = owned or cells < int(upgrade.get("cost", 0))
 		if owned:
 			buy.add_theme_color_override("font_disabled_color", C_MINT)
@@ -1358,6 +1859,17 @@ func show_run_summary(stats: Dictionary, panel_name: String) -> void:
 	if not _panels.has(panel_name):
 		return
 	var panel: Control = _panels[panel_name]
+	# The headline result is set before the grid so it never depends on it.
+	var score_label = panel.get_meta("score_label", null)
+	if score_label is Label:
+		(score_label as Label).text = _format_number(int(stats.get("score", 0)))
+	var best_label = panel.get_meta("best_label", null)
+	if best_label is Label:
+		# Set both text and colour every time: the panel is reused between runs,
+		# so a previous record's gold must not persist onto a lesser run.
+		var record := bool(stats.get("new_best", false))
+		(best_label as Label).text = "NEW BEST" if record else "BEST  %s" % _format_number(int(stats.get("best", 0)))
+		(best_label as Label).add_theme_color_override("font_color", C_GOLD if record else C_MUTED)
 	var labels = panel.get_meta("summary_labels", null)
 	if not (labels is Dictionary):
 		return
@@ -1409,6 +1921,17 @@ func _style_flask_dot(dot: PanelContainer, filled: bool) -> void:
 	var color := C_MINT if filled else Color("26332f")
 	var edge := Color("98ffd0") if filled else Color("3b4944")
 	dot.add_theme_stylebox_override("panel", _panel_box(color, edge, 3, 1, 0))
+
+
+## Boon card frame: no content margins, because the card's own MarginContainer
+## owns the padding and the Button only provides the border and tint.
+func _card_box(background: Color, border: Color, border_width: int) -> StyleBoxFlat:
+	var box := _panel_box(background, border, 12, border_width, 6)
+	box.content_margin_left = 0.0
+	box.content_margin_right = 0.0
+	box.content_margin_top = 0.0
+	box.content_margin_bottom = 0.0
+	return box
 
 
 func _upgrade_box(background: Color, border: Color, border_width: int) -> StyleBoxFlat:

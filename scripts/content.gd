@@ -470,6 +470,38 @@ static func encounter_for_room(room_index: int) -> Array:
 static func room_name(template: Dictionary) -> String:
 	return str(template.get("name", str(template.get("tag", "unknown")).to_upper()))
 
+# --- Controls ---
+## The single source of truth for the controls screen AND the rebinding list.
+## Both render from the LIVE input map, so neither can drift from what the game
+## actually does. Order is the order the player sees.
+const CONTROLS_ROWS := [
+	{ "label": "MOVE LEFT",  "action": "move_left" },
+	{ "label": "MOVE RIGHT", "action": "move_right" },
+	{ "label": "JUMP",       "action": "jump" },
+	{ "label": "BLADE",      "action": "attack" },
+	{ "label": "DASH",       "action": "dash" },
+	{ "label": "LANCE",      "action": "special" },
+	{ "label": "IGNITE",     "action": "ignite" },
+	{ "label": "PARRY",      "action": "parry" },
+	{ "label": "FLASK",      "action": "heal" },
+	{ "label": "ENTER RIFT", "action": "interact" },
+	{ "label": "PAUSE",      "action": "pause" },
+]
+## Composites that are not actions of their own, shown as a hint under the table.
+const CONTROLS_HINTS := "AIR SLAM:  DOWN + BLADE      ·      GAMEPAD IS ALWAYS LIVE"
+
+# --- First-run teaching ---
+## One-time contextual lessons. Each is shown the first time the situation that
+## makes the mechanic useful actually arises, so the player learns by playing
+## rather than by reading a bindings list and guessing what matters.
+const HINTS := {
+	"parry": "S — PARRY.  Time it against a winding strike to deflect it.",
+	"riposte": "Deflected!  A counter is banked — press J to riposte.",
+	"slam": "DOWN + J in the air — down-slam onto a crowd.",
+	"wall_jump": "Against a wall, jump again to kick away.",
+	"flask": "F — FLASK.  Charges refill when a chamber is cleared.",
+}
+
 # --- Cells meta-progression (currency kept across runs, Dead Cells-style) ---
 const META_UPGRADES: Array = [
 	{ "id": "m_max_hp",   "title": "Ember Soul",   "desc": "+10 starting HP.",          "cost": 5,  "kind": "max_hp",    "value": 10.0 },
