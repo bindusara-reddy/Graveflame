@@ -24,7 +24,9 @@ func _ready() -> void:
 	for name in ["explore", "boss"]:
 		var p := AudioStreamPlayer.new()
 		p.name = name.capitalize()
-		p.bus = "Master"
+		# Routed to the Music bus so the options mix owns the score's level;
+		# track-to-track balance stays on the player's own volume_db.
+		p.bus = "Music"
 		p.volume_db = -80.0
 		add_child(p)
 		_players[name] = p

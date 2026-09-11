@@ -73,9 +73,33 @@ func _init_audio() -> void:
 	_streams["second_wind"] = _make_sweep(200.0, 900.0, 0.6, 0.5, 0.1)
 	_streams["pyre"] = _make_noise(0.35, 0.6, true)
 	_streams["shatter"] = _make_sweep(420.0, 65.0, 0.14, 0.25, 0.85)
+	# --- Attack anticipation ---
+	# A windup the player cannot hear reads as an unfair hit, so every move that
+	# can damage them is voiced before it lands. Each archetype gets a distinct
+	# pitch band and noise mix so a crowded room stays parseable by ear.
+	_streams["tell_stalker"] = _make_sweep(190.0, 640.0, 0.20, 0.26, 0.42)
+	_streams["tell_hopper"] = _make_sweep(520.0, 1180.0, 0.11, 0.22, 0.22)
+	_streams["tell_wisp"] = _make_sweep(320.0, 1240.0, 0.30, 0.22, 0.05)
+	_streams["tell_brute"] = _make_sweep(86.0, 148.0, 0.36, 0.34, 0.58)
+	_streams["tell_bomber"] = _make_noise(0.34, 0.30)
+	# The warden's four moves each carry their own tell, so the answer is legible.
+	_streams["tell_lunge"] = _make_sweep(210.0, 720.0, 0.26, 0.34, 0.28)
+	_streams["tell_fan"] = _make_metallic(330.0, 0.28, 0.36)
+	_streams["tell_slam"] = _make_sweep(120.0, 340.0, 0.32, 0.36, 0.36)
+	_streams["tell_charge"] = _make_sweep(150.0, 430.0, 0.42, 0.36, 0.48)
+	# --- Run state and menus ---
+	_streams["wave"] = _make_metallic(196.0, 0.30, 0.30)
+	_streams["rift"] = _make_sweep(180.0, 760.0, 0.40, 0.30, 0.34)
+	_streams["ui_move"] = _make_blip(540.0, 0.045, 0.16)
+	_streams["ui_confirm"] = _make_sweep(430.0, 780.0, 0.11, 0.24, 0.04)
+	_streams["ui_back"] = _make_sweep(430.0, 250.0, 0.11, 0.20, 0.04)
+	# --- Run outcome: a payoff for the throne, a toll for the ash ---
+	_streams["victory"] = _make_fanfare([523.25, 659.25, 783.99, 1046.5, 1318.51], 0.13, 0.34, 0.7)
+	_streams["defeat"] = _make_fanfare([174.61, 155.56, 130.81, 98.0], 0.28, 0.34, 0.9)
 	for i in range(8):
 		var p := AudioStreamPlayer.new()
-		p.bus = "Master"
+		# One bus for every gameplay and menu cue, so a single slider mixes them.
+		p.bus = "SFX"
 		add_child(p)
 		_audio_pool.append(p)
 
@@ -189,12 +213,39 @@ func _make_arpeggio() -> AudioStreamWAV:
 	stream.data = data
 	return stream
 
-func play(name: String, pitch: float = 1.0) -> void:
+## A stepped sequence of tones: the run's outcome rather than a single hit.
+## Each note re-attacks on its own envelope, so a rising set reads as triumph
+## and a slow descending set as a toll.
+func _make_fanfare(notes: Array, step: float, vol: float, hold: float = 0.0) -> AudioStreamWAV:
+	var rate := 22050
+	var dur := step * float(notes.size()) + hold
+	var n := int(rate * dur)
+	var data := PackedByteArray()
+	data.resize(n * 2)
+	for i in range(n):
+		var t := float(i) / float(rate)
+		var idx := mini(int(t / step), notes.size() - 1)
+		var local := t - float(idx) * step
+		var attack := clampf(local / 0.010, 0.0, 1.0)
+		var env := attack * exp(-local * 2.2)
+		var f := float(notes[idx])
+		var s := (sin(t * f * TAU) + sin(t * f * 2.0 * TAU) * 0.24) * env * vol
+		data.encode_s16(i * 2, int(clampf(s, -1.0, 1.0) * 32767.0))
+	var stream := AudioStreamWAV.new()
+	stream.format = AudioStreamWAV.FORMAT_16_BITS
+	stream.mix_rate = rate
+	stream.stereo = false
+	stream.data = data
+	return stream
+
+func play(name: String, pitch: float = 1.0, volume_db: float = 0.0) -> void:
 	if not _streams.has(name): return
 	var p := _audio_pool[_audio_idx]
 	_audio_idx = (_audio_idx + 1) % _audio_pool.size()
 	p.stream = _streams[name]
 	p.pitch_scale = pitch * randf_range(0.97, 1.03)
+	# Telegraphs attenuate with distance; UI and player cues stay flat.
+	p.volume_db = volume_db
 	p.play(0.0)
 
 ## Rift bloom where an enemy is pulled into the chamber: ring plus rising embers.
