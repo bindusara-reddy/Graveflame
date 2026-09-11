@@ -19,6 +19,15 @@ const PRODUCTION_SCRIPTS := [
 	"res://scripts/ui.gd",
 	"res://scripts/game.gd",
 	"res://scripts/music.gd",
+	"res://scripts/vfx.gd",
+	"res://scripts/light_layer.gd",
+	"res://scripts/light_rig.gd",
+	"res://scripts/atmosphere.gd",
+	"res://scripts/title_tableau.gd",
+	"res://scripts/crypt_prop.gd",
+	"res://scripts/warden_art.gd",
+	"res://scripts/backdrop.gd",
+	"res://scripts/boon_art.gd",
 ]
 
 func _init() -> void:
@@ -46,15 +55,21 @@ func _run_tests() -> void:
 	_test_moods()
 
 func _test_script_loading() -> void:
+	# A script whose globals failed to resolve (e.g. because `.godot/` carries no
+	# global class cache) still returns a NON-NULL GDScript from load(), but one
+	# that cannot be instantiated. Checking only for null would report a green
+	# suite while every later check silently skipped, so assert instantiation.
 	for path in PRODUCTION_SCRIPTS:
 		var s = load(path)
 		check(s != null, "load script: %s" % path)
-		if s != null:
-			var inst = s.new() if s.can_instantiate() else null
-			if inst != null and inst is RefCounted:
-				pass
-			if inst != null and inst is Node:
-				inst.queue_free()
+		if s == null:
+			continue
+		check(s is GDScript and s.can_instantiate(), "script compiles: %s (missing class cache?)" % path)
+		if not (s is GDScript and s.can_instantiate()):
+			continue
+		var inst = s.new()
+		if inst is Node:
+			inst.queue_free()
 
 func _test_content() -> void:
 	var Content = load("res://scripts/content.gd")
