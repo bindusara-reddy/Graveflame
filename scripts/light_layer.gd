@@ -3,6 +3,13 @@ extends Node2D
 ## aura, boss furnace core, projectile glints, wall torches, room light points
 ## (braziers, candles), the open rift, and glows on wisps, elites and burning foes.
 ## Platforms and actors draw above this node, so they remain clean silhouettes.
+##
+## Deliberately NOT the same thing as LightRig. This pass adds GLOW: an additive
+## colour wash that also covers what real lights cannot (projectiles, bomber
+## fuses, the ground pool under the knight). LightRig owns real attenuation via
+## PointLight2D plus the ambient CanvasModulate. Both effects are wanted, and
+## both read the same per-frame cached source data (Game.torch_positions and
+## Room.light_points), so neither recomputes the other's bookkeeping.
 
 const VFX := preload("res://scripts/vfx.gd")
 

@@ -11,9 +11,21 @@ signal damaged(amount: float, pos: Vector2, blocked: bool)
 signal projectile_requested(team: String, pos: Vector2, vel: Vector2, dmg: float, kb: float, pierce: int, life: float, color: Color)
 signal exploded(pos: Vector2, radius: float, damage: float)
 signal pyre_burst(pos: Vector2, radius: float)
+## Windup announcement. The game voices this so an incoming hit is never a surprise.
+signal telegraphed(kind: String, pos: Vector2, elite: bool)
 
 enum Kind { STALKER, HOPPER, WISP, BRUTE, BOMBER }
 enum EState { SPAWN, SEEK, WINDUP, ATTACK, RECOVER, STAGGER, DEAD }
+
+## Telegraph id for an archetype's windup. The game resolves these to sounds, so
+## enemy code never names an audio cue directly.
+static func telegraph_id(p_kind: int) -> String:
+	match p_kind:
+		Kind.HOPPER: return "hopper"
+		Kind.WISP: return "wisp"
+		Kind.BRUTE: return "brute"
+		Kind.BOMBER: return "bomber"
+		_: return "stalker"
 
 ## Pyre boon damage, mirrored from the player's build by the game so a burning
 ## enemy can detonate against its neighbours without holding a player reference.
@@ -249,6 +261,7 @@ func _begin_windup() -> void:
 	velocity.x *= 0.2
 	if kind == Kind.BOMBER:
 		_fuse_t = _fuse_total
+	emit_signal("telegraphed", telegraph_id(kind), global_position, elite)
 
 func _step_windup(delta: float) -> void:
 	_apply_gravity(delta)

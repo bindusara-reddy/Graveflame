@@ -27,6 +27,15 @@ var _run_cells: int = 0
 var _streak_kills := 0
 var _streak_t := 0.0
 var _streak_tier := 0
+## Which screen OPTIONS was opened from, so BACK can return there.
+var _options_return := "title"
+## Seconds before another first-run lesson may appear, so two triggers in the
+## same moment cannot stack into noise.
+var _hint_cooldown := 0.0
+## A lesson requested by a combat signal, resolved in _process. Teaching writes
+## to the save file, and file I/O must never sit inside a physics callback where
+## it can hitch a frame and shift combat timing.
+var _queued_lesson := ""
 # Run statistics shown on the end screens.
 var _stats: Dictionary = {}
 var _vignette_rect: ColorRect
@@ -35,6 +44,11 @@ var _low_hp_t := 0.0
 var mood: Dictionary = Content.mood_for(0.0)
 const VIGNETTE_EDGE := Color(0.027, 0.02, 0.043, 0.78)
 const VIGNETTE_LOW_HP := Color(0.46, 0.04, 0.07, 0.92)
+## Attack anticipation: a windup the player cannot hear reads as an unfair hit.
+## RANGE bounds how far a tell carries; REFRACTORY stops a crowd stacking into noise.
+const TELEGRAPH_RANGE := 620.0
+const TELEGRAPH_REFRACTORY := 0.07
+var _telegraph_at: Dictionary = {}
 # Visual layers. Lights and ambience are inserted before World so they draw above
 # the backdrop but beneath platforms, actors and combat VFX.
 const TORCH_Y := Content.FLOOR_Y - 200.0
@@ -108,6 +122,10 @@ func _ready() -> void:
 	_lights.process_mode = Node.PROCESS_MODE_PAUSABLE
 	pixel_view.add_child(_lights)
 	_lights.set_ambient(mood.ambient)
+	# Route synthesized audio through named buses so the options screen has
+	# something to mix. Master already exists as bus 0.
+	_ensure_audio_bus("Music")
+	_ensure_audio_bus("SFX")
 	# Procedural score (always; keeps playing under pause menus)
 	music = MusicSynth.new()
 	music.name = "Music"
@@ -139,6 +157,13 @@ func _ready() -> void:
 	ui.forge_requested.connect(_on_forge_requested)
 	ui.buy_meta_requested.connect(_on_buy_meta)
 	ui.back_from_forge_requested.connect(_on_back_from_forge)
+	ui.cue.connect(_on_ui_cue)
+	ui.options_requested.connect(_on_options_requested)
+	ui.back_from_options_requested.connect(_on_back_from_options)
+	ui.option_value_changed.connect(_on_option_value_changed)
+	ui.keys_requested.connect(_on_keys_requested)
+	ui.back_from_keys_requested.connect(_on_back_from_keys)
+	ui.binding_changed.connect(_on_binding_changed)
 	# Show saved cells + best score on the HUD
 	ui.set_cells(Save.get_cells())
 	ui.set_best(Save.get_best_score())
@@ -146,8 +171,37 @@ func _ready() -> void:
 	randomize()
 	_seed = randi()
 	_reset_stats()
+	_restore_options()
 	music.play_track("title")
 	set_process(true)
+
+
+## Reapply the saved settings at boot so a relaunch honours them, then let the
+## UI reflect the same values without firing the change handlers.
+func _restore_options() -> void:
+	var opts := Save.get_options()
+	feedback.set_reduced_motion(bool(opts.reduced_motion))
+	_atmosphere.set_reduced_motion(bool(opts.reduced_motion))
+	feedback.set_reduced_flash(bool(opts.reduced_flash))
+	if _vignette_rect != null and _vignette_rect.material is ShaderMaterial:
+		(_vignette_rect.material as ShaderMaterial).set_shader_parameter("grain", 0.0 if bool(opts.reduced_flash) else VFX.GRAIN_DEFAULT)
+	music.set_enabled(bool(opts.music_on))
+	_apply_audio_options()
+	ui.sync_options(opts)
+	_apply_bindings()
+	DisplayServer.window_set_mode(
+		DisplayServer.WINDOW_MODE_FULLSCREEN if bool(opts.fullscreen) else DisplayServer.WINDOW_MODE_WINDOWED
+	)
+
+
+## Idempotent: a missing bus is added with the existing Master as its parent.
+func _ensure_audio_bus(bus_name: String) -> void:
+	if AudioServer.get_bus_index(bus_name) >= 0:
+		return
+	AudioServer.add_bus()
+	var idx := AudioServer.bus_count - 1
+	AudioServer.set_bus_name(idx, bus_name)
+	AudioServer.set_bus_send(idx, "Master")
 
 func _reset_stats() -> void:
 	_stats = {
@@ -177,8 +231,47 @@ func _process(delta: float) -> void:
 			_stats.time += delta
 			_tick_streak(delta)
 		_update_low_hp_vignette(delta)
+		_teach_from_state(delta)
 	else:
 		_set_vignette(VIGNETTE_EDGE)
+
+
+## Contextual first-run teaching. Each lesson fires the first time the situation
+## that makes it useful actually arises, then never again for that save. The
+## player cannot discover parry timing or the riposte follow-up from a bindings
+## list, so these are taught where they matter.
+func _teach(id: String) -> void:
+	if _hint_cooldown > 0.0 or Save.has_learned(id):
+		return
+	var text: String = Content.HINTS.get(id, "")
+	if text.is_empty():
+		return
+	Save.mark_learned(id)
+	ui.show_hint(text)
+	_hint_cooldown = 6.0
+
+
+func _teach_from_state(delta: float) -> void:
+	_hint_cooldown = maxf(0.0, _hint_cooldown - delta)
+	if not is_instance_valid(player) or get_tree().paused:
+		return
+	# A lesson requested by a combat signal takes precedence over ambient ones.
+	if not _queued_lesson.is_empty():
+		var queued := _queued_lesson
+		_queued_lesson = ""
+		_teach(queued)
+		return
+	# Wall slide is the only reliable signal that a wall jump is available.
+	if player.wall_sliding:
+		_teach("wall_jump")
+		return
+	# Falling with no jumps left, and nothing underfoot to land on.
+	if not player.is_on_floor() and player.velocity.y > 260.0 and player.jumps_left <= 0:
+		_teach("slam")
+		return
+	# Hurt and still holding a charge: the moment a flask is worth remembering.
+	if player.flask_charges > 0 and float(player.build.get("hp", 0.0)) <= float(player.build.get("max_hp", 100.0)) * 0.4:
+		_teach("flask")
 
 func _tick_streak(delta: float) -> void:
 	if _streak_kills <= 0:
@@ -262,13 +355,34 @@ func _plane_range(depth: float, period: float, margin: float) -> Vector2i:
 func _plane_x(depth: float, layer_x: float) -> float:
 	return layer_x + _view_center.x * (1.0 - depth)
 
+## How strongly the farthest plane is pulled toward the mood's atmosphere.
+const DEPTH_HAZE := 0.6
+
+## Aerial perspective. Parallax alone only moves planes; without haze they all
+## keep the same contrast and the scene reads as stacked cutouts rather than as
+## receding space. Each plane is pushed toward the mood's own fog by how far away
+## it sits, so distance costs contrast the way it does in air.
+## `depth` is 0 at the far plane, 1 at the play plane.
+func _haze(color: Color, depth: float) -> Color:
+	return color.lerp(mood.fog, clampf((1.0 - depth) * DEPTH_HAZE, 0.0, 1.0))
+
 ## Sconce flame positions on the midground buttresses; the light layer stacks
 ## its torch glows on exactly these points.
+## Asked for twice per frame (additive glow pass and PointLight rig), so the
+## result is cached within a frame. Callers only read it.
+var _torch_cache := PackedVector2Array()
+var _torch_frame := -1
+
 func torch_positions() -> PackedVector2Array:
+	var frame := Engine.get_process_frames()
+	if frame == _torch_frame:
+		return _torch_cache
 	var out := PackedVector2Array()
 	var r := _plane_range(0.65, 320.0, 160.0)
 	for k in range(r.x, r.y + 1):
 		out.append(Vector2(_plane_x(0.65, float(k) * 320.0), TORCH_Y - 12.0))
+	_torch_cache = out
+	_torch_frame = frame
 	return out
 
 ## Animated flames over the buttress sconces.
@@ -313,25 +427,55 @@ func _draw_moon(ci: CanvasItem, horizon: float) -> void:
 	if bite > 0.01:
 		ci.draw_circle(c + Vector2(38.0, -24.0), 72.0, Color(mood.bg_top, 0.85 * bite))
 
+## A vertical shaft lit by a broad source: brightest a third of the way in from
+## the lit edge, falling away toward the rim and the shadowed return. Filling a
+## column with one flat colour (or two or three bands) is what made every pillar
+## read as a cut-paper bar instead of a rounded mass.
+func _draw_shaft(ci: CanvasItem, x: float, w: float, top: float, bottom: float, stone: Color) -> void:
+	var hi := stone.lightened(0.20)
+	var lo := stone.darkened(0.22)
+	var steps := 8
+	var h := bottom - top
+	for i in range(steps):
+		var u0 := float(i) / float(steps)
+		var u1 := float(i + 1) / float(steps)
+		var mid := (u0 + u1) * 0.5
+		var lit := pow(maxf(0.0, cos((mid - 0.30) * 2.1)), 2.0)
+		ci.draw_rect(Rect2(x + w * u0, top, w * (u1 - u0) + 0.6, h), lo.lerp(hi, lit))
+
+
 func _draw_spires(ci: CanvasItem, horizon: float) -> void:
 	var depth := 0.15
 	var period := 150.0
-	var col: Color = mood.spire
-	var window_col: Color = mood.torch
+	var col: Color = _haze(mood.spire, depth)
+	# Fenestration is emissive, but a light this far back is seen through air:
+	# leaving it at full torch brightness is what makes the towers read as pasted
+	# on top of the scene instead of behind it.
+	var window_col: Color = _haze(mood.torch, depth)
 	var r := _plane_range(depth, period, 120.0)
 	var base := horizon + 80.0
 	var mass_top := horizon - 150.0
-	ci.draw_rect(Rect2(_plane_x(depth, float(r.x) * period) - period, mass_top, float(r.y - r.x + 2) * period, base - mass_top), col)
+	# Vertical form. A plane filled with one constant colour reads as cut paper;
+	# a ramp (darker aloft, lifting toward the base where the hall's light pools)
+	# gives the mass a sense of standing height instead of being a flat shape.
+	var spire_lo := col.lightened(0.08)
+	var spire_hi := col.darkened(0.22)
+	VFX.draw_vgradient(ci, Rect2(_plane_x(depth, float(r.x) * period) - period, mass_top, float(r.y - r.x + 2) * period, base - mass_top), spire_hi, spire_lo)
 	for k in range(r.x, r.y + 1):
 		var h := 300.0 + VFX.hash01(k, 1) * 120.0
 		var w := 58.0 + VFX.hash01(k, 2) * 32.0
 		var x := _plane_x(depth, float(k) * period + VFX.hash01(k, 3) * 40.0)
 		var spire_top := base - h
-		ci.draw_colored_polygon(PackedVector2Array([
+		# Per-vertex ramp, indexed to the point order below: the two base corners
+		# stay lifted while everything above the shoulder falls into shadow.
+		ci.draw_polygon(PackedVector2Array([
 			Vector2(x - w * 0.5, base), Vector2(x - w * 0.5, spire_top + 40.0), Vector2(x - w * 0.28, spire_top + 14.0),
 			Vector2(x - w * 0.1, spire_top + 4.0), Vector2(x, spire_top - 26.0), Vector2(x + w * 0.1, spire_top + 6.0),
 			Vector2(x + w * 0.3, spire_top + 18.0), Vector2(x + w * 0.5, spire_top + 44.0), Vector2(x + w * 0.5, base),
-		]), col)
+		]), PackedColorArray([
+			spire_lo, spire_hi, spire_hi, spire_hi, spire_hi,
+			spire_hi, spire_hi, spire_hi, spire_lo,
+		]))
 		# Slit windows keep the towers reading as inhabited ruins; a few flicker.
 		for wi in range(3):
 			var wy := spire_top + 80.0 + float(wi) * 64.0 + VFX.hash01(k + wi, 4) * 30.0
@@ -342,26 +486,35 @@ func _draw_spires(ci: CanvasItem, horizon: float) -> void:
 func _draw_arches(ci: CanvasItem, horizon: float) -> void:
 	var depth := 0.35
 	var period := 200.0
-	var wall: Color = mood.wall
-	var edge: Color = mood.edge
+	var wall: Color = _haze(mood.wall, depth)
+	var edge: Color = _haze(mood.edge, depth)
 	var r := _plane_range(depth, period, 160.0)
 	var base := horizon + 60.0
 	var arch_top := horizon - 340.0
 	var x_start := _plane_x(depth, float(r.x) * period) - period
 	var width := float(r.y - r.x + 2) * period
 	var moving := not Feedback.motion_reduced
+	# Vertical form on the masses, and an occlusion band where the colonnade
+	# passes under the entablature. That contact shadow is what makes the layers
+	# stack into a space instead of floating as independent cutouts.
+	var wall_hi := wall.darkened(0.16)
+	var wall_lo := wall.lightened(0.05)
 	# Entablature above the colonnade plus its ground course.
-	ci.draw_rect(Rect2(x_start, arch_top - 34.0, width, 34.0), wall)
+	VFX.draw_vgradient(ci, Rect2(x_start, arch_top - 34.0, width, 34.0), wall_hi, wall_lo)
 	ci.draw_line(Vector2(x_start, arch_top - 34.0), Vector2(x_start + width, arch_top - 34.0), edge, 2.0)
-	ci.draw_rect(Rect2(x_start, base - 24.0, width, 24.0), wall)
+	VFX.draw_vgradient(ci, Rect2(x_start, base - 24.0, width, 24.0), wall_lo, wall_hi)
+	VFX.draw_vgradient(ci, Rect2(x_start, arch_top, width, 54.0), Color(0.0, 0.0, 0.0, 0.34), Color(0.0, 0.0, 0.0, 0.0))
 	for k in range(r.x, r.y + 1):
 		var cx := _plane_x(depth, float(k) * period)
 		var glazed := VFX.hash01(k, 11) > 0.6
 		if glazed:
 			# A walled bay: leaded rose window glowing with the mood's light.
 			ci.draw_rect(Rect2(cx - 52.0, arch_top + 100.0, 104.0, base - arch_top - 100.0), wall.darkened(0.12))
+			# The bay is recessed, so its opening is darker than the frame around
+			# it and lifts toward the floor course.
+			VFX.draw_vgradient(ci, Rect2(cx - 52.0, arch_top + 100.0, 104.0, base - arch_top - 100.0), Color(0.0, 0.0, 0.0, 0.26), Color(0.0, 0.0, 0.0, 0.06))
 			var wc := Vector2(cx, arch_top + 158.0)
-			var glass: Color = mood.glass
+			var glass: Color = _haze(mood.glass, depth)
 			var breathe := 0.22 + (0.06 * sin(_atmo_t * 1.3 + float(k)) if moving else 0.0)
 			ci.draw_circle(wc, 44.0, Color(glass, 0.06))
 			ci.draw_circle(wc, 27.0, Color(glass, breathe))
@@ -371,8 +524,8 @@ func _draw_arches(ci: CanvasItem, horizon: float) -> void:
 			ci.draw_arc(wc, 27.0, 0.0, TAU, 24, edge.darkened(0.3), 2.5)
 			ci.draw_arc(wc, 12.0, 0.0, TAU, 16, edge.darkened(0.3), 1.5)
 		# Pillars and the spandrel over an open arch; the sky shows through the opening.
-		ci.draw_rect(Rect2(cx - 80.0, arch_top, 28.0, base - arch_top), wall)
-		ci.draw_rect(Rect2(cx + 52.0, arch_top, 28.0, base - arch_top), wall)
+		_draw_shaft(ci, cx - 80.0, 28.0, arch_top, base, wall)
+		_draw_shaft(ci, cx + 52.0, 28.0, arch_top, base, wall)
 		var spandrel := PackedVector2Array([Vector2(cx - 80.0, arch_top), Vector2(cx + 80.0, arch_top), Vector2(cx + 80.0, arch_top + 110.0)])
 		for i in range(13):
 			var a := -PI * float(i) / 12.0
@@ -426,7 +579,7 @@ func _draw_light_shafts(ci: CanvasItem, top: float, horizon: float) -> void:
 func _draw_buttresses(ci: CanvasItem, horizon: float) -> void:
 	var depth := 0.65
 	var period := 320.0
-	var stone: Color = mood.stone
+	var stone: Color = _haze(mood.stone, depth)
 	var frame := Color(VFX.MORTAR, 0.55)
 	var r := _plane_range(depth, period, 160.0)
 	var base := horizon + 60.0
@@ -435,8 +588,8 @@ func _draw_buttresses(ci: CanvasItem, horizon: float) -> void:
 	var torch: Color = mood.torch
 	for k in range(r.x, r.y + 1):
 		var x := _plane_x(depth, float(k) * period)
-		# Pilaster with capital and plinth.
-		ci.draw_rect(Rect2(x - 22.0, top, 44.0, base - top), stone)
+		# Pilaster with capital and plinth, lit as a round shaft rather than a bar.
+		_draw_shaft(ci, x - 22.0, 44.0, top, base, stone)
 		ci.draw_rect(Rect2(x - 30.0, top, 60.0, 14.0), stone.lightened(0.08))
 		ci.draw_rect(Rect2(x - 28.0, horizon - 40.0, 56.0, 40.0), stone.lightened(0.05))
 		ci.draw_line(Vector2(x - 22.0, top), Vector2(x - 22.0, base), Color(VFX.RIM, 0.18), 1.5)
@@ -470,7 +623,7 @@ func _draw_rubble(ci: CanvasItem, horizon: float) -> void:
 	var depth := 0.85
 	var period := 260.0
 	var r := _plane_range(depth, period, 120.0)
-	var stone: Color = mood.stone
+	var stone: Color = _haze(mood.stone, depth)
 	for k in range(r.x, r.y + 1):
 		if VFX.hash01(k, 81) < 0.45:
 			continue
@@ -495,7 +648,7 @@ func _draw_undercroft(ci: CanvasItem, horizon: float) -> void:
 	var depth := 0.5
 	var period := 260.0
 	var r := _plane_range(depth, period, 160.0)
-	var wall: Color = mood.wall
+	var wall: Color = _haze(mood.wall, depth)
 	var top := horizon + 130.0
 	var bottom := horizon + 560.0
 	var x_start := _plane_x(depth, float(r.x) * period) - period
@@ -621,7 +774,7 @@ func _advance_room() -> void:
 	room.mood = mood
 	room.setup(tmpl, is_boss, player, run.rng.randi())
 	room.set_meta("room_index", run.room_index)
-	# Connect before _ready() because boss_spawned and wave_started happen there.
+	# Connect before _ready() because boss_spawned and the first wave happen there.
 	room.completed.connect(_on_room_completed)
 	room.cleared.connect(_on_room_cleared)
 	room.enemy_died.connect(_on_enemy_died)
@@ -632,6 +785,8 @@ func _advance_room() -> void:
 	room.boss_phase_changed.connect(_on_boss_phase)
 	room.enemy_exploded.connect(_on_enemy_exploded)
 	room.enemy_spawned.connect(_on_enemy_spawned)
+	room.wave_started.connect(_on_wave_started)
+	room.telegraphed.connect(_on_enemy_telegraphed)
 	room.prop_shattered.connect(feedback.shatter)
 	Enemy.pyre_damage = float(run.build.get("pyre_dmg", 0.0))
 	world.add_child(room)
@@ -646,6 +801,9 @@ func _advance_room() -> void:
 	ui.fade_from_black(0.45)
 	if not is_boss:
 		ui.show_room_intro(run.room_index, run.rooms_total(), Content.room_name(tmpl))
+	else:
+		# The throne room is one continuous fight, so it carries no wave counter.
+		ui.hide_wave()
 	_stats.rooms = run.room_index + 1
 	player.build = run.build
 
@@ -693,6 +851,34 @@ func _on_enemy_damaged(amount: float, pos: Vector2, blocked: bool) -> void:
 
 func _on_enemy_spawned(pos: Vector2, color: Color) -> void:
 	feedback.spawn_rift(pos, color)
+
+## Voice every windup, attenuated by distance from the player. The refractory
+## keeps a room full of simultaneous tells readable instead of deafening.
+func _on_enemy_telegraphed(kind: String, pos: Vector2, _elite: bool) -> void:
+	# Range first: an inaudible enemy must never consume another's cue.
+	var distance := 0.0
+	if is_instance_valid(player):
+		distance = player.global_position.distance_to(pos)
+	if distance > TELEGRAPH_RANGE:
+		return
+	var cue := "tell_" + kind
+	var now := float(Time.get_ticks_msec()) * 0.001
+	if now - float(_telegraph_at.get(cue, -1.0)) < TELEGRAPH_REFRACTORY:
+		return
+	_telegraph_at[cue] = now
+	var falloff := clampf(1.0 - distance / TELEGRAPH_RANGE, 0.06, 1.0)
+	feedback.play(cue, 1.0, linear_to_db(falloff))
+	# A close windup is exactly when parry timing needs to be explained. Queue
+	# it: this runs inside the enemy's physics step.
+	if distance < 260.0:
+		_queued_lesson = "parry"
+
+## The chamber's wave count is always on the HUD; only later waves call out,
+## because the first lands under the chamber card that already names the room.
+func _on_wave_started(current: int, total: int) -> void:
+	ui.set_wave(current, total)
+	if current > 1:
+		feedback.play("wave")
 
 func _on_pyre_burst(pos: Vector2, radius: float) -> void:
 	feedback.blast(pos, radius)
@@ -800,6 +986,8 @@ func _on_room_cleared(room_name: String) -> void:
 
 func _on_room_completed() -> void:
 	ui.hide_room_clear()
+	# The rift swallows the chamber: mark the descent before the reward opens.
+	feedback.play("rift")
 	# A streak belongs to the chamber it was built in.
 	_streak_kills = 0
 	_streak_t = 0.0
@@ -835,13 +1023,23 @@ func _on_upgrade_selected(idx: int) -> void:
 	get_tree().paused = false
 	state = GState.PLAYING
 
+## Fold the run's headline result into the stats the summary screen renders.
+## Called before either end screen so death and victory report identically.
+func _finalize_summary() -> void:
+	var previous_best := Save.get_best_score()
+	Save.set_best_score(score)
+	var best := Save.get_best_score()
+	ui.set_best(best)
+	_stats["score"] = score
+	_stats["best"] = best
+	_stats["new_best"] = score > previous_best
+
 func _on_player_died() -> void:
 	feedback.flash_death(player.global_position, Content.PAL.player)
 	feedback.shake(12.0, 0.4)
-	feedback.play("die")
-	# Persist best score + show cells earned
-	Save.set_best_score(score)
-	ui.set_best(Save.get_best_score())
+	# A toll rather than a hit: the run itself has ended, not just the player.
+	feedback.play("defeat")
+	_finalize_summary()
 	ui.show_run_cells(_run_cells, "gameover")
 	ui.show_run_summary(_stats, "gameover")
 	ui.hide_streak()
@@ -883,6 +1081,9 @@ func _on_parried(pos: Vector2, success: bool) -> void:
 		feedback.hit_stop(0.065)
 		feedback.shake(4.0, 0.1)
 		feedback.play("parry")
+		# The counter window is open right now. Queue the lesson rather than
+		# writing the save file from inside the player's physics step.
+		_queued_lesson = "riposte"
 
 func _on_enemy_exploded(pos: Vector2, radius: float, damage: float) -> void:
 	if damage <= 0.0:
@@ -900,15 +1101,16 @@ func _victory() -> void:
 	var bonus := 20
 	_run_cells += bonus
 	Save.add_cells(bonus)
-	Save.set_best_score(score)
 	get_tree().paused = true
 	state = GState.VICTORY
 	ui.hide_boss_bar()
 	ui.hide_streak()
 	ui.hide_banners()
+	_finalize_summary()
 	ui.show_run_cells(_run_cells, "victory")
 	ui.show_run_summary(_stats, "victory")
 	ui.show_panel("victory")
+	feedback.play("victory")
 	music.play_track("title")
 
 # --- Pause ---
@@ -940,6 +1142,7 @@ func _on_quit_to_title() -> void:
 	music.play_track("title")
 
 func _on_option_toggled(key: String, value: bool) -> void:
+	Save.set_option(key, value)
 	match key:
 		"reduced_motion":
 			feedback.set_reduced_motion(value)
@@ -948,12 +1151,92 @@ func _on_option_toggled(key: String, value: bool) -> void:
 			feedback.set_reduced_flash(value)
 			if _vignette_rect != null and _vignette_rect.material is ShaderMaterial:
 				(_vignette_rect.material as ShaderMaterial).set_shader_parameter("grain", 0.0 if value else VFX.GRAIN_DEFAULT)
-		"music": music.set_enabled(value)
+		"fullscreen":
+			DisplayServer.window_set_mode(
+				DisplayServer.WINDOW_MODE_FULLSCREEN if value else DisplayServer.WINDOW_MODE_WINDOWED
+			)
+		"music":
+			Save.set_option("music_on", value)
+			music.set_enabled(value)
+	_apply_audio_options()
 
 func _on_forge_requested() -> void:
 	ui.hide_all_panels()
 	ui.setup_forge(Save.get_cells())
 	ui.show_panel("forge")
+
+
+## Remember where OPTIONS was opened from so BACK returns there, and restore
+## the pause state on the way out instead of dropping the player into a run.
+func _on_options_requested() -> void:
+	var pause_open: bool = is_instance_valid(ui) and (ui._panels["pause"] as Control).visible
+	_options_return = "pause" if pause_open else "title"
+	ui.hide_all_panels()
+	ui.sync_options(Save.get_options())
+	ui.show_panel("options")
+
+func _on_back_from_options() -> void:
+	ui.hide_all_panels()
+	if _options_return == "pause" and state == GState.PLAYING:
+		ui.show_panel("pause")
+		return
+	ui.show_panel("title")
+
+func _on_option_value_changed(key: String, value: float) -> void:
+	Save.set_option(key, value)
+	_apply_audio_options()
+
+## Replace only the keyboard events for an action. Gamepad bindings are left
+## untouched, so rebinding can never remove pad support as a side effect.
+func _apply_binding(action: String, keycode: int) -> void:
+	if not InputMap.has_action(action):
+		return
+	for event in InputMap.action_get_events(action):
+		if event is InputEventKey:
+			InputMap.action_erase_event(action, event)
+	if keycode == 0:
+		return
+	var key := InputEventKey.new()
+	key.physical_keycode = keycode
+	InputMap.action_add_event(action, key)
+
+
+func _apply_bindings() -> void:
+	var bindings := Save.get_bindings()
+	for action in bindings:
+		_apply_binding(str(action), int(bindings[action]))
+
+
+func _on_binding_changed(action: String, keycode: int) -> void:
+	Save.set_binding(action, keycode)
+	_apply_binding(action, keycode)
+	# The controls screen renders from the live map, so it must be rebuilt too.
+	ui.sync_keys(Save.get_bindings())
+	ui.sync_controls()
+
+func _on_keys_requested() -> void:
+	ui.hide_all_panels()
+	ui.sync_keys(Save.get_bindings())
+	ui.show_panel("keys")
+
+func _on_back_from_keys() -> void:
+	ui.hide_all_panels()
+	ui.show_panel("options")
+
+
+## Push the persisted mix onto the audio buses. Music also honours its own
+## on/off toggle, which is folded into the music bus so the two cannot fight.
+func _apply_audio_options() -> void:
+	var opts := Save.get_options()
+	_apply_bus("Master", float(opts.master))
+	_apply_bus("Music", float(opts.music) * (1.0 if bool(opts.music_on) else 0.0))
+	_apply_bus("SFX", float(opts.sfx))
+
+func _apply_bus(bus_name: String, linear: float) -> void:
+	var idx := AudioServer.get_bus_index(bus_name)
+	if idx < 0:
+		return
+	AudioServer.set_bus_volume_db(idx, linear_to_db(clampf(linear, 0.0, 1.0)))
 
 func _on_buy_meta(idx: int) -> void:
 	if idx < 0 or idx >= Content.META_UPGRADES.size():
@@ -970,6 +1253,10 @@ func _on_back_from_forge() -> void:
 	ui.show_panel("title")
 	ui.set_cells(Save.get_cells())
 	ui.set_best(Save.get_best_score())
+
+## Menu feedback stays flat and dry: it is heard up close, at the cursor.
+func _on_ui_cue(kind: String) -> void:
+	feedback.play(kind)
 
 func _unhandled_input(event: InputEvent) -> void:
 	if event.is_action_pressed("pause") and state == GState.PLAYING:

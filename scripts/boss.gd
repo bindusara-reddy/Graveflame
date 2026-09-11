@@ -161,6 +161,17 @@ func _choose_action(player) -> void:
 		Action.SLAM: _begin_slam()
 		Action.CHARGE: _begin_charge()
 		_: _begin_lunge()
+	# Announce the chosen move at the decision point so every entry into a
+	# windup is voiced, and the player can answer the one that is coming.
+	emit_signal("telegraphed", _action_telegraph(), global_position, true)
+
+## Telegraph id for the move just chosen, resolved to a sound by the game.
+func _action_telegraph() -> String:
+	match action_idx:
+		Action.FAN: return "fan"
+		Action.SLAM: return "slam"
+		Action.CHARGE: return "charge"
+		_: return "lunge"
 
 func _begin_lunge() -> void:
 	action_idx = Action.LUNGE

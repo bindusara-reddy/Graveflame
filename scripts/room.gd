@@ -16,6 +16,7 @@ signal boss_spawned
 signal boss_phase_changed(phase: int)
 signal enemy_exploded(pos: Vector2, radius: float, damage: float)
 signal pyre_burst(pos: Vector2, radius: float)
+signal telegraphed(kind: String, pos: Vector2, elite: bool)
 signal enemy_spawned(pos: Vector2, color: Color)
 signal prop_shattered(pos: Vector2, force: Vector2, color: Color)
 
@@ -214,6 +215,7 @@ func _spawn_enemy(kind: int, pos: Vector2, mods: Dictionary = {}) -> void:
 	e.projectile_requested.connect(_on_proj_requested)
 	e.exploded.connect(_on_enemy_exploded)
 	e.pyre_burst.connect(_on_pyre_burst)
+	e.telegraphed.connect(_on_enemy_telegraphed)
 	enemies.append(e)
 	emit_signal("enemy_spawned", pos, Content.ELITE_COLOR if bool(mods.get("elite", false)) else Color(e.data.color))
 
@@ -222,6 +224,9 @@ func _on_enemy_exploded(pos: Vector2, radius: float, damage: float) -> void:
 
 func _on_pyre_burst(pos: Vector2, radius: float) -> void:
 	emit_signal("pyre_burst", pos, radius)
+
+func _on_enemy_telegraphed(kind: String, pos: Vector2, elite: bool) -> void:
+	emit_signal("telegraphed", kind, pos, elite)
 
 func _on_enemy_damaged(amount: float, pos: Vector2, blocked: bool) -> void:
 	emit_signal("enemy_damaged", amount, pos, blocked)
@@ -237,6 +242,7 @@ func _spawn_boss() -> void:
 	boss.phase_changed.connect(func(p: int): emit_signal("boss_phase_changed", p))
 	boss.exploded.connect(_on_enemy_exploded)
 	boss.summon_requested.connect(_on_boss_summon)
+	boss.telegraphed.connect(_on_enemy_telegraphed)
 	emit_signal("boss_spawned")
 
 func _on_boss_summon(kind: int, pos: Vector2) -> void:
@@ -312,7 +318,17 @@ func _mood() -> Dictionary:
 	return mood if not mood.is_empty() else Content.mood_for(0.0)
 
 ## Static light sources for the light layer: braziers, candle clusters, vents.
+## Both lighting passes (LightLayer's additive glow and LightRig's PointLight2Ds)
+## ask for this every frame, and building it allocates a fresh array of
+## dictionaries each time. It is cached within a frame instead. Callers must not
+## mutate the result; they only read positions, colours and flicker rates.
+var _light_points_cache: Array = []
+var _light_points_frame := -1
+
 func light_points() -> Array:
+	var frame := Engine.get_process_frames()
+	if frame == _light_points_frame:
+		return _light_points_cache
 	var out: Array = []
 	var tag := str(template.get("tag", "intro"))
 	var m := _mood()
@@ -341,6 +357,8 @@ func light_points() -> Array:
 	for prop in props:
 		if is_instance_valid(prop) and prop.kind == 1 and not prop.broken:
 			out.append({ "pos": prop.global_position + Vector2(0.0, -49.0), "radius": 72.0, "color": Color("ffac67"), "alpha": 0.16, "rate": 8.0, "phase": prop.position.x })
+	_light_points_cache = out
+	_light_points_frame = frame
 	return out
 
 func exit_center() -> Vector2:
@@ -355,7 +373,7 @@ func _draw() -> void:
 	var platforms: Array = template.get("platforms", [])
 	for pi in range(platforms.size()):
 		var pr := Rect2(platforms[pi].position, platforms[pi].size)
-		_draw_masonry(pr, accent, pi + 1, m)
+		_draw_masonry(pr, accent, pi + 1, m, true)
 		_draw_platform_dressing(pr, m, pi + 1)
 	# climbable walls (accent edge so players know they can wall-slide)
 	var walls: Array = template.get("walls", [])
@@ -374,7 +392,13 @@ func _draw() -> void:
 
 ## Stone courses with deterministic slab widths (48/64/80) so joints never line
 ## up between rows, a 6px trim, a 1.5px rim catch-light and a 12px occlusion band.
-func _draw_masonry(pr: Rect2, accent: Color, salt: int, m: Dictionary) -> void:
+##
+## `walkable` marks geometry the player can stand on. Its cap is drawn as a
+## distinct lit deck instead of the shared stone edge, because the mood's edge
+## and stone tones sit within a few percent of each other and the walkable floor
+## was reading as the same material as the wall behind it. Knowing what you can
+## stand on must not depend on inferring it from where the props sit.
+func _draw_masonry(pr: Rect2, accent: Color, salt: int, m: Dictionary, walkable: bool = false) -> void:
 	var lip := 6.0
 	var stone: Color = m.stone
 	var base := stone.darkened(0.22)
@@ -382,7 +406,11 @@ func _draw_masonry(pr: Rect2, accent: Color, salt: int, m: Dictionary) -> void:
 	var y := pr.position.y + lip
 	var row := 0
 	while y < pr.end.y - 1.0:
-		var row_h := 16.0 if row < 3 else 26.0
+		# Course heights vary per row. A constant vertical rhythm is the one part
+		# of the masonry that genuinely repeated, and it is what makes the wall
+		# read as printed wallpaper rather than laid stone. Horizontal variation
+		# (slab widths, tones, cracks) already existed; this is the missing axis.
+		var row_h := (16.0 if row < 3 else 26.0) + (VFX.hash01(row * 29 + salt, 71) - 0.5) * 6.0
 		row_h = minf(row_h, pr.end.y - y)
 		var x := pr.position.x - VFX.hash01(row + salt * 7, 3) * 56.0
 		var col := 0
@@ -412,7 +440,16 @@ func _draw_masonry(pr: Rect2, accent: Color, salt: int, m: Dictionary) -> void:
 		y += row_h
 		row += 1
 	VFX.draw_vgradient(self, Rect2(pr.position.x, pr.position.y + lip, pr.size.x, 12.0), Color(0.03, 0.016, 0.06, 0.7), Color(0.03, 0.016, 0.06, 0.0))
-	draw_rect(Rect2(pr.position, Vector2(pr.size.x, lip)), (m.edge as Color).lightened(0.12))
+	if walkable:
+		# A lit deck: the stone edge family is too close to the wall tone to read
+		# on its own, so the standing surface is lifted and the body below it is
+		# sunk, giving one strong value break exactly where the feet land.
+		var deck: Color = (m.edge as Color).lightened(0.22)
+		draw_rect(Rect2(pr.position, Vector2(pr.size.x, lip + 4.0)), deck)
+		draw_rect(Rect2(pr.position + Vector2(0.0, lip + 4.0), Vector2(pr.size.x, 8.0)), Color(0.0, 0.0, 0.0, 0.28))
+		draw_line(Vector2(pr.position.x, pr.position.y + 1.0), Vector2(pr.end.x, pr.position.y + 1.0), deck.lightened(0.45), 2.0)
+	else:
+		draw_rect(Rect2(pr.position, Vector2(pr.size.x, lip)), (m.edge as Color).lightened(0.12))
 	draw_rect(Rect2(pr.position + Vector2(0.0, lip), Vector2(pr.size.x, 2.0)), Color(accent.r, accent.g, accent.b, 0.28))
 	draw_line(Vector2(pr.position.x, pr.position.y + 0.75), Vector2(pr.end.x, pr.position.y + 0.75), VFX.RIM, 1.5)
 	draw_rect(Rect2(pr.position.x, pr.end.y - 2.0, pr.size.x, 2.0), VFX.JOINT)

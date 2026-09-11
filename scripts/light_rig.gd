@@ -3,6 +3,11 @@ extends Node2D
 ## and pooled PointLight2Ds for the knight's flame, wall torches, room braziers,
 ## the open rift, the boss, wisps and elites. Runs inside the pixel viewport so
 ## light falls on the same grid as everything else.
+##
+## Pairs with LightLayer rather than duplicating it: this node attenuates what is
+## already drawn, while LightLayer adds the additive glow (and the effects real
+## lights cannot express, such as projectile glints and bomber fuses). Both read
+## the same per-frame cached source data.
 
 const VFX := preload("res://scripts/vfx.gd")
 
