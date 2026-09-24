@@ -3,6 +3,7 @@ extends Node2D
 ## Particles, camera shake, flash, and procedurally generated original audio.
 
 const VFX := preload("res://scripts/vfx.gd")
+const KnightArt := preload("res://scripts/knight_art.gd")
 
 var camera: Camera2D
 var shake_amp := 0.0
@@ -13,6 +14,8 @@ var reduced_flash := false
 ## accessibility switches without holding a reference to this instance.
 static var motion_reduced := false
 static var flash_reduced := false
+## Controller vibration switch (Options). Off means the pad never rumbles.
+static var vibration := true
 var _glow: Node2D
 var _particles: Array[Dictionary] = []
 var _audio_pool: Array[AudioStreamPlayer] = []
@@ -20,7 +23,11 @@ var _audio_idx := 0
 var _streams: Dictionary = {}
 var _hit_stop_active := false
 var _hit_stop_until_usec: int = 0
-var _hit_stop_restore_scale := 1.0
+## Cinematic slow motion (death and victory beats). Hit-stop and slow motion
+## both want Engine.time_scale; the slower of the two always wins, and ending
+## one restores whatever the other still asks for instead of a stale snapshot.
+var _slowmo := 1.0
+var _slowmo_tween: Tween
 
 const MAX_PARTICLES := 320
 const HIT_STOP_TIME_SCALE := 0.06
@@ -45,204 +52,117 @@ func _ready() -> void:
 	set_process(true)
 
 func _exit_tree() -> void:
+	if _sfx_thread != null and _sfx_thread.is_started():
+		_sfx_thread.wait_to_finish()
+		_sfx_thread = null
 	# Never leave the entire game slowed if this node is removed during a freeze.
 	_restore_hit_stop()
+	if _slowmo_tween != null and _slowmo_tween.is_valid():
+		_slowmo_tween.kill()
+	_slowmo = 1.0
+	Engine.time_scale = 1.0
+
+func _apply_time_scale() -> void:
+	Engine.time_scale = minf(HIT_STOP_TIME_SCALE if _hit_stop_active else 1.0, _slowmo)
+
+## Ease into `scale` and back out to full speed over `duration` real seconds.
+## Reduced motion keeps real time: a sudden world slowdown is exactly the kind
+## of motion change that setting exists to remove.
+func slow_motion(scale: float, duration: float) -> void:
+	if reduced_motion or not is_inside_tree():
+		return
+	if _slowmo_tween != null and _slowmo_tween.is_valid():
+		_slowmo_tween.kill()
+	_slowmo_tween = create_tween()
+	_slowmo_tween.set_pause_mode(Tween.TWEEN_PAUSE_PROCESS)
+	_slowmo_tween.set_ignore_time_scale(true)
+	_slowmo_tween.tween_method(_set_slowmo, _slowmo, scale, 0.12)
+	_slowmo_tween.tween_interval(maxf(0.0, duration * 0.55))
+	_slowmo_tween.tween_method(_set_slowmo, scale, 1.0, maxf(0.05, duration * 0.45)).set_trans(Tween.TRANS_SINE).set_ease(Tween.EASE_IN)
+
+func end_slow_motion() -> void:
+	if _slowmo_tween != null and _slowmo_tween.is_valid():
+		_slowmo_tween.kill()
+	_set_slowmo(1.0)
+
+func _set_slowmo(v: float) -> void:
+	_slowmo = clampf(v, 0.01, 1.0)
+	_apply_time_scale()
+
+const SfxSynth := preload("res://scripts/sfx_synth.gd")
+const VOICES := 14
+var _sfx_thread: Thread
+## name -> Array of takes; play() rotates through them.
+var _takes: Dictionary = {}
+var _take_idx: Dictionary = {}
 
 func _init_audio() -> void:
-	# Generate short original PCM samples into AudioStreamWAV
-	_streams["hit"] = _make_blip(220.0, 0.08, 0.6)
-	_streams["hurt"] = _make_blip(120.0, 0.14, 0.7, true)
-	_streams["jump"] = _make_blip(420.0, 0.07, 0.35)
-	_streams["dash"] = _make_noise(0.12, 0.4)
-	_streams["shoot"] = _make_blip(660.0, 0.06, 0.3)
-	_streams["die"] = _make_blip(90.0, 0.4, 0.8, true)
-	_streams["pickup"] = _make_blip(740.0, 0.18, 0.4)
-	_streams["boss"] = _make_noise(0.5, 0.6, true)
-	_streams["clear"] = _make_arpeggio()
-	# Distinct combat cues remain synthesized and asset-free.
-	_streams["swing"] = _make_sweep(820.0, 150.0, 0.10, 0.34, 0.55)
-	_streams["attack"] = _streams["swing"] # backwards-compatible cue name
-	_streams["parry"] = _make_metallic(920.0, 0.17, 0.42)
-	_streams["riposte"] = _make_sweep(1380.0, 180.0, 0.19, 0.42, 0.24)
-	_streams["heal"] = _make_sweep(330.0, 820.0, 0.32, 0.32, 0.03)
-	_streams["flame"] = _make_sweep(150.0, 560.0, 0.24, 0.38, 0.48)
-	_streams["land"] = _make_sweep(105.0, 48.0, 0.10, 0.44, 0.30)
-	_streams["shield"] = _make_metallic(250.0, 0.22, 0.48)
-	_streams["elite"] = _make_metallic(140.0, 0.5, 0.55)
-	_streams["streak"] = _make_blip(520.0, 0.12, 0.32)
-	_streams["second_wind"] = _make_sweep(200.0, 900.0, 0.6, 0.5, 0.1)
-	_streams["pyre"] = _make_noise(0.35, 0.6, true)
-	_streams["shatter"] = _make_sweep(420.0, 65.0, 0.14, 0.25, 0.85)
-	# --- Attack anticipation ---
-	# A windup the player cannot hear reads as an unfair hit, so every move that
-	# can damage them is voiced before it lands. Each archetype gets a distinct
-	# pitch band and noise mix so a crowded room stays parseable by ear.
-	_streams["tell_stalker"] = _make_sweep(190.0, 640.0, 0.20, 0.26, 0.42)
-	_streams["tell_hopper"] = _make_sweep(520.0, 1180.0, 0.11, 0.22, 0.22)
-	_streams["tell_wisp"] = _make_sweep(320.0, 1240.0, 0.30, 0.22, 0.05)
-	_streams["tell_brute"] = _make_sweep(86.0, 148.0, 0.36, 0.34, 0.58)
-	_streams["tell_bomber"] = _make_noise(0.34, 0.30)
-	# The warden's four moves each carry their own tell, so the answer is legible.
-	_streams["tell_lunge"] = _make_sweep(210.0, 720.0, 0.26, 0.34, 0.28)
-	_streams["tell_fan"] = _make_metallic(330.0, 0.28, 0.36)
-	_streams["tell_slam"] = _make_sweep(120.0, 340.0, 0.32, 0.36, 0.36)
-	_streams["tell_charge"] = _make_sweep(150.0, 430.0, 0.42, 0.36, 0.48)
-	# --- Run state and menus ---
-	_streams["wave"] = _make_metallic(196.0, 0.30, 0.30)
-	_streams["rift"] = _make_sweep(180.0, 760.0, 0.40, 0.30, 0.34)
-	_streams["ui_move"] = _make_blip(540.0, 0.045, 0.16)
-	_streams["ui_confirm"] = _make_sweep(430.0, 780.0, 0.11, 0.24, 0.04)
-	_streams["ui_back"] = _make_sweep(430.0, 250.0, 0.11, 0.20, 0.04)
-	# --- Run outcome: a payoff for the throne, a toll for the ash ---
-	_streams["victory"] = _make_fanfare([523.25, 659.25, 783.99, 1046.5, 1318.51], 0.13, 0.34, 0.7)
-	_streams["defeat"] = _make_fanfare([174.61, 155.56, 130.81, 98.0], 0.28, 0.34, 0.9)
-	for i in range(8):
+	# Every cue is registered up front so callers and contracts can see the full
+	# cue book at once; the waveforms arrive from a worker thread a moment later
+	# (about a second of synthesis), and play() stays silent for a cue until then.
+	for name in SfxSynth.cue_names():
+		_streams[name] = null
+	_streams["attack"] = null  # backwards-compatible alias of "swing"
+	for i in range(VOICES):
 		var p := AudioStreamPlayer.new()
 		# One bus for every gameplay and menu cue, so a single slider mixes them.
 		p.bus = "SFX"
 		add_child(p)
 		_audio_pool.append(p)
+	var cached := SfxSynth.load_cached()
+	if not cached.is_empty():
+		_install_sfx(cached)
+		return
+	_sfx_thread = Thread.new()
+	_sfx_thread.start(_render_sfx)
 
-func _make_blip(freq: float, dur: float, vol: float, downward: bool = false) -> AudioStreamWAV:
-	var rate := 22050
-	var n := int(rate * dur)
-	var data := PackedByteArray()
-	data.resize(n * 2)
-	for i in range(n):
-		var t := float(i) / float(rate)
-		var env := exp(-t * 6.0)
-		var f := freq - (freq * 0.4 * t) if downward else freq
-		var s := sin(t * f * TAU) * env * vol
-		var v := int(clampf(s, -1.0, 1.0) * 32767.0)
-		data.encode_s16(i * 2, v)
-	var stream := AudioStreamWAV.new()
-	stream.format = AudioStreamWAV.FORMAT_16_BITS
-	stream.mix_rate = rate
-	stream.stereo = false
-	stream.data = data
-	return stream
+static func _render_sfx() -> Dictionary:
+	var out := {}
+	for name in SfxSynth.cue_names():
+		var takes: Array = []
+		for take in range(int(SfxSynth.VARIANTS.get(name, 1))):
+			takes.append(SfxSynth.build_pcm(name, take))
+		out[name] = takes
+	return out
 
-func _make_noise(dur: float, vol: float, low: bool = false) -> AudioStreamWAV:
-	var rate := 22050
-	var n := int(rate * dur)
-	var data := PackedByteArray()
-	data.resize(n * 2)
-	var prev := 0.0
-	for i in range(n):
-		var t := float(i) / float(rate)
-		var env := exp(-t * 5.0)
-		var raw := (randf() * 2.0 - 1.0)
-		if low: prev = lerpf(prev, raw, 0.25); raw = prev
-		var s := raw * env * vol
-		var v := int(clampf(s, -1.0, 1.0) * 32767.0)
-		data.encode_s16(i * 2, v)
-	var stream := AudioStreamWAV.new()
-	stream.format = AudioStreamWAV.FORMAT_16_BITS
-	stream.mix_rate = rate
-	stream.stereo = false
-	stream.data = data
-	return stream
+## Collect the rendered cue book once the worker is done.
+func _collect_sfx() -> void:
+	if _sfx_thread == null or _sfx_thread.is_alive():
+		return
+	var pcm: Dictionary = _sfx_thread.wait_to_finish()
+	_sfx_thread = null
+	var book := {}
+	for name in pcm:
+		var takes: Array = []
+		for data in pcm[name]:
+			takes.append(SfxSynth.to_stream(data))
+		book[name] = takes
+	_install_sfx(book)
+	SfxSynth.save_cached(book)
 
-func _make_sweep(start_freq: float, end_freq: float, dur: float, vol: float, noise_mix: float = 0.0) -> AudioStreamWAV:
-	var rate := 22050
-	var n := int(rate * dur)
-	var data := PackedByteArray()
-	data.resize(n * 2)
-	var phase := 0.0
-	var filtered_noise := 0.0
-	for i in range(n):
-		var t := float(i) / float(rate)
-		var progress := clampf(t / maxf(dur, 0.001), 0.0, 1.0)
-		var freq := lerpf(start_freq, end_freq, smoothstep(0.0, 1.0, progress))
-		phase += TAU * freq / float(rate)
-		var attack := clampf(t / 0.008, 0.0, 1.0)
-		var env := attack * pow(1.0 - progress, 1.7)
-		var raw_noise := randf() * 2.0 - 1.0
-		filtered_noise = lerpf(filtered_noise, raw_noise, 0.38)
-		var tone := sin(phase) + sin(phase * 2.01) * 0.18
-		var sample := lerpf(tone, filtered_noise, noise_mix) * env * vol
-		data.encode_s16(i * 2, int(clampf(sample, -1.0, 1.0) * 32767.0))
-	var stream := AudioStreamWAV.new()
-	stream.format = AudioStreamWAV.FORMAT_16_BITS
-	stream.mix_rate = rate
-	stream.stereo = false
-	stream.data = data
-	return stream
+func _install_sfx(book: Dictionary) -> void:
+	for name in book:
+		var takes: Array = book[name]
+		_takes[name] = takes
+		_streams[name] = takes[0]
+	_takes["attack"] = _takes.get("swing", [])
+	_streams["attack"] = _streams.get("swing")
 
-func _make_metallic(base_freq: float, dur: float, vol: float) -> AudioStreamWAV:
-	var rate := 22050
-	var n := int(rate * dur)
-	var data := PackedByteArray()
-	data.resize(n * 2)
-	for i in range(n):
-		var t := float(i) / float(rate)
-		var progress := clampf(t / maxf(dur, 0.001), 0.0, 1.0)
-		var attack := clampf(t / 0.003, 0.0, 1.0)
-		var env := attack * exp(-progress * 6.5)
-		var sample := (
-			sin(t * base_freq * TAU)
-			+ sin(t * base_freq * 2.71 * TAU) * 0.52
-			+ sin(t * base_freq * 4.13 * TAU) * 0.28
-		) * env * vol * 0.62
-		data.encode_s16(i * 2, int(clampf(sample, -1.0, 1.0) * 32767.0))
-	var stream := AudioStreamWAV.new()
-	stream.format = AudioStreamWAV.FORMAT_16_BITS
-	stream.mix_rate = rate
-	stream.stereo = false
-	stream.data = data
-	return stream
-
-func _make_arpeggio() -> AudioStreamWAV:
-	var rate := 22050
-	var dur := 0.4
-	var n := int(rate * dur)
-	var data := PackedByteArray()
-	data.resize(n * 2)
-	var notes := [523.0, 659.0, 784.0, 1046.0]
-	for i in range(n):
-		var t := float(i) / float(rate)
-		var env := exp(-t * 3.5)
-		var ni := int(t / 0.1) % notes.size()
-		var s := sin(t * notes[ni] * TAU) * env * 0.4
-		var v := int(clampf(s, -1.0, 1.0) * 32767.0)
-		data.encode_s16(i * 2, v)
-	var stream := AudioStreamWAV.new()
-	stream.format = AudioStreamWAV.FORMAT_16_BITS
-	stream.mix_rate = rate
-	stream.stereo = false
-	stream.data = data
-	return stream
-
-## A stepped sequence of tones: the run's outcome rather than a single hit.
-## Each note re-attacks on its own envelope, so a rising set reads as triumph
-## and a slow descending set as a toll.
-func _make_fanfare(notes: Array, step: float, vol: float, hold: float = 0.0) -> AudioStreamWAV:
-	var rate := 22050
-	var dur := step * float(notes.size()) + hold
-	var n := int(rate * dur)
-	var data := PackedByteArray()
-	data.resize(n * 2)
-	for i in range(n):
-		var t := float(i) / float(rate)
-		var idx := mini(int(t / step), notes.size() - 1)
-		var local := t - float(idx) * step
-		var attack := clampf(local / 0.010, 0.0, 1.0)
-		var env := attack * exp(-local * 2.2)
-		var f := float(notes[idx])
-		var s := (sin(t * f * TAU) + sin(t * f * 2.0 * TAU) * 0.24) * env * vol
-		data.encode_s16(i * 2, int(clampf(s, -1.0, 1.0) * 32767.0))
-	var stream := AudioStreamWAV.new()
-	stream.format = AudioStreamWAV.FORMAT_16_BITS
-	stream.mix_rate = rate
-	stream.stereo = false
-	stream.data = data
-	return stream
+func sfx_ready() -> bool:
+	return _sfx_thread == null and not _takes.is_empty()
 
 func play(name: String, pitch: float = 1.0, volume_db: float = 0.0) -> void:
-	if not _streams.has(name): return
+	if _streams.get(name) == null:
+		return
+	var takes: Array = _takes.get(name, [])
+	var stream: AudioStream = _streams[name]
+	if takes.size() > 1:
+		var ti := (int(_take_idx.get(name, 0)) + 1) % takes.size()
+		_take_idx[name] = ti
+		stream = takes[ti]
 	var p := _audio_pool[_audio_idx]
 	_audio_idx = (_audio_idx + 1) % _audio_pool.size()
-	p.stream = _streams[name]
+	p.stream = stream
 	p.pitch_scale = pitch * randf_range(0.97, 1.03)
 	# Telegraphs attenuate with distance; UI and player cues stay flat.
 	p.volume_db = volume_db
@@ -308,8 +228,7 @@ func hit_stop(duration: float) -> void:
 	if _hit_stop_active:
 		return
 	_hit_stop_active = true
-	_hit_stop_restore_scale = Engine.time_scale
-	Engine.time_scale = minf(Engine.time_scale, HIT_STOP_TIME_SCALE)
+	_apply_time_scale()
 	_run_hit_stop()
 
 func _run_hit_stop() -> void:
@@ -324,9 +243,16 @@ func _run_hit_stop() -> void:
 func _restore_hit_stop() -> void:
 	if not _hit_stop_active:
 		return
-	Engine.time_scale = _hit_stop_restore_scale
 	_hit_stop_active = false
 	_hit_stop_until_usec = 0
+	_apply_time_scale()
+
+## Pad rumble: `weak` is the fast motor, `strong` the heavy one (0..1).
+func rumble(weak: float, strong: float, duration: float) -> void:
+	if not vibration:
+		return
+	for pad in Input.get_connected_joypads():
+		Input.start_joy_vibration(pad, clampf(weak, 0.0, 1.0), clampf(strong, 0.0, 1.0), duration)
 
 func shake(amp: float, time: float) -> void:
 	if reduced_motion: return
@@ -372,8 +298,10 @@ func flash_hurt(pos: Vector2) -> void:
 ## Death burst: a gold flash, dark ember-rimmed shards that tumble and drop, sparks.
 func flash_death(pos: Vector2, color: Color, big: bool = false) -> void:
 	_flash(pos, 64.0 if big else 45.0)
-	var shards := 32 if big else 22
-	var sparks := 20 if big else 14
+	# Ordinary kills come apart as paper halves (see Severed), so their confetti
+	# stays light; the big deaths keep the full shower.
+	var shards := 32 if big else 9
+	var sparks := 20 if big else 12
 	if reduced_motion:
 		shards = 5
 		sparks = 3
@@ -412,13 +340,15 @@ func burst_sparks(pos: Vector2, count: int, speed: float, tint: Color = VFX.GOLD
 			"length": randf_range(6.0, 14.0)
 		})
 
-## Additive sweep afterglow for the live hitbox arc; reveals tail to head over 0.14s.
-func slash_arc(origin: Vector2, facing: float, radius: float, arc: float, heavy: bool = false) -> void:
+## Additive afterglow of a blade sweep. `a0` -> `a1` are body angles (authored
+## facing right) so the glow travels the way the sword actually swung: down for
+## the cut, up for the cleave, overhead for the finisher.
+func slash_arc(origin: Vector2, facing: float, radius: float, a0: float, a1: float, heavy: bool = false) -> void:
 	if reduced_motion:
 		return
 	_push_particle({
-		"kind": "slash", "pos": origin, "vel": Vector2.ZERO, "life": 0.14, "max": 0.14,
-		"color": Color.WHITE, "size": 16.0 if heavy else 12.0, "radius": radius, "arc": arc, "facing": facing
+		"kind": "slash", "pos": origin, "vel": Vector2.ZERO, "life": 0.16, "max": 0.16,
+		"color": Color.WHITE, "size": 16.0 if heavy else 12.0, "radius": radius, "a0": a0, "a1": a1, "facing": facing
 	})
 
 ## Thin counterthrust silhouette, readable even with motion reduction enabled.
@@ -467,15 +397,16 @@ func slash(pos: Vector2, facing: float, color: Color = Color("ffd23f"), heavy: b
 			"size": randf_range(1.5, 3.5), "length": randf_range(14.0, 28.0)
 		})
 
-## A short procedural player silhouette, useful while dashing.
-func afterimage(pos: Vector2, facing: float, color: Color = Color("e8e0d0")) -> void:
+## A flat echo of the knight in the pose it held, left behind while dashing.
+func afterimage(pos: Vector2, facing: float, color: Color = Color("e8e0d0"), pose: Dictionary = {}) -> void:
 	if reduced_motion:
 		return
 	var effect_color := _accessible_color(color)
 	effect_color.a = minf(effect_color.a, 0.38 if not reduced_flash else 0.16)
 	_push_particle({
 		"kind": "afterimage", "pos": pos, "vel": Vector2(-facing * 28.0, 0.0),
-		"life": 0.20, "max": 0.20, "color": effect_color, "size": 1.0, "facing": facing
+		"life": 0.20, "max": 0.20, "color": effect_color, "size": 1.0, "facing": facing,
+		"pose": pose.duplicate(),
 	})
 
 ## Stretched sparks plus a compact additive ring at the actual point of contact.
@@ -523,6 +454,8 @@ func _push_particle(particle: Dictionary) -> void:
 		_particles.append(particle)
 
 func _process(delta: float) -> void:
+	if _sfx_thread != null:
+		_collect_sfx()
 	# Shake
 	if shake_time > 0.0 and not reduced_motion:
 		shake_time -= delta
@@ -628,6 +561,10 @@ func _draw() -> void:
 					draw_set_transform(Vector2.ZERO, 0.0, Vector2.ONE)
 			"afterimage":
 				var facing := float(p.get("facing", 1.0))
+				var ghost_pose: Dictionary = p.get("pose", {})
+				if not ghost_pose.is_empty():
+					KnightArt.paint(self, pos, ghost_pose, facing, {"flat": c})
+					continue
 				# Echo the actual compact coat, scarf and crown, never a collision box.
 				var coat := PackedVector2Array([
 					pos + Vector2(-12.5, -15.0), pos + Vector2(11.0, -17.0),
@@ -689,7 +626,13 @@ func _draw_glow() -> void:
 				_glow.draw_circle(pos, radius * 0.5, Color(VFX.TEAL, c.a * 0.12))
 			"slash":
 				var progress := 1.0 - a
-				VFX.slash_ribbon(_glow, pos, float(p.get("radius", 48.0)), float(p.get("arc", 2.4)), float(p.get("facing", 1.0)), minf(1.0, 0.35 + progress * 1.3), size, 0.55 * c.a)
+				var a0 := float(p.get("a0", -1.0))
+				var a1 := float(p.get("a1", 1.0))
+				# The glow's tail catches up with its head as it fades.
+				var tail := lerpf(a0, a1, clampf(progress * 0.8, 0.0, 0.85))
+				_glow.draw_set_transform(pos, 0.0, Vector2(float(p.get("facing", 1.0)), 1.0))
+				KnightArt.arc_smear(_glow, Vector2.ZERO, float(p.get("radius", 48.0)), tail, a1, size, 0.55 * c.a)
+				_glow.draw_set_transform(Vector2.ZERO, 0.0, Vector2.ONE)
 			"flash":
 				_glow.draw_circle(pos, size, Color(c.r, c.g, c.b, c.a * 0.8))
 
@@ -702,6 +645,7 @@ func set_reduced_motion(v: bool) -> void:
 		camera.offset = Vector2.ZERO
 		_particles.clear()
 		_restore_hit_stop()
+		end_slow_motion()
 	if _glow != null:
 		_glow.queue_redraw()
 

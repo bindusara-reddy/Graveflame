@@ -20,3 +20,6 @@ Thumbs.db
 /scripts/creature_sprite.gd
 /scripts/env_art.gd
 *.uid
+
+# Python bytecode from the launcher tests
+__pycache__/

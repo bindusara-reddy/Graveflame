@@ -57,10 +57,12 @@ func _draw() -> void:
 			if moving:
 				flick += sin(t * float(lp.get("rate", 8.0)) + float(lp.get("phase", 0.0))) * 0.08
 			VFX.draw_radial(self, lp.pos, float(lp.radius) * flick, Color(lp.color, float(lp.alpha) * gain))
-		if room.exit_open:
+		if room.exit_open and not room.is_boss:
 			var pulse := 1.0 + (sin(t * 3.0) * 0.08 if moving else 0.0)
-			VFX.draw_radial(self, room.exit_center(), 150.0 * pulse, Color(Content.PAL.exit, 0.32 * gain))
-			VFX.draw_radial(self, room.exit_center(), 46.0, Color(VFX.HOT, 0.18 * gain))
+			for e in room.exits:
+				var rc: Vector2 = (e.rect as Rect2).get_center()
+				VFX.draw_radial(self, rc, 130.0 * pulse, Color(Room.exit_style(str(e.kind)).color, 0.3 * gain))
+				VFX.draw_radial(self, rc, 46.0, Color(VFX.HOT, 0.18 * gain))
 		for e in room.enemies:
 			if not is_instance_valid(e) or e.dead:
 				continue

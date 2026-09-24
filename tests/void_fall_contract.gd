@@ -66,6 +66,8 @@ func run() -> void:
 	game.run.apply_upgrade(Content.UPGRADES.filter(func(u): return u.id == "dashmaster")[0])
 	await ticks(85)
 	game.player.hurt_taken.connect(func(_amount, _pos): damage_events += 1)
+	var rescued := [false]
+	game.player.action_feedback.connect(func(kind, _pos): if kind == "rescued": rescued[0] = true)
 	Input.action_press("move_right")
 	for i in range(900):
 		Input.action_release("dash")
@@ -78,15 +80,20 @@ func run() -> void:
 		await ticks(1)
 		deepest_y = maxf(deepest_y, game.player.position.y)
 		if game.player.position.y > Content.FLOOR_Y + 240.0: below_ticks += 1
-		if game.state == Game.GState.GAME_OVER or below_ticks >= 180: break
+		if damage_events > 0 or game.state == Game.GState.GAME_OVER or below_ticks >= 180: break
 	for action in ["dash", "move_left", "move_right"]: Input.action_release(action)
-	check(saw_dash and deepest_y > Content.FLOOR_Y + 240.0, "real dash inputs reach the death plane")
-	check(game.state == Game.GState.GAME_OVER and below_ticks <= 2, "invulnerability cannot postpone terminal out-of-world death")
-	check(game.player.dead and game.player.build.hp == 0.0 and game.run.build.hp == 0.0, "terminal fall synchronizes player and run health")
-	check(damage_events == 1 and is_equal_approx(float(game._stats.damage_taken), 100.0), "terminal fall records remaining health exactly once")
+	await ticks(20)
+	# Spike pits cost health, not the run; only the world boundary is terminal.
+	check(saw_dash and damage_events == 1, "real dash inputs carry the knight onto the pit spikes")
+	check(below_ticks == 0 and game.state == Game.GState.PLAYING and not game.player.dead, "dash immunity cannot carry the knight past the spikes into the void")
+	check(rescued[0] and game.player.position.y < Content.FLOOR_Y and game.player.is_on_floor(), "the spikes return the knight to solid ground")
+	check(is_equal_approx(float(game.player.build.hp), 82.0) and is_equal_approx(float(game.run.build.hp), 82.0) and is_equal_approx(float(game._stats.damage_taken), 18.0), "a spike pit costs 18 health and the run synchronizes it")
 	print("VOID_DASH_EVIDENCE: below_ticks=", below_ticks, " y=", deepest_y, " hp=", game.player.build.hp)
+	game.player.fall_out_of_world()
+	check(game.state == Game.GState.GAME_OVER and game.player.dead and game.player.build.hp == 0.0 and game.run.build.hp == 0.0, "crossing the world boundary remains terminal")
+	check(damage_events == 2 and is_equal_approx(float(game._stats.damage_taken), 100.0), "terminal fall records remaining health exactly once")
 	for i in range(3): game.player.fall_out_of_world()
-	check(damage_events == 1 and is_equal_approx(float(game._stats.damage_taken), 100.0), "repeat terminal calls after a real fall do not add damage")
+	check(damage_events == 2 and is_equal_approx(float(game._stats.damage_taken), 100.0), "repeat terminal calls do not add damage")
 
 	await boot_component()
 	check(game.player.build.second_wind and not game.player.build.second_wind_used, "normal boon grants an unused Second Wind")

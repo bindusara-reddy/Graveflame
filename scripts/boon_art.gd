@@ -82,6 +82,20 @@ static func draw(ci: CanvasItem, id: String, c: Vector2, r: float, tint: Color) 
 		"emberwave": _wave(ci, c, r, tint)
 		"thorns": _thorn(ci, c, r, tint)
 		"m_special": _spark(ci, c, r, tint)
+		"m_kindled": _kindling(ci, c, r, tint)
+		"m_seer": _eye(ci, c, r, tint)
+		"m_tithe": _cell(ci, c, r, tint)
+		"cindertrail": _cinder_trail(ci, c, r, tint)
+		"flareparry": _flare_parry(ci, c, r, tint)
+		"twinlance": _twin_lance(ci, c, r, tint)
+		"phoenix": _phoenix(ci, c, r, tint)
+		"brand": _brand(ci, c, r, tint)
+		"skyfall": _skyfall(ci, c, r, tint)
+		# Rift markers: what waits beyond each door out of a cleared chamber.
+		"rift_boon": _flame(ci, c, r, tint)
+		"rift_font": _flask(ci, c, r, tint)
+		"rift_cache": _cell(ci, c, r, tint)
+		"rift_trial": _crossed_blades(ci, c, r, tint)
 		_: _rune(ci, c, r, tint)
 
 
@@ -341,6 +355,83 @@ static func _skull(ci: CanvasItem, c: Vector2, r: float, tint: Color) -> void:
 	for i in range(4):
 		var x := -0.22 + float(i) * 0.147
 		ci.draw_rect(Rect2(_p(c, r, x - 0.028, 0.44), Vector2(r * 0.056, r * 0.22)), tint.lightened(0.35))
+
+
+## Cinder Trail: three small fires stepping away along a ground line, the
+## footprints of a dash. A staircase outline no other sigil has.
+static func _cinder_trail(ci: CanvasItem, c: Vector2, r: float, tint: Color) -> void:
+	ci.draw_line(_p(c, r, -0.95, 0.78), _p(c, r, 0.95, 0.78), EDGE, r * 0.2)
+	ci.draw_line(_p(c, r, -0.9, 0.78), _p(c, r, 0.9, 0.78), Color(tint, 0.6), r * 0.1)
+	for i in range(3):
+		var x := -0.58 + float(i) * 0.58
+		var h := 0.5 + float(i) * 0.36
+		_outlined(ci, [[x, 0.7 - h], [x + 0.22, 0.44], [x + 0.2, 0.7], [x - 0.2, 0.7], [x - 0.22, 0.44]], c, r, tint.lightened(0.1 * float(i)))
+
+## Flare Parry: the parry crescent throwing out three flame points.
+static func _flare_parry(ci: CanvasItem, c: Vector2, r: float, tint: Color) -> void:
+	for a: float in [-0.9, -0.1, 0.7]:
+		var d := Vector2(cos(a), sin(a))
+		var base := c + d * r * 0.62
+		var n := Vector2(-d.y, d.x)
+		var tip := c + d * r * 1.0
+		ci.draw_colored_polygon(PackedVector2Array([base + n * r * 0.16, tip, base - n * r * 0.16]), EDGE)
+		ci.draw_colored_polygon(PackedVector2Array([base + n * r * 0.1, c + d * r * 0.94, base - n * r * 0.1]), tint.lightened(0.25))
+	ci.draw_arc(c + Vector2(-0.12, 0.0) * r, r * 0.56, -2.3, 1.1, 26, EDGE, r * 0.34, true)
+	ci.draw_arc(c + Vector2(-0.12, 0.0) * r, r * 0.56, -2.3, 1.1, 26, tint, r * 0.2, true)
+
+## Twin Lance: two lance heads, one above the other.
+static func _twin_lance(ci: CanvasItem, c: Vector2, r: float, tint: Color) -> void:
+	for y: float in [-0.36, 0.36]:
+		_outlined(ci, [[0.92, y], [0.42, y - 0.24], [0.42, y + 0.24]], c, r, tint)
+		ci.draw_rect(Rect2(_p(c, r, -0.9, y - 0.08), Vector2(r * 1.34, r * 0.16)), Color(EDGE, 0.9))
+		ci.draw_rect(Rect2(_p(c, r, -0.86, y - 0.05), Vector2(r * 1.3, r * 0.1)), tint.darkened(0.2))
+
+## Phoenix Flask: the flask with a pair of flame wings.
+static func _phoenix(ci: CanvasItem, c: Vector2, r: float, tint: Color) -> void:
+	for sx: float in [-1.0, 1.0]:
+		_outlined(ci, [[sx * 0.3, 0.0], [sx * 0.96, -0.62], [sx * 0.78, -0.18], [sx * 0.98, -0.1], [sx * 0.62, 0.3], [sx * 0.3, 0.3]], c, r, tint.darkened(0.1))
+	_outlined(ci, [[-0.1, -0.78], [0.1, -0.78], [0.1, -0.36], [0.34, 0.06], [0.38, 0.46], [0.2, 0.74], [-0.2, 0.74], [-0.38, 0.46], [-0.34, 0.06], [-0.1, -0.36]], c, r, tint)
+	_outlined(ci, [[0.0, -0.06], [0.16, 0.24], [0.1, 0.56], [-0.1, 0.56], [-0.16, 0.24]], c, r, Color(1, 0.93, 0.62, 0.95))
+
+## Ember Brand: a branding iron -- a ring on a long handle.
+static func _brand(ci: CanvasItem, c: Vector2, r: float, tint: Color) -> void:
+	ci.draw_line(_p(c, r, -0.92, 0.92), _p(c, r, -0.12, 0.12), EDGE, r * 0.3)
+	ci.draw_line(_p(c, r, -0.9, 0.9), _p(c, r, -0.14, 0.14), tint.darkened(0.3), r * 0.16)
+	var head := _p(c, r, 0.26, -0.26)
+	ci.draw_arc(head, r * 0.5, 0.0, TAU, 32, EDGE, r * 0.34, true)
+	ci.draw_arc(head, r * 0.5, 0.0, TAU, 32, tint, r * 0.2, true)
+	# A flame burning inside the ring: a hot brand, not a lens.
+	var f := PackedVector2Array([head + Vector2(0.0, -0.3) * r, head + Vector2(0.16, 0.02) * r, head + Vector2(0.1, 0.2) * r, head + Vector2(-0.1, 0.2) * r, head + Vector2(-0.16, 0.02) * r])
+	ci.draw_colored_polygon(f, Color(1.0, 0.62, 0.2))
+	ci.draw_colored_polygon(PackedVector2Array([head + Vector2(0.0, -0.08) * r, head + Vector2(0.07, 0.14) * r, head + Vector2(-0.07, 0.14) * r]), Color(1.0, 0.93, 0.62))
+
+## Skyfall: a down-strike splitting into two floor waves.
+static func _skyfall(ci: CanvasItem, c: Vector2, r: float, tint: Color) -> void:
+	_outlined(ci, [[0.0, 0.44], [0.4, -0.1], [0.14, -0.1], [0.14, -0.92], [-0.14, -0.92], [-0.14, -0.1], [-0.4, -0.1]], c, r, tint)
+	for sx: float in [-1.0, 1.0]:
+		_outlined(ci, [[sx * 0.2, 0.86], [sx * 0.5, 0.52], [sx * 0.98, 0.62], [sx * 0.6, 0.86]], c, r, tint.lightened(0.15))
+
+## An open eye: seeing one more road than you would.
+static func _eye(ci: CanvasItem, c: Vector2, r: float, tint: Color) -> void:
+	_outlined(ci, [[-0.9, 0.0], [-0.45, -0.46], [0.0, -0.58], [0.45, -0.46], [0.9, 0.0], [0.45, 0.46], [0.0, 0.58], [-0.45, 0.46]], c, r, tint)
+	ci.draw_circle(c, r * 0.34, Color(EDGE, 0.95))
+	ci.draw_circle(c, r * 0.2, tint.lightened(0.4))
+	ci.draw_circle(c + Vector2(-0.08, -0.1) * r, r * 0.07, Color(1, 1, 1, 0.8))
+
+
+## A cell: the keep's currency, a faceted gem with a lit crown facet.
+static func _cell(ci: CanvasItem, c: Vector2, r: float, tint: Color) -> void:
+	_outlined(ci, [[0.0, -0.86], [0.62, -0.28], [0.44, 0.5], [0.0, 0.88], [-0.44, 0.5], [-0.62, -0.28]], c, r, tint)
+	_poly(ci, [[0.0, -0.66], [0.4, -0.24], [0.0, -0.06], [-0.4, -0.24]], c, r, tint.lightened(0.45))
+	_poly(ci, [[0.0, -0.06], [0.3, 0.44], [0.0, 0.7], [-0.3, 0.44]], c, r, Color(EDGE, 0.35))
+
+
+## A trial: two blades crossed over a small skull-less boss plate.
+static func _crossed_blades(ci: CanvasItem, c: Vector2, r: float, tint: Color) -> void:
+	for sx in [-1.0, 1.0]:
+		_stroke(ci, [[-0.7 * sx, 0.72], [0.62 * sx, -0.74]], c, r, 0.13, tint)
+		_stroke(ci, [[-0.52 * sx, 0.36], [-0.22 * sx, 0.66]], c, r, 0.1, tint.darkened(0.2))
+	_outlined(ci, [[0.0, -0.2], [0.24, 0.02], [0.0, 0.26], [-0.24, 0.02]], c, r, tint.lightened(0.3))
 
 
 static func _burst(ci: CanvasItem, c: Vector2, r: float, tint: Color) -> void:

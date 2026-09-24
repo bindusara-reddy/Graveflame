@@ -3,7 +3,8 @@ extends SceneTree
 ## writes them into docs/screenshots/. Uses a scratch save so it never touches
 ## real progress.
 ##   DISPLAY=:1 godot4 --path . --script res://tests/storefront_capture.gd \
-##       --resolution 320x180 --position 0,0 --audio-driver Dummy -- OUT_DIR
+##       --resolution 320x180 --position 0,0 --audio-driver Dummy --fixed-fps 60 -- OUT_DIR
+## (--fixed-fps keeps the staged beats deterministic on a slow renderer.)
 var out_dir := "docs/screenshots"
 var game: Game
 var _vp: SubViewport
@@ -53,6 +54,9 @@ func _run() -> void:
 	Save.path = "user://graveflame_storefront.json"
 	if FileAccess.file_exists(Save.path):
 		DirAccess.remove_absolute(Save.path)
+	# A returning player's save: no first-run lessons popping into the frame.
+	for lesson in Content.HINTS:
+		Save.mark_learned(lesson)
 	_vp = SubViewport.new()
 	_vp.size = Vector2i(1280, 720)
 	_vp.render_target_update_mode = SubViewport.UPDATE_ALWAYS
@@ -90,6 +94,9 @@ func _run() -> void:
 	game.player.state = Player.State.SLAM
 	game.player._slam_active = true
 	game.player.velocity = Vector2(0.0, Content.P_SLAM_VEL)
+	# Physics is frozen for the portrait, so pose the puppet by hand.
+	game.player._pose = {}
+	game.player._step_animation(0.0)
 	game.player.set_physics_process(false)
 	game.feedback.camera.position = Vector2(640.0, 430.0)
 	# Enemies land a hit or two before they freeze, and the floating damage
@@ -120,6 +127,22 @@ func _run() -> void:
 	await _ticks(150)
 	game.ui.hide_banners()
 	game.feedback._particles.clear()
+	# The Warden wanders while the fight settles; square the pair up again so
+	# the frame is a face-off, not a knight turning his back on the boss.
+	game.player.respawn_at(Vector2(560.0, Content.FLOOR_Y - 27.0))
+	game.player.facing = 1.0
+	game.player.iframes = 30.0
+	_stage_run_state(3120, 214, 58.0)
+	if is_instance_valid(boss):
+		boss.global_position = Vector2(800.0, Content.FLOOR_Y - Content.BOSS_H * 0.5)
+		boss.velocity = Vector2.ZERO
+		boss.facing = -1.0
+		# Cancel whatever move it was in (a charge would carry it through the knight).
+		boss._disarm()
+		boss.state = Enemy.EState.SEEK
+		boss.action_t = 5.0
+	game.feedback.camera.position = game._camera_target_for(Vector2(680.0, game.player.position.y))
+	await _ticks(2)
 	if is_instance_valid(boss):
 		boss._begin_lunge()
 	await _ticks(6)

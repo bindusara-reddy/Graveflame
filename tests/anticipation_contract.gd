@@ -36,7 +36,7 @@ func run() -> void:
 	await ticks(20)
 
 	# --- Every archetype windup resolves to a real synthesized cue ---
-	for kind in [Enemy.Kind.STALKER, Enemy.Kind.HOPPER, Enemy.Kind.WISP, Enemy.Kind.BRUTE, Enemy.Kind.BOMBER]:
+	for kind in [Enemy.Kind.STALKER, Enemy.Kind.HOPPER, Enemy.Kind.WISP, Enemy.Kind.BRUTE, Enemy.Kind.BOMBER, Enemy.Kind.CROW]:
 		var id: String = Enemy.telegraph_id(kind)
 		check(_has_cue(CUE_PREFIX + id), "enemy windup cue exists: %s" % id)
 

@@ -24,6 +24,7 @@ signal option_value_changed(key: String, value: float)
 signal keys_requested
 signal back_from_keys_requested
 signal binding_changed(action: String, keycode: int)
+signal vow_toggled(id: String)
 
 const C_VOID := Color("09070f")
 const C_INK := Color("100d18")
@@ -42,7 +43,67 @@ const C_RED := Color("dc5962")
 var _root: Control
 var _hud: Control
 
+## Burning-paper veil between chambers. `progress` 0 = the frame is covered in
+## soot-black paper, 1 = fully burned away. The hole opens from `origin` with a
+## ragged, noise-driven edge that glows like a paper edge catching fire.
+const BURN_SHADER := """
+shader_type canvas_item;
+render_mode unshaded;
+
+uniform float progress = 0.0;
+uniform vec2 origin = vec2(0.5, 0.55);
+uniform float aspect = 1.7778;
+uniform vec4 ink : source_color = vec4(0.035, 0.027, 0.06, 1.0);
+uniform vec4 ember : source_color = vec4(1.0, 0.48, 0.12, 1.0);
+uniform vec4 hot : source_color = vec4(1.0, 0.86, 0.55, 1.0);
+
+float hash(vec2 p) { return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453); }
+float noise(vec2 p) {
+	vec2 i = floor(p);
+	vec2 f = fract(p);
+	vec2 u = f * f * (3.0 - 2.0 * f);
+	return mix(mix(hash(i), hash(i + vec2(1.0, 0.0)), u.x), mix(hash(i + vec2(0.0, 1.0)), hash(i + vec2(1.0, 1.0)), u.x), u.y);
+}
+float fbm(vec2 p) {
+	float v = 0.0;
+	float a = 0.5;
+	for (int i = 0; i < 4; i++) { v += a * noise(p); p *= 2.07; a *= 0.5; }
+	return v;
+}
+
+void fragment() {
+	vec2 q = vec2((UV.x - origin.x) * aspect, UV.y - origin.y);
+	float d = length(q);
+	float ragged = fbm(UV * vec2(aspect, 1.0) * 7.0) * 0.22;
+	// Distance past the burning edge: > 0 is burned through.
+	float edge = progress * (1.25 + 0.22) - (d + ragged);
+	float cover = 1.0 - smoothstep(0.0, 0.004, edge);
+	// The glowing rim: a hot core just inside, embers fading behind it.
+	float rim = exp(-abs(edge) * 60.0);
+	float char_band = smoothstep(0.045, 0.0, -edge) * cover;
+	vec3 col = mix(ink.rgb, vec3(0.12, 0.05, 0.03), char_band);
+	col = mix(col, ember.rgb, rim * 0.9);
+	col = mix(col, hot.rgb, pow(rim, 3.0));
+	float alpha = max(cover, rim * 0.95);
+	COLOR = vec4(col, alpha);
+}
+"""
+
+static var _burn_material: ShaderMaterial
+
+static func burn_material() -> ShaderMaterial:
+	if _burn_material == null:
+		var sh := Shader.new()
+		sh.code = BURN_SHADER
+		_burn_material = ShaderMaterial.new()
+		_burn_material.shader = sh
+	return _burn_material
+
 var _hp_bar: ProgressBar
+## Pale "chip" behind a bar: what was just lost lingers, then drains away.
+var _hp_trail: ProgressBar
+var _boss_trail: ProgressBar
+var _trail_tweens: Dictionary = {}
 var _hp_value_label: Label
 var _special_bar: ProgressBar
 var _special_value_label: Label
@@ -86,6 +147,7 @@ var _forge_rows: VBoxContainer
 var _reduced_motion_check: CheckBox
 var _reduced_flash_check: CheckBox
 var _fullscreen_check: CheckBox
+var _vibration_check: CheckBox
 ## key -> { slider, readout } for every volume control on the options screen.
 var _option_sliders: Dictionary = {}
 ## Rebinding: the rows container and whichever action is awaiting a keypress.
@@ -194,7 +256,8 @@ func _build_hint() -> void:
 	# This is the one line a new player must read, so it is set a step larger
 	# than the ambient HUD text rather than matching it.
 	_hint_label = _make_label("", 16, C_TEXT, HorizontalAlignment.HORIZONTAL_ALIGNMENT_CENTER)
-	panel.add_child(_hint_label)
+	# Inside the margin, or the first glyph sits on the panel's edge.
+	margin.add_child(_hint_label)
 	_hint_panel = center
 	_hint_panel.visible = false
 
@@ -305,10 +368,10 @@ func _build_player_status() -> void:
 	hp_head.add_child(_make_label("VITALITY", 10, C_MUTED, HorizontalAlignment.HORIZONTAL_ALIGNMENT_LEFT))
 	_hp_value_label = _make_label("100 / 100", 11, C_TEXT, HorizontalAlignment.HORIZONTAL_ALIGNMENT_RIGHT)
 	hp_head.add_child(_hp_value_label)
-	_hp_bar = _make_bar(C_RED, Color("4a1820"), 12.0)
-	_hp_bar.max_value = 100.0
-	_hp_bar.value = 100.0
-	stack.add_child(_hp_bar)
+	var hp_pair := _trailed_bar(C_RED, Color("4a1820"), 12.0)
+	stack.add_child(hp_pair.holder)
+	_hp_bar = hp_pair.bar
+	_hp_trail = hp_pair.trail
 
 	var sp_head := HBoxContainer.new()
 	sp_head.mouse_filter = Control.MOUSE_FILTER_IGNORE
@@ -401,10 +464,14 @@ func _build_boss_status() -> void:
 	head.add_child(_boss_label)
 	_boss_value_label = _make_label("420", 12, C_RED, HorizontalAlignment.HORIZONTAL_ALIGNMENT_RIGHT)
 	head.add_child(_boss_value_label)
-	_boss_bar = _make_bar(Color("b94350"), Color("41131b"), 13.0)
+	var boss_pair := _trailed_bar(Color("b94350"), Color("41131b"), 13.0)
+	stack.add_child(boss_pair.holder)
+	_boss_bar = boss_pair.bar
+	_boss_trail = boss_pair.trail
 	_boss_bar.max_value = Content.BOSS_HP
 	_boss_bar.value = Content.BOSS_HP
-	stack.add_child(_boss_bar)
+	_boss_trail.max_value = Content.BOSS_HP
+	_boss_trail.value = Content.BOSS_HP
 	_boss_panel.visible = false
 
 
@@ -792,35 +859,67 @@ func _build_pause() -> void:
 
 func _build_reward() -> void:
 	var panel := _screen("reward", false, C_GOLD)
-	var content := _dialog(panel, Vector2(1140, 580), C_GOLD, 38, 34)
-	content.add_theme_constant_override("separation", 11)
+	# No enclosing card: the boons lie on the dimmed chamber like cards dealt
+	# onto a table, so the choice is the only object on screen.
+	var content := _dialog(panel, Vector2(1000, 0), C_GOLD, 12, 8)
+	var holder := panel.get_meta("dialog") as PanelContainer
+	holder.add_theme_stylebox_override("panel", StyleBoxEmpty.new())
+	content.alignment = BoxContainer.ALIGNMENT_CENTER
+	content.add_theme_constant_override("separation", 6)
 
-	content.add_child(_make_label("ROOM CLEARED", 13, C_MINT, HorizontalAlignment.HORIZONTAL_ALIGNMENT_CENTER))
-	content.add_child(_make_label("CHOOSE YOUR BOON", 42, C_TEXT, HorizontalAlignment.HORIZONTAL_ALIGNMENT_CENTER))
-	content.add_child(_make_label("The Graveflame changes with every victory.", 16, C_MUTED, HorizontalAlignment.HORIZONTAL_ALIGNMENT_CENTER))
-	content.add_child(_separator(C_GOLD))
+	content.add_child(_make_label("CHAMBER CLEARED", 13, C_MINT, HorizontalAlignment.HORIZONTAL_ALIGNMENT_CENTER))
+	content.add_child(_make_label("Choose a Boon", 46, C_TEXT, HorizontalAlignment.HORIZONTAL_ALIGNMENT_CENTER))
+	content.add_child(_make_label("The Graveflame changes with every victory.", 15, C_MUTED, HorizontalAlignment.HORIZONTAL_ALIGNMENT_CENTER))
+	content.add_child(_ornament(C_GOLD))
 
 	_upgrade_row = HBoxContainer.new()
 	_upgrade_row.name = "UpgradeChoices"
-	_upgrade_row.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	_upgrade_row.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	_upgrade_row.alignment = BoxContainer.ALIGNMENT_CENTER
-	_upgrade_row.add_theme_constant_override("separation", 14)
+	_upgrade_row.add_theme_constant_override("separation", 26)
 	content.add_child(_upgrade_row)
 	panel.set_meta("buttons", [])
 	panel.set_meta("upgrade_row", _upgrade_row)
 
-	content.add_child(_make_label("Select one boon to continue the descent.", 12, C_MUTED, HorizontalAlignment.HORIZONTAL_ALIGNMENT_CENTER))
+	var gap := Control.new()
+	gap.custom_minimum_size = Vector2(0, 6)
+	gap.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	content.add_child(gap)
+	content.add_child(_make_label("1 · 2 · 3  or  click to take a boon", 12, C_MUTED, HorizontalAlignment.HORIZONTAL_ALIGNMENT_CENTER))
+
+
+## A short rule with a lozenge at its centre, the keep's printer's mark.
+func _ornament(color: Color) -> Control:
+	var mark := Ornament.new()
+	mark.color = color
+	mark.custom_minimum_size = Vector2(0, 18)
+	mark.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	return mark
+
+
+class Ornament extends Control:
+	var color := Color.WHITE
+	func _draw() -> void:
+		var c := size * 0.5
+		var w := minf(220.0, size.x * 0.4)
+		draw_line(c + Vector2(-w, 0.0), c + Vector2(-12.0, 0.0), Color(color, 0.55), 1.0)
+		draw_line(c + Vector2(12.0, 0.0), c + Vector2(w, 0.0), Color(color, 0.55), 1.0)
+		draw_colored_polygon(PackedVector2Array([c + Vector2(0.0, -5.0), c + Vector2(6.0, 0.0), c + Vector2(0.0, 5.0), c + Vector2(-6.0, 0.0)]), color)
+		draw_circle(c + Vector2(-w, 0.0), 1.5, Color(color, 0.55))
+		draw_circle(c + Vector2(w, 0.0), 1.5, Color(color, 0.55))
 
 
 func _build_game_over() -> void:
-	var panel := _screen("gameover", true, C_RED)
+	# See-through: the fallen knight stays in the frame behind the verdict.
+	var panel := _screen("gameover", false, C_RED)
 	var content := _dialog(panel, Vector2(760, 620), C_RED, 48, 30)
 	content.add_theme_constant_override("separation", 10)
 
 	content.add_child(_make_label("RUN ENDED", 13, C_RED, HorizontalAlignment.HORIZONTAL_ALIGNMENT_CENTER))
 	content.add_child(_make_label("THE FLAME FADES", 54, C_TEXT, HorizontalAlignment.HORIZONTAL_ALIGNMENT_CENTER))
-	content.add_child(_make_label("Ash remembers every attempt.", 18, C_MUTED, HorizontalAlignment.HORIZONTAL_ALIGNMENT_CENTER))
+	var epitaph := _make_label(Content.EPITAPHS[0], 18, C_MUTED, HorizontalAlignment.HORIZONTAL_ALIGNMENT_CENTER)
+	content.add_child(epitaph)
+	panel.set_meta("line_label", epitaph)
 	content.add_child(_separator(Color("75414b")))
 	_build_run_result(content, panel)
 	var cells := _make_label("CELLS SECURED  +0", 20, C_GOLD, HorizontalAlignment.HORIZONTAL_ALIGNMENT_CENTER)
@@ -843,13 +942,15 @@ func _build_game_over() -> void:
 
 
 func _build_victory() -> void:
-	var panel := _screen("victory", true, C_MINT)
+	var panel := _screen("victory", false, C_MINT)
 	var content := _dialog(panel, Vector2(760, 640), C_MINT, 48, 30)
 	content.add_theme_constant_override("separation", 10)
 
 	content.add_child(_make_label("WARDEN DEFEATED", 13, C_MINT, HorizontalAlignment.HORIZONTAL_ALIGNMENT_CENTER))
 	content.add_child(_make_label("GRAVEFLAME ENDURES", 50, C_TEXT, HorizontalAlignment.HORIZONTAL_ALIGNMENT_CENTER))
-	content.add_child(_make_label("The keep falls silent, but the descent is never the same twice.", 17, C_MUTED, HorizontalAlignment.HORIZONTAL_ALIGNMENT_CENTER))
+	var closing := _make_label(Content.VICTORY_LINES[0], 17, C_MUTED, HorizontalAlignment.HORIZONTAL_ALIGNMENT_CENTER)
+	content.add_child(closing)
+	panel.set_meta("line_label", closing)
 	content.add_child(_separator(C_MINT))
 	_build_run_result(content, panel)
 	var cells := _make_label("CELLS SECURED  +0", 20, C_GOLD, HorizontalAlignment.HORIZONTAL_ALIGNMENT_CENTER)
@@ -1007,6 +1108,10 @@ func _build_options() -> void:
 	content.add_child(_fullscreen_check)
 	_fullscreen_check.toggled.connect(func(value: bool): emit_signal("option_toggled", "fullscreen", value))
 
+	_vibration_check = _check("Controller vibration", "The pad rumbles with hits, parries and falls.")
+	content.add_child(_vibration_check)
+	_vibration_check.toggled.connect(func(value: bool): emit_signal("option_toggled", "vibration", value))
+
 	content.add_child(_make_label("ACCESSIBILITY", 12, C_EMBER_HI, HorizontalAlignment.HORIZONTAL_ALIGNMENT_LEFT))
 	_reduced_motion_check = _check("Reduced motion", "Disables camera shake and softens particles.")
 	_reduced_flash_check = _check("Reduced flash", "Reduces high-contrast impact flashes.")
@@ -1045,6 +1150,8 @@ func sync_options(opts: Dictionary) -> void:
 		_reduced_flash_check.set_pressed_no_signal(bool(opts.get("reduced_flash", false)))
 	if _music_check != null:
 		_music_check.set_pressed_no_signal(bool(opts.get("music_on", true)))
+	if _vibration_check != null:
+		_vibration_check.set_pressed_no_signal(bool(opts.get("vibration", true)))
 
 
 ## Keyboard text for one action, or a dash when nothing is bound.
@@ -1150,6 +1257,23 @@ static func _title_font() -> Font:
 			push_warning("Graveflame: wordmark font missing, using the theme font")
 			_wordmark_font = ThemeDB.fallback_font
 	return _wordmark_font
+
+
+## Headings share the wordmark's serif without its wide tracking, so every
+## screen title reads as part of the same printed keep rather than a web form.
+static var _heading: Font
+
+static func _heading_font() -> Font:
+	if _heading == null:
+		var base := _title_font()
+		if base is FontVariation:
+			var v := FontVariation.new()
+			v.base_font = (base as FontVariation).base_font
+			v.spacing_glyph = 1
+			_heading = v
+		else:
+			_heading = base
+	return _heading
 
 
 func _build_title_stack(text: String, size: int) -> Control:
@@ -1302,6 +1426,9 @@ func _make_label(text: String, size: int, color: Color, alignment: HorizontalAli
 	label.add_theme_color_override("font_color", color)
 	label.add_theme_color_override("font_outline_color", Color("000000b0"))
 	label.add_theme_constant_override("outline_size", 2 if size >= 18 else 1)
+	if size >= 30:
+		label.add_theme_font_override("font", _heading_font())
+		label.add_theme_constant_override("outline_size", 3)
 	return label
 
 
@@ -1314,6 +1441,40 @@ func _make_stat_line(parent: VBoxContainer, title: String, value: String, value_
 	var result := _make_label(value, 12, value_color, HorizontalAlignment.HORIZONTAL_ALIGNMENT_RIGHT)
 	row.add_child(result)
 	return result
+
+
+## A bar with a chip trail behind it. Returns { holder, bar, trail }.
+func _trailed_bar(fill: Color, background: Color, height: float) -> Dictionary:
+	var holder := Control.new()
+	holder.custom_minimum_size.y = height
+	holder.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	var trail := _make_bar(Color("f4e2c8"), background, height)
+	holder.add_child(trail)
+	trail.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	var bar := _make_bar(fill, Color(0.0, 0.0, 0.0, 0.0), height)
+	holder.add_child(bar)
+	bar.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	for b in [trail, bar]:
+		(b as ProgressBar).max_value = 100.0
+		(b as ProgressBar).value = 100.0
+	return { "holder": holder, "bar": bar, "trail": trail }
+
+## Losses hold as a pale chip for a beat, then drain; gains fill at once.
+func _set_trailed(bar: ProgressBar, trail: ProgressBar, value: float, maximum: float) -> void:
+	bar.max_value = maxf(1.0, maximum)
+	trail.max_value = bar.max_value
+	var v := clampf(value, 0.0, bar.max_value)
+	bar.value = v
+	if _trail_tweens.has(trail) and is_instance_valid(_trail_tweens[trail]):
+		(_trail_tweens[trail] as Tween).kill()
+	if v >= trail.value or Feedback.motion_reduced:
+		trail.value = v
+		return
+	var tw := create_tween()
+	tw.set_pause_mode(Tween.TWEEN_PAUSE_PROCESS)
+	tw.tween_interval(0.35)
+	tw.tween_property(trail, "value", v, 0.45).set_trans(Tween.TRANS_SINE).set_ease(Tween.EASE_IN_OUT)
+	_trail_tweens[trail] = tw
 
 
 func _make_bar(fill: Color, background: Color, height: float) -> ProgressBar:
@@ -1333,6 +1494,7 @@ func _bar_box(color: Color) -> StyleBoxFlat:
 	box.corner_radius_top_right = 4
 	box.corner_radius_bottom_left = 4
 	box.corner_radius_bottom_right = 4
+	box.corner_detail = 1
 	return box
 
 
@@ -1348,10 +1510,14 @@ func _panel_box(background: Color, border: Color, radius: int, border_width: int
 	box.corner_radius_top_right = radius
 	box.corner_radius_bottom_left = radius
 	box.corner_radius_bottom_right = radius
+	# One-segment corners: cut with a blade, not rounded like a web card.
+	box.corner_detail = 1
+	box.anti_aliasing_size = 0.6
 	if shadow > 0:
-		box.shadow_color = Color(0.0, 0.0, 0.0, 0.58)
-		box.shadow_size = shadow
-		box.shadow_offset = Vector2(0, 6)
+		# A hard, offset shadow: one sheet of paper lying on another.
+		box.shadow_color = Color(0.0, 0.0, 0.0, 0.62)
+		box.shadow_size = 1
+		box.shadow_offset = Vector2(4, 6) if shadow >= 6 else Vector2(3, 4)
 	return box
 
 
@@ -1481,12 +1647,17 @@ func _check(title: String, description: String) -> CheckBox:
 
 # --- Public API --------------------------------------------------------------
 
-func show_panel(name: String) -> void:
+func show_panel(name: String, fade: float = 0.0) -> void:
 	if not _panels.has(name):
 		return
 	var panel: Control = _panels[name]
 	panel.visible = true
 	panel.modulate = Color.WHITE
+	if fade > 0.0 and not Feedback.motion_reduced:
+		panel.modulate = Color(1.0, 1.0, 1.0, 0.0)
+		var tween := create_tween()
+		tween.set_pause_mode(Tween.TWEEN_PAUSE_PROCESS)
+		tween.tween_property(panel, "modulate:a", 1.0, fade).set_trans(Tween.TRANS_SINE).set_ease(Tween.EASE_OUT)
 	if name == "title" and _title_controls != null:
 		_set_title_controls_open(false)
 	if name == "title" and _title_tableau != null:
@@ -1549,8 +1720,7 @@ func hide_banners() -> void:
 
 
 func set_hp(hp: float, max_hp: float) -> void:
-	_hp_bar.max_value = maxf(1.0, max_hp)
-	_hp_bar.value = clampf(hp, 0.0, max_hp)
+	_set_trailed(_hp_bar, _hp_trail, hp, max_hp)
 	_hp_value_label.text = "%d / %d" % [roundi(hp), roundi(max_hp)]
 
 
@@ -1584,11 +1754,14 @@ func show_boss_bar(max_hp: float) -> void:
 	_boss_label.visible = true
 	_boss_bar.max_value = maxf(1.0, max_hp)
 	_boss_bar.value = max_hp
+	_boss_trail.max_value = _boss_bar.max_value
+	_boss_trail.value = max_hp
 	_boss_value_label.text = str(roundi(max_hp))
 
 
 func update_boss_bar(hp: float) -> void:
-	_boss_bar.value = clampf(hp, 0.0, _boss_bar.max_value)
+	if not is_equal_approx(hp, _boss_bar.value):
+		_set_trailed(_boss_bar, _boss_trail, hp, _boss_bar.max_value)
 	_boss_value_label.text = str(maxi(0, roundi(hp)))
 
 
@@ -1637,63 +1810,122 @@ class BoonSigil extends Control:
 		BoonArt.draw(self, boon_id, size * 0.5, minf(size.x, size.y) * 0.46, tint)
 
 
+## A boon's sigil set in a paper medallion: an inked disc, a rarity ring, and
+## for epics a slow ember breath around the ring.
+class BoonMedallion extends Control:
+	var boon_id := ""
+	var tint := Color.WHITE
+	var epic := false
+	var _t := 0.0
+	func setup(p_id: String, p_tint: Color, p_epic: bool) -> void:
+		boon_id = p_id
+		tint = p_tint
+		epic = p_epic
+		mouse_filter = Control.MOUSE_FILTER_IGNORE
+		custom_minimum_size = Vector2(0.0, 112.0)
+		set_process(epic)
+		if not resized.is_connected(queue_redraw):
+			resized.connect(queue_redraw)
+	func _process(delta: float) -> void:
+		if not Feedback.motion_reduced:
+			_t += delta
+		queue_redraw()
+	func _draw() -> void:
+		var c := size * 0.5
+		var r := minf(size.x, size.y) * 0.46
+		draw_circle(c + Vector2(3.0, 4.0), r, Color(0.0, 0.0, 0.0, 0.5))
+		draw_circle(c, r, Color("120e19"))
+		draw_arc(c, r, 0.0, TAU, 48, Color(tint, 0.85), 2.0, true)
+		draw_arc(c, r - 6.0, 0.0, TAU, 48, Color(tint, 0.25), 1.0, true)
+		if epic:
+			var breath := 0.5 + 0.5 * sin(_t * 2.2)
+			draw_arc(c, r + 5.0, 0.0, TAU, 48, Color(tint, 0.15 + 0.25 * breath), 3.0, true)
+		BoonArt.draw(self, boon_id, c, r * 0.62, tint)
+
+
 ## One boon card. The Button IS the card frame, so focus, hover and click stay a
-## single control; the children are plain labels. Rarity is carried by border
-## weight, frame tint and a coloured chip rather than by text alone, which was
-## invisible at a 5% tint on a 1280x720 frame.
+## single control; the children are plain labels. Rarity is carried by the
+## coloured top edge, border weight and medallion ring, not by text alone.
 func _upgrade_card(index: int, upgrade: Dictionary, rarity: String, rc: Color) -> Button:
 	var epic := rarity == "epic"
 	var edge_w := 3 if epic else 2
-	var tint := Color(rc.r, rc.g, rc.b, 0.22 if epic else (0.14 if rarity == "rare" else 0.07))
+	var paper := Color("1c1725")
 	var button := Button.new()
-	button.custom_minimum_size = Vector2(0, 220)
-	button.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	button.custom_minimum_size = Vector2(292, 318)
+	button.size_flags_horizontal = Control.SIZE_SHRINK_CENTER
+	button.size_flags_vertical = Control.SIZE_SHRINK_CENTER
 	button.focus_mode = Control.FOCUS_ALL
 	button.mouse_default_cursor_shape = Control.CURSOR_POINTING_HAND
-	button.add_theme_stylebox_override("normal", _card_box(C_SURFACE.blend(tint), rc.darkened(0.2), edge_w))
-	button.add_theme_stylebox_override("hover", _card_box(C_SURFACE_HI.blend(tint), rc, edge_w + 1))
-	button.add_theme_stylebox_override("focus", _card_box(C_SURFACE_HI.blend(tint), rc.lightened(0.3), edge_w + 1))
-	button.add_theme_stylebox_override("pressed", _card_box(Color("332333"), C_GOLD, edge_w + 1))
+	button.add_theme_stylebox_override("normal", _card_box(paper, rc.darkened(0.3), edge_w))
+	button.add_theme_stylebox_override("hover", _card_box(paper.lightened(0.05), rc, edge_w + 1))
+	button.add_theme_stylebox_override("focus", _card_box(paper.lightened(0.05), rc.lightened(0.25), edge_w + 1))
+	button.add_theme_stylebox_override("pressed", _card_box(paper.lightened(0.1), C_GOLD, edge_w + 1))
 
-	var margin := _margin_container(18, 18, 16, 16)
+	var margin := _margin_container(22, 22, 16, 18)
 	margin.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	margin.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	button.add_child(margin)
 	var stack := VBoxContainer.new()
 	stack.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	stack.add_theme_constant_override("separation", 10)
+	stack.add_theme_constant_override("separation", 8)
 	margin.add_child(stack)
 
-	var head := HBoxContainer.new()
-	head.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	stack.add_child(head)
-	var chip := _make_label(rarity.to_upper(), 12, rc, HorizontalAlignment.HORIZONTAL_ALIGNMENT_LEFT)
-	chip.size_flags_horizontal = Control.SIZE_SHRINK_BEGIN
-	head.add_child(chip)
-	var gap := Control.new()
-	gap.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	gap.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	head.add_child(gap)
-	if bool(upgrade.get("unique", false)):
-		var once := _make_label("ONCE PER RUN", 10, C_GOLD, HorizontalAlignment.HORIZONTAL_ALIGNMENT_RIGHT)
-		once.size_flags_horizontal = Control.SIZE_SHRINK_END
-		head.add_child(once)
 	# The index is a live keyboard shortcut, so printing it is not decoration.
-	var key := _make_label("[%d]" % (index + 1), 11, C_MUTED, HorizontalAlignment.HORIZONTAL_ALIGNMENT_RIGHT)
-	key.size_flags_horizontal = Control.SIZE_SHRINK_END
-	head.add_child(key)
+	var key := _make_label("%d" % (index + 1), 12, C_MUTED, HorizontalAlignment.HORIZONTAL_ALIGNMENT_RIGHT)
+	stack.add_child(key)
 
-	var sigil := BoonSigil.new()
-	sigil.setup(str(upgrade.get("id", "")), rc)
+	var sigil := BoonMedallion.new()
+	sigil.setup(str(upgrade.get("id", "")), rc, epic)
 	stack.add_child(sigil)
 
-	var title := _make_label(str(upgrade.get("title", "UNKNOWN BOON")).to_upper(), 21, C_TEXT, HorizontalAlignment.HORIZONTAL_ALIGNMENT_LEFT)
+	var title := _make_label(str(upgrade.get("title", "Unknown Boon")), 25, C_TEXT, HorizontalAlignment.HORIZONTAL_ALIGNMENT_CENTER)
+	title.add_theme_font_override("font", _heading_font())
 	stack.add_child(title)
-	var desc := _make_label(str(upgrade.get("desc", "")), 13, C_MUTED, HorizontalAlignment.HORIZONTAL_ALIGNMENT_LEFT)
+	var desc := _make_label(str(upgrade.get("desc", "")), 14, C_MUTED, HorizontalAlignment.HORIZONTAL_ALIGNMENT_CENTER)
 	desc.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	desc.vertical_alignment = VerticalAlignment.VERTICAL_ALIGNMENT_TOP
+	desc.custom_minimum_size = Vector2(240, 0)
+	desc.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	stack.add_child(desc)
+	# Rarity sits at the foot of the card, where a printed card keeps its set mark.
+	var foot := rarity.to_upper()
+	if bool(upgrade.get("unique", false)):
+		foot += "  ·  ONCE PER RUN"
+	stack.add_child(_make_label(foot, 11, rc, HorizontalAlignment.HORIZONTAL_ALIGNMENT_CENTER))
+	# Lift toward the hand under the cursor or the pad's focus.
+	button.mouse_entered.connect(_lift_card.bind(button, true))
+	button.mouse_exited.connect(_lift_card.bind(button, false))
+	button.focus_entered.connect(_lift_card.bind(button, true))
+	button.focus_exited.connect(_lift_card.bind(button, false))
 	return button
+
+
+func _lift_card(button: Button, up: bool) -> void:
+	if not is_instance_valid(button) or Feedback.motion_reduced:
+		return
+	button.pivot_offset = button.size * Vector2(0.5, 1.0)
+	var t := create_tween()
+	t.set_pause_mode(Tween.TWEEN_PAUSE_PROCESS)
+	t.tween_property(button, "scale", Vector2.ONE * (1.035 if up else 1.0), 0.12).set_trans(Tween.TRANS_SINE).set_ease(Tween.EASE_OUT)
+
+
+## Deal the offered cards in, one after another, turning flat as they land.
+func _deal_cards(buttons: Array) -> void:
+	if Feedback.motion_reduced:
+		return
+	for i in range(buttons.size()):
+		var b: Button = buttons[i]
+		b.modulate = Color(1.0, 1.0, 1.0, 0.0)
+		b.scale = Vector2.ONE * 0.9
+		b.rotation = (float(i) - float(buttons.size() - 1) * 0.5) * 0.09
+		b.pivot_offset = b.custom_minimum_size * Vector2(0.5, 1.0)
+		var t := create_tween()
+		t.set_pause_mode(Tween.TWEEN_PAUSE_PROCESS)
+		t.tween_interval(0.06 + float(i) * 0.08)
+		t.set_parallel(true)
+		t.tween_property(b, "modulate:a", 1.0, 0.18)
+		t.tween_property(b, "scale", Vector2.ONE, 0.3).set_trans(Tween.TRANS_BACK).set_ease(Tween.EASE_OUT)
+		t.tween_property(b, "rotation", 0.0, 0.3).set_trans(Tween.TRANS_BACK).set_ease(Tween.EASE_OUT)
 
 
 func setup_upgrades(upgrades: Array) -> void:
@@ -1712,6 +1944,7 @@ func setup_upgrades(upgrades: Array) -> void:
 		_upgrade_row.add_child(button)
 		buttons.append(button)
 	(_panels["reward"] as Control).set_meta("buttons", buttons)
+	_deal_cards(buttons)
 	if not buttons.is_empty():
 		(buttons[0] as Button).grab_focus.call_deferred()
 
@@ -1745,14 +1978,17 @@ func setup_forge(cells: int) -> void:
 		return
 	_clear_children(_forge_rows)
 
-	var purchased: Array = Save.get_purchased_meta()
 	var focus_target: Button = null
 	for i in range(Content.META_UPGRADES.size()):
 		var upgrade: Dictionary = Content.META_UPGRADES[i]
-		var owned := purchased.has(upgrade.get("id", ""))
+		var id := str(upgrade.get("id", ""))
+		var rank := Save.get_meta_rank(id)
+		var max_rank := Content.meta_max_rank(upgrade)
+		var next_cost := Content.meta_next_cost(upgrade, rank)
+		var mastered := next_cost < 0
 		var row := PanelContainer.new()
 		row.custom_minimum_size.y = 68.0
-		row.add_theme_stylebox_override("panel", _panel_box(C_INK, Color("3b3147"), 8, 1, 0))
+		row.add_theme_stylebox_override("panel", _panel_box(C_INK, Color("715026") if rank > 0 else Color("3b3147"), 8, 1, 0))
 		_forge_rows.add_child(row)
 		var margin := _margin_container(16, 12, 8, 8)
 		row.add_child(margin)
@@ -1762,25 +1998,33 @@ func setup_forge(cells: int) -> void:
 
 		var sigil := BoonSigil.new()
 		# Forge rows are shorter than cards, so the sigil takes a fixed square.
-		sigil.setup(str(upgrade.get("id", "")), C_GOLD if owned else C_EMBER_HI, Vector2(46.0, 46.0))
+		sigil.setup(id, C_GOLD if rank > 0 else C_EMBER_HI, Vector2(46.0, 46.0))
 		line.add_child(sigil)
 
 		var copy := VBoxContainer.new()
 		copy.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 		copy.add_theme_constant_override("separation", 1)
 		line.add_child(copy)
-		copy.add_child(_make_label(str(upgrade.get("title", "Upgrade")).to_upper(), 14, C_TEXT, HorizontalAlignment.HORIZONTAL_ALIGNMENT_LEFT))
+		var head := HBoxContainer.new()
+		head.add_theme_constant_override("separation", 10)
+		copy.add_child(head)
+		var name_label := _make_label(str(upgrade.get("title", "Upgrade")).to_upper(), 14, C_TEXT, HorizontalAlignment.HORIZONTAL_ALIGNMENT_LEFT)
+		name_label.size_flags_horizontal = Control.SIZE_SHRINK_BEGIN
+		head.add_child(name_label)
+		head.add_child(_rank_pips(rank, max_rank))
 		copy.add_child(_make_label(str(upgrade.get("desc", "")), 12, C_MUTED, HorizontalAlignment.HORIZONTAL_ALIGNMENT_LEFT))
 
-		var buy := _button("OWNED" if owned else "%d CELLS" % int(upgrade.get("cost", 0)), "Buy%d" % i, false, Vector2(132, 44), "")
-		buy.disabled = owned or cells < int(upgrade.get("cost", 0))
-		if owned:
+		var buy := _button("MASTERED" if mastered else "%d CELLS" % next_cost, "Buy%d" % i, false, Vector2(132, 44), "")
+		buy.disabled = mastered or cells < next_cost
+		if mastered:
 			buy.add_theme_color_override("font_disabled_color", C_MINT)
 		else:
 			buy.pressed.connect(_on_buy_meta_pressed.bind(i))
 		line.add_child(buy)
 		if focus_target == null and not buy.disabled:
 			focus_target = buy
+
+	_build_vow_rows()
 
 	if focus_target == null:
 		var back = panel.get_meta("back_button", null)
@@ -1790,13 +2034,74 @@ func setup_forge(cells: int) -> void:
 		focus_target.grab_focus.call_deferred()
 
 
-func show_run_cells(cells_earned: int, panel_name: String) -> void:
+## Vows sit under the relics: burdens rather than purchases, sworn or unsworn
+## for free once the Warden has fallen, each paying out in score and cells.
+func _build_vow_rows() -> void:
+	var head := _make_label("VOWS", 13, C_RED, HorizontalAlignment.HORIZONTAL_ALIGNMENT_LEFT)
+	head.custom_minimum_size.y = 34.0
+	_forge_rows.add_child(head)
+	if not Save.vows_unlocked():
+		_forge_rows.add_child(_make_label("Defeat the Ember Warden to swear vows.", 12, C_MUTED, HorizontalAlignment.HORIZONTAL_ALIGNMENT_LEFT))
+		return
+	var sworn := Save.get_vows()
+	_forge_rows.add_child(_make_label("Sworn vows make the next descent harsher.  Score ×%s" % String.num(Content.vow_score_multiplier(sworn), 2), 12, C_MUTED, HorizontalAlignment.HORIZONTAL_ALIGNMENT_LEFT))
+	for i in range(Content.VOWS.size()):
+		var v: Dictionary = Content.VOWS[i]
+		var on := sworn.has(str(v.id))
+		var row := PanelContainer.new()
+		row.custom_minimum_size.y = 58.0
+		row.add_theme_stylebox_override("panel", _panel_box(C_INK, Color("8e3c49") if on else Color("3b3147"), 8, 1, 0))
+		_forge_rows.add_child(row)
+		var margin := _margin_container(16, 12, 6, 6)
+		row.add_child(margin)
+		var line := HBoxContainer.new()
+		line.add_theme_constant_override("separation", 14)
+		margin.add_child(line)
+		var copy := VBoxContainer.new()
+		copy.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		copy.add_theme_constant_override("separation", 1)
+		line.add_child(copy)
+		copy.add_child(_make_label(str(v.title).to_upper(), 14, C_RED if on else C_TEXT, HorizontalAlignment.HORIZONTAL_ALIGNMENT_LEFT))
+		copy.add_child(_make_label("%s   +%d%% score" % [str(v.desc), roundi(float(v.score) * 100.0)], 12, C_MUTED, HorizontalAlignment.HORIZONTAL_ALIGNMENT_LEFT))
+		var toggle := _button("SWORN" if on else "SWEAR", "Vow%d" % i, on, Vector2(132, 40), "")
+		toggle.pressed.connect(func(): emit_signal("vow_toggled", str(v.id)))
+		line.add_child(toggle)
+
+
+## Rank as a row of small lozenges: filled for owned, hollow for the rest.
+func _rank_pips(rank: int, max_rank: int) -> Control:
+	var pips := RankPips.new()
+	pips.rank = rank
+	pips.max_rank = max_rank
+	pips.custom_minimum_size = Vector2(14.0 * float(max_rank), 14.0)
+	pips.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+	pips.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	return pips
+
+
+class RankPips extends Control:
+	var rank := 0
+	var max_rank := 1
+	func _draw() -> void:
+		for i in range(max_rank):
+			var c := Vector2(7.0 + float(i) * 14.0, size.y * 0.5)
+			var pts := PackedVector2Array([c + Vector2(0, -5), c + Vector2(5, 0), c + Vector2(0, 5), c + Vector2(-5, 0)])
+			if i < rank:
+				draw_colored_polygon(pts, Color("ffd166"))
+			else:
+				pts.append(pts[0])
+				draw_polyline(pts, Color("6f6578"), 1.2, true)
+
+
+func show_run_cells(cells_earned: int, panel_name: String, vows_kept: int = 0) -> void:
 	if not _panels.has(panel_name):
 		return
 	var panel: Control = _panels[panel_name]
 	var label = panel.get_meta("cells_label", null)
 	if label is Label:
 		(label as Label).text = "CELLS SECURED  +%s" % _format_number(cells_earned)
+		if vows_kept > 0:
+			(label as Label).text += "   ·   %d %s KEPT" % [vows_kept, "VOW" if vows_kept == 1 else "VOWS"]
 		(label as Label).visible = true
 
 
@@ -1832,8 +2137,36 @@ func hide_streak() -> void:
 	_streak_tier = 0
 
 
-func show_room_intro(idx: int, total: int, room_name: String) -> void:
-	_play_banner(_room_intro, room_name.to_upper(), "CHAMBER %02d OF %02d" % [idx + 1, total], 1.5)
+func show_room_intro(idx: int, total: int, room_name: String, trial: bool = false) -> void:
+	var sub := "CHAMBER %02d OF %02d" % [idx + 1, total]
+	if trial:
+		sub += "  ·  TRIAL"
+	_play_banner(_room_intro, room_name.to_upper(), sub, 1.5)
+
+
+var _hud_tween: Tween
+
+## Ease the whole HUD out for a cinematic beat, or snap it back for play.
+func set_hud_faded(faded: bool) -> void:
+	if _hud == null:
+		return
+	if _hud_tween != null and is_instance_valid(_hud_tween):
+		_hud_tween.kill()
+	if not faded:
+		_hud.modulate = Color.WHITE
+		return
+	_hud_tween = create_tween()
+	_hud_tween.set_pause_mode(Tween.TWEEN_PAUSE_PROCESS)
+	_hud_tween.tween_property(_hud, "modulate:a", 0.0, 0.5)
+
+
+## The Warden's fall, carried by the same card that announced it.
+func show_victory_card() -> void:
+	if not _room_intro.is_empty():
+		if _room_intro.tween != null and is_instance_valid(_room_intro.tween):
+			(_room_intro.tween as Tween).kill()
+		(_room_intro.root as Control).visible = false
+	_play_banner(_boss_intro, "THE WARDEN FALLS", "THE EMBER THRONE IS SILENT", 2.2)
 
 
 func show_boss_intro(boss_name: String, subtitle: String, hold: float = 2.4) -> void:
@@ -1845,20 +2178,41 @@ func show_boss_intro(boss_name: String, subtitle: String, hold: float = 2.4) -> 
 	_play_banner(_boss_intro, boss_name.to_upper(), subtitle.to_upper(), hold)
 
 
-## Veil that lifts on arrival in a new chamber.
-func fade_from_black(duration: float = 0.45) -> void:
+var _veil_tween: Tween
+
+## Arrival in a new chamber: the black page burns away from where the knight
+## stands, its edge glowing like paper catching. Reduced motion keeps a plain
+## fade, since a travelling edge is exactly the motion that setting removes.
+func fade_from_black(duration: float = 0.45, origin: Vector2 = Vector2(0.5, 0.55)) -> void:
 	if _fade == null:
 		return
+	if _veil_tween != null and is_instance_valid(_veil_tween):
+		_veil_tween.kill()
+	_veil_tween = create_tween()
+	_veil_tween.set_pause_mode(Tween.TWEEN_PAUSE_PROCESS)
+	if Feedback.motion_reduced:
+		_fade.material = null
+		_fade.color = Color(C_VOID, 1.0)
+		_veil_tween.tween_property(_fade, "color:a", 0.0, duration).set_trans(Tween.TRANS_SINE).set_ease(Tween.EASE_IN)
+		return
+	var mat := burn_material()
+	_fade.material = mat
 	_fade.color = Color(C_VOID, 1.0)
-	var tween := create_tween()
-	tween.set_pause_mode(Tween.TWEEN_PAUSE_PROCESS)
-	tween.tween_property(_fade, "color:a", 0.0, duration).set_trans(Tween.TRANS_SINE).set_ease(Tween.EASE_IN)
+	var vs := get_viewport().get_visible_rect().size
+	mat.set_shader_parameter("aspect", vs.x / maxf(1.0, vs.y))
+	mat.set_shader_parameter("origin", origin)
+	mat.set_shader_parameter("progress", 0.0)
+	_veil_tween.tween_method(func(v: float): mat.set_shader_parameter("progress", v), 0.0, 1.0, duration * 1.6).set_trans(Tween.TRANS_SINE).set_ease(Tween.EASE_OUT)
+	_veil_tween.tween_callback(func(): _fade.color = Color(C_VOID, 0.0))
 
 
 func show_run_summary(stats: Dictionary, panel_name: String) -> void:
 	if not _panels.has(panel_name):
 		return
 	var panel: Control = _panels[panel_name]
+	var line = panel.get_meta("line_label", null)
+	if line is Label and stats.has("line"):
+		(line as Label).text = str(stats.line)
 	# The headline result is set before the grid so it never depends on it.
 	var score_label = panel.get_meta("score_label", null)
 	if score_label is Label:
@@ -1927,6 +2281,8 @@ func _style_flask_dot(dot: PanelContainer, filled: bool) -> void:
 ## owns the padding and the Button only provides the border and tint.
 func _card_box(background: Color, border: Color, border_width: int) -> StyleBoxFlat:
 	var box := _panel_box(background, border, 12, border_width, 6)
+	# The rarity colour runs heavier along the top, like a card's printed band.
+	box.border_width_top = border_width + 4
 	box.content_margin_left = 0.0
 	box.content_margin_right = 0.0
 	box.content_margin_top = 0.0

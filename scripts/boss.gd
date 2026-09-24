@@ -9,6 +9,8 @@ signal phase_changed(phase: int)
 signal died_boss
 signal hp_changed_boss(hp: float, max_hp: float)
 signal summon_requested(kind: int, pos: Vector2)
+## The felled Warden breaking apart, a beat after the killing blow.
+signal shattered(pos: Vector2)
 
 enum BPhase { INTRO, ONE, TWO }
 enum Action { LUNGE, FAN, SLAM, CHARGE }
@@ -23,8 +25,15 @@ var _slam_wave_emitted := false
 var _charge_dir := 1.0
 var _charge_t := 0.0
 var _summoned := false
+## Game-time seconds from the killing blow to the Warden coming apart.
+const SHATTER_T := 0.62
+var _death_t := 0.0
+var _shattered := false
 
 func _ready() -> void:
+	if Enemy.vows.has("v_pyre"):
+		# Vow of the Pyre: a hardier Warden that is already burning.
+		max_hp = Content.BOSS_HP * 1.2
 	kind = Kind.STALKER  # reuse melee shape
 	data = Content.ENEMY[Kind.STALKER].duplicate()
 	data.w = Content.BOSS_W
@@ -74,7 +83,9 @@ func _ready() -> void:
 	state = EState.SEEK
 
 func _physics_process(delta: float) -> void:
-	if dead: return
+	if dead:
+		_step_death(delta)
+		return
 	_tick_status(delta)
 	if dead: return
 	if global_position.y > Content.FLOOR_Y + 220.0:
@@ -98,6 +109,8 @@ func _physics_process(delta: float) -> void:
 			state = EState.SEEK
 			action_t = 0.55
 			emit_signal("phase_changed", 1)
+			if Enemy.vows.has("v_pyre"):
+				_ignite()
 		return
 	_check_phase2()
 	match state:
@@ -115,16 +128,22 @@ func _disarm() -> void:
 
 func _check_phase2() -> void:
 	if not _phase2_triggered and hp <= max_hp * Content.BOSS_PHASE2_AT:
-		_phase2_triggered = true
-		phase = BPhase.TWO
-		emit_signal("phase_changed", 2)
-		_disarm()
-		state = EState.SEEK
-		action_t = 0.8
-		if not _summoned:
-			_summoned = true
-			emit_signal("summon_requested", Content.BOSS_SUMMON_KIND, Vector2(300.0, Content.FLOOR_Y - 260.0))
-			emit_signal("summon_requested", Content.BOSS_SUMMON_KIND, Vector2(980.0, Content.FLOOR_Y - 260.0))
+		_ignite()
+
+## Phase two: faster, relentless, and two wisps called to the throne.
+func _ignite() -> void:
+	if _phase2_triggered:
+		return
+	_phase2_triggered = true
+	phase = BPhase.TWO
+	emit_signal("phase_changed", 2)
+	_disarm()
+	state = EState.SEEK
+	action_t = 0.8
+	if not _summoned:
+		_summoned = true
+		emit_signal("summon_requested", Content.BOSS_SUMMON_KIND, Vector2(300.0, Content.FLOOR_Y - 260.0))
+		emit_signal("summon_requested", Content.BOSS_SUMMON_KIND, Vector2(980.0, Content.FLOOR_Y - 260.0))
 
 func _boss_seek(delta: float) -> void:
 	var player = _get_player()
@@ -220,7 +239,7 @@ func _boss_attack(delta: float) -> void:
 			if area.get_meta("team") == "enemy": continue
 			var tgt = area.get_meta("owner")
 			if tgt != null and is_instance_valid(tgt) and tgt.has_method("take_damage"):
-				var dmg := Content.BOSS_DAMAGE * (1.15 if action_idx == Action.CHARGE else 1.0)
+				var dmg := Content.BOSS_DAMAGE * (1.15 if action_idx == Action.CHARGE else 1.0) * Enemy.vow_damage()
 				tgt.take_damage(dmg, Vector2(facing, -0.3), 480.0 if action_idx == Action.CHARGE else 420.0)
 				_atk_hit = true
 				break
@@ -280,7 +299,7 @@ func _do_fan() -> void:
 	for i in range(n):
 		var a := base_ang + lerpf(-spread * 0.5, spread * 0.5, float(i) / maxf(1.0, float(n - 1)))
 		var v := Vector2(cos(a), sin(a)) * Content.BOSS_SHOT_SPEED
-		emit_signal("projectile_requested", "enemy", global_position + Vector2(0.0, -20.0), v, Content.BOSS_SHOT_DAMAGE, 180.0, 0, 2.6, Content.BOSS_COLOR)
+		emit_signal("projectile_requested", "enemy", global_position + Vector2(0.0, -20.0), v, Content.BOSS_SHOT_DAMAGE * Enemy.vow_damage(), 180.0, 0, 2.6, Content.BOSS_COLOR)
 	state = EState.RECOVER
 	st_timer = 0.6 if phase == BPhase.TWO else 0.85
 
@@ -295,12 +314,12 @@ func _do_slam() -> void:
 func _emit_slam_waves() -> void:
 	# Shockwaves happen on contact with the floor, not at the top of the leap.
 	var speed := Content.BOSS_SHOT_SPEED * 0.7
-	emit_signal("projectile_requested", "enemy", global_position + Vector2(-30.0, 0.0), Vector2(-speed, 0.0), Content.BOSS_SHOT_DAMAGE * 0.8, 120.0, 0, 1.4, Content.BOSS_COLOR)
-	emit_signal("projectile_requested", "enemy", global_position + Vector2(30.0, 0.0), Vector2(speed, 0.0), Content.BOSS_SHOT_DAMAGE * 0.8, 120.0, 0, 1.4, Content.BOSS_COLOR)
+	emit_signal("projectile_requested", "enemy", global_position + Vector2(-30.0, 0.0), Vector2(-speed, 0.0), Content.BOSS_SHOT_DAMAGE * 0.8 * Enemy.vow_damage(), 120.0, 0, 1.4, Content.BOSS_COLOR)
+	emit_signal("projectile_requested", "enemy", global_position + Vector2(30.0, 0.0), Vector2(speed, 0.0), Content.BOSS_SHOT_DAMAGE * 0.8 * Enemy.vow_damage(), 120.0, 0, 1.4, Content.BOSS_COLOR)
 	if phase == BPhase.TWO:
 		# Phase 2 adds a slower, higher pair so a single jump no longer clears everything.
-		emit_signal("projectile_requested", "enemy", global_position + Vector2(-30.0, -70.0), Vector2(-speed * 0.55, 0.0), Content.BOSS_SHOT_DAMAGE * 0.8, 120.0, 0, 1.6, Content.BOSS_COLOR)
-		emit_signal("projectile_requested", "enemy", global_position + Vector2(30.0, -70.0), Vector2(speed * 0.55, 0.0), Content.BOSS_SHOT_DAMAGE * 0.8, 120.0, 0, 1.6, Content.BOSS_COLOR)
+		emit_signal("projectile_requested", "enemy", global_position + Vector2(-30.0, -70.0), Vector2(-speed * 0.55, 0.0), Content.BOSS_SHOT_DAMAGE * 0.8 * Enemy.vow_damage(), 120.0, 0, 1.6, Content.BOSS_COLOR)
+		emit_signal("projectile_requested", "enemy", global_position + Vector2(30.0, -70.0), Vector2(speed * 0.55, 0.0), Content.BOSS_SHOT_DAMAGE * 0.8 * Enemy.vow_damage(), 120.0, 0, 1.6, Content.BOSS_COLOR)
 	emit_signal("exploded", global_position + Vector2(0.0, Content.BOSS_H * 0.45), 120.0, 0.0)
 
 func _boss_recover(delta: float) -> void:
@@ -345,8 +364,31 @@ func _die(_award_reward: bool = true) -> void:
 	emit_signal("died", 300)
 	emit_signal("died_boss")
 
+## Shudder, crack with fire, then come apart. Visual only; the fight is over.
+func _step_death(delta: float) -> void:
+	if _shattered:
+		return
+	_death_t += delta
+	_anim_t += delta
+	velocity.x = 0.0
+	velocity.y += Content.GRAVITY * delta
+	move_and_slide()
+	_hurt_flash = 0.1 if fmod(_death_t, 0.14) < 0.06 else 0.0
+	if _death_t >= SHATTER_T:
+		_shattered = true
+		visible = false
+		emit_signal("shattered", global_position + Vector2(0.0, -24.0))
+	queue_redraw()
+
 func visual_pose() -> Dictionary:
-	return WardenArt.pose(self)
+	var p := WardenArt.pose(self)
+	if dead:
+		var k := clampf(_death_t / SHATTER_T, 0.0, 1.0)
+		p["dying"] = k
+		var amp := 1.5 + 5.0 * k
+		p["jitter"] = Vector2(sin(_death_t * 91.0), cos(_death_t * 73.0)) * amp if not Feedback.motion_reduced else Vector2.ZERO
+		p["lean"] = -0.12 * k
+	return p
 
 func _draw() -> void:
 	WardenArt.paint(self, visual_pose())

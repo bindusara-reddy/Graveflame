@@ -5,6 +5,12 @@ extends CharacterBody2D
 ## A Dead Cells-inspired action-roguelite character. All art is drawn procedurally.
 
 const VFX := preload("res://scripts/vfx.gd")
+const KnightArt := preload("res://scripts/knight_art.gd")
+
+## Double-jump somersault length, seconds.
+const FLIP_TIME := 0.3
+## One full stride (two steps) per this much ground covered, so feet never skate.
+const STRIDE := 62.0
 
 signal hp_changed(hp: float, max_hp: float)
 signal special_changed(value: float, maximum: float)
@@ -88,6 +94,20 @@ var _momentum_stacks := 0
 var _land_squash := 0.0
 var _was_on_floor := true
 var _prev_vy := 0.0
+# --- Puppet animation (visual only; never read by gameplay) ---
+## Current blended pose (see KnightArt) and the blade smear for this frame.
+var _pose: Dictionary = {}
+var _smear: Dictionary = {}
+var _run_phase := 0.0
+var _flip_t := 0.0
+var _cast_t := 0.0
+var _ignite_t := 0.0
+var _turn_t := 0.0
+var _last_facing := 1.0
+## Seconds since the killing blow; drives the collapse.
+var _death_t := 0.0
+## Last spot the knight stood on solid ground; spike pits return them here.
+var _safe_pos := Vector2.ZERO
 
 func setup(rm: RunModel) -> void:
 	_run_model = rm
@@ -155,6 +175,12 @@ func _ready() -> void:
 
 func _physics_process(delta: float) -> void:
 	if dead:
+		# The body keeps animating its collapse after the killing blow.
+		_death_t += delta
+		_anim_time += delta
+		_hurt_flash = maxf(0.0, _hurt_flash - delta)
+		_step_animation(delta)
+		queue_redraw()
 		return
 	var controls_locked := _input_lock_frames > 0
 	if controls_locked:
@@ -204,9 +230,41 @@ func _physics_process(delta: float) -> void:
 
 	if is_on_floor() and not _was_on_floor and _prev_vy > 320.0:
 		_land_squash = 0.12
+		if state != State.SLAM:
+			emit_signal("action_feedback", "land", global_position + Vector2(0.0, Content.P_BODY_H * 0.5))
 	_was_on_floor = is_on_floor()
 	_air_time = 0.0 if is_on_floor() else minf(_air_time + delta, 1.0)
+	if is_on_floor() and state != State.HURT and _ground_both_sides():
+		_safe_pos = global_position
+	_step_animation(delta)
 	queue_redraw()
+
+
+## Advance the puppet: stride phase by distance, one-shot gesture clocks, and a
+## blend toward the pose the current state asks for.
+func _step_animation(delta: float) -> void:
+	if is_on_floor():
+		var before := _run_phase
+		_run_phase = fmod(_run_phase + absf(velocity.x) * delta / STRIDE * TAU, TAU)
+		# A footfall each time a foot passes under the body: twice per stride.
+		if state == State.LOCOMOTION and absf(velocity.x) > Content.P_SPEED * 0.35:
+			if (before < PI and _run_phase >= PI) or _run_phase < before:
+				emit_signal("action_feedback", "step", global_position)
+	_cast_t = maxf(0.0, _cast_t - delta)
+	_ignite_t = maxf(0.0, _ignite_t - delta)
+	_turn_t = maxf(0.0, _turn_t - delta)
+	if _flip_t > 0.0:
+		_flip_t = maxf(0.0, _flip_t - delta)
+		if is_on_floor() or state != State.LOCOMOTION or wall_sliding:
+			_flip_t = 0.0
+	if facing != _last_facing:
+		# A cut-out turning over: the figure narrows through its edge and back.
+		if state == State.LOCOMOTION:
+			_turn_t = 0.07
+		_last_facing = facing
+	var want := KnightArt.target(self)
+	_pose = KnightArt.blend(_pose, want.pose, float(want.rate), delta)
+	_smear = want.smear
 
 # --- Locomotion ---
 func _step_locomotion(delta: float, controls_locked: bool = false) -> void:
@@ -312,7 +370,9 @@ func _do_jump(is_double: bool) -> void:
 	coyote = 0.0
 	velocity.y = Content.P_DOUBLE_JUMP_VEL if is_double else Content.P_JUMP_VEL
 	jumps_left -= 1
-	if is_double: jumps_left = mini(jumps_left, Content.P_MAX_JUMPS - 1)
+	if is_double:
+		jumps_left = mini(jumps_left, Content.P_MAX_JUMPS - 1)
+		_flip_t = FLIP_TIME
 	wall_sliding = false
 	emit_signal("action_feedback", "jump", global_position)
 
@@ -342,6 +402,11 @@ func _damage_mul(tgt = null) -> float:
 		m += 0.10 * float(_momentum_stacks)
 	if float(build.get("bloodrush", 0.0)) > 0.0 and float(build.hp) < float(build.max_hp) * Content.BLOODRUSH_HP_FRAC:
 		m += float(build.bloodrush)
+	# Ember Brand: burning targets take more.
+	if tgt != null and float(build.get("brand", 0.0)) > 0.0:
+		var burning = tgt.get("burn_time")
+		if burning != null and float(burning) > 0.0:
+			m += float(build.brand)
 	if tgt != null and float(build.get("execute_bonus", 0.0)) > 0.0:
 		var thp = tgt.get("hp")
 		var tmax = tgt.get("hp_max")
@@ -524,6 +589,10 @@ func _do_slam_impact() -> void:
 		_gain_special(Content.P_SPECIAL_GAIN * float(build.get("special_mul", 1.0)) * 2.0)
 	_draw_slam_impact = 0.3
 	emit_signal("slam_landed", center, radius)
+	if bool(build.get("skyfall", false)):
+		# Skyfall: the impact runs out along the floor both ways.
+		for dir: float in [-1.0, 1.0]:
+			emit_signal("projectile_requested", "player", global_position + Vector2(dir * 26.0, 14.0), Vector2(dir * 560.0, 0.0), 18.0 * _damage_mul(), 300.0, 3, 0.6, VFX.ORANGE)
 	# small bounce
 	velocity.y = -220.0
 
@@ -536,11 +605,18 @@ func _do_special() -> void:
 	if build.get("special_pierce", false): dmg *= 1.2
 	var pierce := 3 if bool(build.get("special_pierce", false)) else 0
 	var pos := global_position + Vector2(facing * 30.0, -10.0)
-	emit_signal("projectile_requested", "player", pos, Vector2(facing * spd, 0.0), dmg, 360.0, pierce, 1.6, Content.PAL.special)
+	if bool(build.get("twin_lance", false)):
+		# Twin Lance: two bolts fanned a hair apart, each at full strength.
+		for tilt: float in [-0.09, 0.09]:
+			emit_signal("projectile_requested", "player", pos + Vector2(0.0, tilt * 60.0), Vector2(facing * spd, 0.0).rotated(tilt * facing), dmg, 360.0, pierce, 1.6, Content.PAL.special)
+	else:
+		emit_signal("projectile_requested", "player", pos, Vector2(facing * spd, 0.0), dmg, 360.0, pierce, 1.6, Content.PAL.special)
 	emit_signal("action_feedback", "special", pos)
+	_cast_t = 0.22
 
 func _do_graveflame() -> void:
 	special = 0.0
+	_ignite_t = 0.4
 	_flame_time = Content.P_FLAME_DURATION
 	iframes = maxf(iframes, 0.18)
 	emit_signal("special_changed", special, max_special)
@@ -575,6 +651,8 @@ func _step_dash(delta: float) -> void:
 	if global_position.distance_to(_dash_echo_pos) >= 24.0:
 		_dash_echo_pos = global_position
 		emit_signal("action_feedback", "dash_trail", global_position)
+		if bool(build.get("cinder_trail", false)) and is_on_floor():
+			emit_signal("action_feedback", "cinder", global_position + Vector2(0.0, Content.P_BODY_H * 0.5))
 
 # --- Parry ---
 func _begin_parry() -> void:
@@ -672,10 +750,15 @@ func _use_flask() -> void:
 	_flask_heal_flash = 0.5
 	emit_signal("flask_changed", flask_charges, flask_max)
 	emit_signal("action_feedback", "heal", global_position)
+	if float(build.get("phoenix", 0.0)) > 0.0:
+		# Phoenix Flask: the draught catches fire.
+		_flame_time = maxf(_flame_time, 3.0)
+		nova(float(build.phoenix), 130.0)
 
-func refill_flask() -> void:
+## Restore `amount` flask charges (all of them when negative), capped at max.
+func refill_flask(amount: int = -1) -> void:
 	flask_max = int(build.get("flask_charges", Content.FLASK_MAX))
-	flask_charges = flask_max
+	flask_charges = flask_max if amount < 0 else mini(flask_max, flask_charges + amount)
 	emit_signal("flask_changed", flask_charges, flask_max)
 
 # --- Hurt ---
@@ -729,6 +812,22 @@ func take_damage(amount: float, from_dir: Vector2, kb: float) -> void:
 	if float(build.get("thorns", 0.0)) > 0.0:
 		_thorns_burst()
 
+## A ring of flame around the knight: damages and ignites every enemy within
+## `radius`. Shared by Flare Parry and Phoenix Flask.
+func nova(dmg: float, radius: float) -> void:
+	for area in get_tree().get_nodes_in_group("enemy_hurtbox"):
+		if not is_instance_valid(area): continue
+		var tgt = area.get_meta("owner")
+		if tgt == null or not is_instance_valid(tgt) or not tgt.has_method("take_damage"): continue
+		if bool(tgt.get("dead")): continue
+		if tgt.global_position.distance_to(global_position) <= radius:
+			var dir: Vector2 = (tgt.global_position - global_position).normalized()
+			if dir == Vector2.ZERO: dir = Vector2(facing, 0.0)
+			tgt.take_damage(dmg * _damage_mul(tgt), Vector2(dir.x, -0.4), 320.0)
+			if tgt.has_method("apply_burn"):
+				tgt.apply_burn(Content.P_FLAME_BURN_DPS, Content.P_FLAME_BURN_TIME)
+	emit_signal("action_feedback", "nova", global_position)
+
 ## Cinder Skin: a hit taken scorches everything standing close.
 func _thorns_burst() -> void:
 	var dmg := float(build.get("thorns", 0.0))
@@ -761,6 +860,37 @@ func _heal(amount: float) -> void:
 	if _run_model: _run_model.build.hp = build.hp
 	emit_signal("hp_changed", float(build.hp), float(build.max_hp))
 
+## True when there is floor under both of the knight's flanks, a stride out.
+## A pit rescue must never return the knight to the very lip it fell from.
+func _ground_both_sides() -> bool:
+	var space := get_world_2d().direct_space_state
+	for side: float in [-1.0, 1.0]:
+		var from := global_position + Vector2(side * 38.0, 0.0)
+		var q := PhysicsRayQueryParameters2D.create(from, from + Vector2(0.0, Content.P_BODY_H * 0.5 + 14.0), Content.L_WORLD)
+		if space.intersect_ray(q).is_empty():
+			return false
+	return true
+
+## Spike pits cost health, not the run: the spikes bite (through dash or parry
+## immunity, since a pit is not an attack to dodge) and the knight is pulled
+## back to the last solid ground they stood on.
+func hit_hazard(amount: float) -> void:
+	if dead:
+		return
+	var held_iframes := iframes
+	iframes = 0.0
+	take_damage(amount, Vector2(0.0, -1.0), 0.0)
+	if dead:
+		return
+	global_position = _safe_pos
+	velocity = Vector2.ZERO
+	state = State.LOCOMOTION
+	_slam_active = false
+	_deactivate_hitbox()
+	iframes = maxf(1.0, held_iframes)
+	_hurt_flash = 0.15
+	emit_signal("action_feedback", "rescued", global_position)
+
 ## Crossing the world boundary is terminal, not a parryable or survivable hit.
 ## Dash immunity and Second Wind still apply to ordinary combat and hazards.
 func fall_out_of_world() -> void:
@@ -776,6 +906,8 @@ func fall_out_of_world() -> void:
 
 func _die() -> void:
 	dead = true
+	_death_t = 0.0
+	_flip_t = 0.0
 	riposte_time = 0.0
 	_riposte_attack = false
 	state = State.DEAD
@@ -791,8 +923,13 @@ func respawn_at(pos: Vector2, reset_resources: bool = false) -> void:
 	if _parry_area != null:
 		_parry_area.monitoring = false
 	global_position = pos
+	_safe_pos = pos
 	velocity = Vector2.ZERO
 	dead = false
+	_death_t = 0.0
+	_flip_t = 0.0
+	_cast_t = 0.0
+	_ignite_t = 0.0
 	state = State.LOCOMOTION
 	iframes = 1.2
 	attack_buffer = 0.0
@@ -835,53 +972,26 @@ func suppress_gameplay_input(frames: int = 2) -> void:
 func _draw() -> void:
 	var w := Content.P_BODY_W
 	var h := Content.P_BODY_H
-	var flicker := iframes > 0.0 and fmod(iframes, 0.12) < 0.06
+	var flicker := iframes > 0.0 and fmod(iframes, 0.12) < 0.06 and not dead
 	var body_col: Color = Content.PAL.player if not flicker else Content.PAL.player_accent
 	if _hurt_flash > 0.0: body_col = Color.WHITE
 	if _flask_heal_flash > 0.0:
 		body_col = body_col.lerp(VFX.TEAL, 0.5)
-	# Contact shadow (shrinks and fades with air time), then the flame-headed silhouette.
+	# Contact shadow (shrinks and fades with air time), then the jointed knight.
 	VFX.draw_contact_shadow(self, Vector2(0.0, h * 0.5 + 1.0), 36.0, 8.0, clampf(_air_time / 0.3, 0.0, 1.0))
-	var run_amount := clampf(absf(velocity.x) / Content.P_SPEED, 0.0, 1.0)
-	var bob := sin(_anim_time * 14.0) * 1.5 * run_amount if is_on_floor() else 0.0
-	var lean := clampf(velocity.x / 1800.0, -0.12, 0.12)
-	draw_set_transform(Vector2(0.0, bob), lean, Vector2.ONE)
-	# Tattered scarf/cape trails opposite the facing direction.
-	draw_colored_polygon(PackedVector2Array([
-		Vector2(-facing * 7.0, -h * 0.3),
-		Vector2(-facing * (25.0 + run_amount * 9.0), -h * 0.08),
-		Vector2(-facing * 12.0, h * 0.24),
-	]), Color("c94a28"))
-	# Boots and legs.
-	draw_line(Vector2(-7.0, h * 0.12), Vector2(-8.0 - facing * run_amount * 4.0, h * 0.48), Color("17131f"), 8.0, true)
-	draw_line(Vector2(7.0, h * 0.12), Vector2(8.0 + facing * run_amount * 4.0, h * 0.48), Color("221a2c"), 8.0, true)
-	# Asymmetric coat with a bright Graveflame sash.
-	var coat := PackedVector2Array([
-		Vector2(-w * 0.48, -h * 0.28), Vector2(w * 0.42, -h * 0.32),
-		Vector2(w * 0.52, h * 0.24), Vector2(0.0, h * 0.36),
-		Vector2(-w * 0.56, h * 0.20),
-	])
-	VFX.draw_shaded_polygon(self, coat, body_col, _hurt_flash <= 0.0)
-	VFX.draw_rim(self, coat, facing, 1.25 if _flame_time > 0.0 else 1.0)
-	draw_line(Vector2(-facing * 7.0, -h * 0.24), Vector2(facing * 8.0, h * 0.24), Content.PAL.player_accent, 4.0, true)
-	# Dark mask under an animated, entirely procedural flame crown.
-	var head_pos := Vector2(0.0, -h * 0.52)
-	draw_circle(head_pos, w * 0.40, Color("211828"))
-	VFX.draw_rim_circle(self, head_pos, w * 0.40, facing, 0.9)
-	var flame_col := Color("ff7a18") if _flame_time <= 0.0 else VFX.GOLD
-	for i in range(4):
-		var fx := -9.0 + float(i) * 6.0
-		var tip := 9.0 + sin(_anim_time * 10.0 + float(i) * 1.7) * 4.0
-		draw_colored_polygon(PackedVector2Array([
-			head_pos + Vector2(fx - 4.0, -4.0),
-			head_pos + Vector2(fx, -tip - 7.0),
-			head_pos + Vector2(fx + 4.0, -3.0),
-		]), flame_col)
-	draw_circle(head_pos + Vector2(facing * 4.0, -1.0), 2.8, Color("ffe8a3"))
-	# Sword silhouette reads even when no attack arc is active.
-	draw_line(Vector2(facing * 10.0, -4.0), Vector2(facing * 25.0, 13.0), Color("aab4c4"), 3.0, true)
-	draw_line(Vector2(facing * 7.0, 0.0), Vector2(facing * 14.0, -7.0), Color("f0b45a"), 3.0, true)
-	draw_set_transform(Vector2.ZERO, 0.0, Vector2.ONE)
+	if _pose.is_empty():
+		_pose = KnightArt.target(self).pose
+	var still := Feedback.motion_reduced
+	KnightArt.paint(self, Vector2.ZERO, _pose, facing, {
+		"coat": body_col,
+		"unshaded": _hurt_flash > 0.0,
+		"flame_mode": _flame_time > 0.0,
+		"t": 0.0 if still else _anim_time,
+		"blink": 1.0 if fmod(_anim_time, 3.7) > 3.58 and not still else 0.0,
+		"flip_scale": lerpf(1.0, 0.25, _turn_t / 0.07) if _turn_t > 0.0 else 1.0,
+	}, _smear if _draw_attack and not _riposte_attack else {})
+	if dead:
+		return
 	if _flame_time > 0.0:
 		var aura_alpha := 0.10 + sin(_anim_time * 8.0) * 0.035
 		draw_circle(Vector2(0.0, -8.0), 34.0, Color(1.0, 0.3, 0.05, aura_alpha))
@@ -896,20 +1006,12 @@ func _draw() -> void:
 	if state == State.HEAL:
 		var heal_progress := clampf(1.0 - _heal_time / Content.P_HEAL_TIME, 0.0, 1.0)
 		draw_arc(Vector2.ZERO, 33.0, -PI * 0.5, -PI * 0.5 + TAU * heal_progress, 32, VFX.TEAL, 4.0)
-		var fpos := Vector2(-facing * 14.0, -h * 0.2)
-		draw_rect(Rect2(fpos.x - 4.0, fpos.y - 4.0, 8.0, 10.0), Color(VFX.TEAL, 0.8))
-		draw_rect(Rect2(fpos.x - 2.0, fpos.y - 8.0, 4.0, 4.0), Color("8a6a3a"))
-	# attack arc
+	# The blade smear is part of the puppet; the counterthrust keeps its own line.
 	if _draw_attack and _riposte_attack:
 		# Counterthrust: a narrow forward blade, not the normal circular sweep.
 		var tip := Vector2(facing * (_attack_range + 8.0), -8.0)
 		draw_line(Vector2(facing * 16.0, -4.0), tip, Color(VFX.TEAL, 0.7), 5.0, true)
 		draw_line(Vector2(facing * 22.0, -4.0), tip, Color(VFX.HOT, 0.9), 1.5, true)
-	elif _draw_attack:
-		# Faint fan over the live hit area plus the white-gold-ember blade ribbon.
-		var origin := Vector2(facing * 8.0, -8.0)
-		_draw_arc(origin, _attack_range, _attack_arc, facing, Color(VFX.GOLD, 0.4), 1.0)
-		VFX.slash_ribbon(self, origin, _attack_range, _attack_arc, facing, 1.0, 11.0, 1.0)
 	if riposte_time > 0.0:
 		# Diegetic cue stays with the fighter instead of adding another HUD panel.
 		var cue := Color(VFX.TEAL, 0.65 if Feedback.flash_reduced else 0.95)
@@ -923,9 +1025,11 @@ func _draw() -> void:
 		var c := Color(1.0, 0.8, 0.3, t * 0.7)
 		draw_arc(Vector2(0.0, 10.0), rad * (1.0 - t * 0.3), 0, TAU, 32, c, 4.0)
 		draw_arc(Vector2(0.0, 10.0), rad * (1.0 - t * 0.5), 0, TAU, 32, Color(1.0, 0.5, 0.2, t * 0.4), 2.0)
-	# slam descent trail
+	# slam descent trail: a streak rising off the plunging blade.
 	if _slam_active:
-		draw_line(Vector2(0, 0), Vector2(0, 40), Color(1.0, 0.8, 0.3, 0.5), 3.0)
+		for i in range(3):
+			var sx := (float(i) - 1.0) * 7.0
+			draw_line(Vector2(sx, -30.0 - float(i % 2) * 8.0), Vector2(sx, -64.0 - float(i % 2) * 10.0), Color(1.0, 0.8, 0.3, 0.35 - float(i % 2) * 0.12), 2.0)
 	# parry shield arc
 	if _draw_parry > 0.0:
 		var pw: float = Content.PARRY_RANGE

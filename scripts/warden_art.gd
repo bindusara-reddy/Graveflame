@@ -138,7 +138,8 @@ static func paint(b,p: Dictionary) -> void:
 	var stride := sin(t*8.0)*5.0*walk if b.is_on_floor() else 2.0
 	var breathe := sin(t*2.2)*1.2
 	VFX.draw_contact_shadow(ci,Vector2(0,60),88.0,14.0,clampf(b._air_time/0.3,0.0,1.0))
-	ci.draw_set_transform(Vector2(0,breathe),float(p.lean)*face,Vector2(face,1))
+	var jitter: Vector2 = p.get("jitter", Vector2.ZERO)
+	ci.draw_set_transform(Vector2(jitter.x,breathe+jitter.y),float(p.lean)*face,Vector2(face,1))
 	# A broad flowing back mass, not separate armour ornaments.
 	var mantle: PackedVector2Array = BODY.mantle.duplicate()
 	for i in range(mantle.size()):
@@ -194,6 +195,27 @@ static func paint(b,p: Dictionary) -> void:
 	if p.windup and int(b.action_idx) == 1:
 		var palm: Vector2 = p.offhand+Vector2(-6,-18)
 		VFX.draw_flame(ci,palm,20.0+float(p.progress)*14.0,9.0,t,0.4,fire,HORN)
+	if p.has("dying"):
+		# Fire splitting the body along fault lines before it comes apart.
+		var dk: float = p.dying
+		var faults := [
+			[Vector2(-30,-44),Vector2(-12,-20),Vector2(-20,2),Vector2(-6,24)],
+			[Vector2(18,-60),Vector2(6,-38),Vector2(22,-14),Vector2(12,10)],
+			[Vector2(-40,-8),Vector2(-18,-6),Vector2(4,-16),Vector2(34,-4)],
+			[Vector2(0,-86),Vector2(10,-70),Vector2(2,-58)],
+		]
+		for i in range(faults.size()):
+			var reveal := clampf(dk * 4.0 - float(i) * 0.7, 0.0, 1.0)
+			if reveal <= 0.0:
+				continue
+			var line := PackedVector2Array()
+			var pts: Array = faults[i]
+			var n := int(ceil(reveal * float(pts.size() - 1))) + 1
+			for j in range(n):
+				line.append(pts[j])
+			if line.size() >= 2:
+				ci.draw_polyline(line,INK,6.0,true)
+				ci.draw_polyline(line,fire.lerp(Color.WHITE,dk*0.6),2.5+dk*2.0,true)
 	if p.windup and int(b.action_idx) == 3:
 		for i in range(3):
 			var x := 55.0+float(i)*27.0

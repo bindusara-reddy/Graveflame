@@ -11,6 +11,7 @@ extends Control
 ## chains, arrival veil) and Embers (particles, hidden under reduced motion).
 
 const VFX := preload("res://scripts/vfx.gd")
+const KnightArt := preload("res://scripts/knight_art.gd")
 
 ## Seconds for the arrival reveal: the furnace rises and the galleries emerge.
 const REVEAL_TIME := 1.6
@@ -313,7 +314,10 @@ func _draw_depth(ci: Control) -> void:
 			elif i > 0:
 				var q := mini(seg + 1, arc_top.size() - 1)
 				var drop := (10.0 + VFX.hash01(seg, 17) * 16.0) * k * (1.0 - 0.5 * u)
-				ci.draw_colored_polygon(PackedVector2Array([arc_top[seg], arc_top[q], arc_top[q] + Vector2(-2.0 * k, drop), arc_top[seg] + Vector2(3.0 * k, drop * 0.6)]), face.darkened(0.6))
+				# Straight drops: skewing the lower corners inward bow-ties the quad
+				# (and fails triangulation) wherever two arc points sit close together.
+				if arc_top[seg].distance_to(arc_top[q]) > 1.0:
+					ci.draw_colored_polygon(PackedVector2Array([arc_top[seg], arc_top[q], arc_top[q] + Vector2(0.0, drop), arc_top[seg] + Vector2(0.0, drop * 0.6)]), face.darkened(0.6))
 			seg += run
 	# Near vault and walls: the enclosure we stand inside, near-black with ribs.
 	var wall := Color("07050c")
@@ -419,7 +423,6 @@ func _draw_knight(ci: Control) -> void:
 	var s := ci.size
 	if s.x <= 0.0 or s.y <= 0.0:
 		return
-	var w := BODY_W
 	var h := BODY_H
 	var facing := 1.0
 	var sc := KNIGHT_SCALE * _k()
@@ -429,38 +432,18 @@ func _draw_knight(ci: Control) -> void:
 	var origin := knight_foot() + Vector2(0.0, -h * 0.5) * sc
 	ci.draw_set_transform(origin, 0.0, Vector2(sc, sc))
 	VFX.draw_ellipse(ci, Vector2(0.0, h * 0.5 + 1.0), 17.0, 3.6, Color(0.0, 0.0, 0.0, 0.35))
-	# Tattered scarf/cape trails opposite the facing direction, lifted by the draft.
-	var lift := sin(anim * 1.7) * 1.5
-	ci.draw_colored_polygon(PackedVector2Array([
-		Vector2(-facing * 7.0, -h * 0.3),
-		Vector2(-facing * 25.0, -h * 0.08 - lift),
-		Vector2(-facing * 12.0, h * 0.24),
-	]), Color("c94a28"))
-	ci.draw_line(Vector2(-7.0, h * 0.12), Vector2(-8.0, h * 0.48), Color("17131f"), 8.0, true)
-	ci.draw_line(Vector2(7.0, h * 0.12), Vector2(8.0, h * 0.48), Color("221a2c"), 8.0, true)
-	var coat := PackedVector2Array([
-		Vector2(-w * 0.48, -h * 0.28), Vector2(w * 0.42, -h * 0.32),
-		Vector2(w * 0.52, h * 0.24), Vector2(0.0, h * 0.36),
-		Vector2(-w * 0.56, h * 0.20),
-	])
-	VFX.draw_shaded_polygon(ci, coat, body_col, true)
-	VFX.draw_rim(ci, coat, facing, 1.0)
-	ci.draw_line(Vector2(-facing * 7.0, -h * 0.24), Vector2(facing * 8.0, h * 0.24), Content.PAL.player_accent, 4.0, true)
-	var head_pos := Vector2(0.0, -h * 0.52)
-	ci.draw_circle(head_pos, w * 0.40, Color("211828"))
-	VFX.draw_rim_circle(ci, head_pos, w * 0.40, facing, 0.9)
-	var flame_col := Color("ff7a18")
-	for i in range(4):
-		var fx := -9.0 + float(i) * 6.0
-		var tip := 9.0 + sin(anim * 10.0 + float(i) * 1.7) * 4.0
-		ci.draw_colored_polygon(PackedVector2Array([
-			head_pos + Vector2(fx - 4.0, -4.0),
-			head_pos + Vector2(fx, -tip - 7.0),
-			head_pos + Vector2(fx + 4.0, -3.0),
-		]), flame_col)
-	ci.draw_circle(head_pos + Vector2(facing * 4.0, -1.0), 2.8, Color("ffe8a3"))
-	ci.draw_line(Vector2(facing * 10.0, -4.0), Vector2(facing * 25.0, 13.0), Color("aab4c4"), 3.0, true)
-	ci.draw_line(Vector2(facing * 7.0, 0.0), Vector2(facing * 14.0, -7.0), Color("f0b45a"), 3.0, true)
+	# The same jointed puppet the knight plays as, at rest on the landing: it
+	# breathes, and the updraft out of the drop lifts the cape.
+	var pose: Dictionary = KnightArt.REST.duplicate()
+	pose.breath = sin(anim * 1.9) * 0.018
+	pose.arm_f = 1.14 + sin(anim * 1.9 + 0.6) * 0.03
+	pose.cape = 0.18 + sin(anim * 1.7) * 0.12
+	pose.flutter = 0.45
+	pose.head = -0.04
+	KnightArt.paint(ci, origin, pose, facing, {
+		"coat": body_col, "t": anim, "scale": sc,
+		"blink": 1.0 if fmod(anim, 4.3) > 4.18 else 0.0,
+	})
 	ci.draw_set_transform(Vector2.ZERO, 0.0, Vector2.ONE)
 
 

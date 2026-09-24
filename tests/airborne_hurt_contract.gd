@@ -134,7 +134,10 @@ func run() -> void:
 			break
 	Input.action_release("move_right")
 	print("LEDGE_HURT_ENTRY: pos=", p.position, " floor=", p.is_on_floor(), " coyote=", p.coyote, " jumps=", p.jumps_left)
-	check(left_ledge and p.position.x > 400.0 and p.position.x < 450.0, "real right input walks off the selected causeway ledge")
+	# The causeway's near floor ends where its pit begins; read it from the room
+	# rather than pinning a number that moves whenever the room is re-laid.
+	var ledge_x: float = (game.room.template.platforms[0] as Rect2).end.x
+	check(left_ledge and p.position.x > ledge_x - 20.0 and p.position.x < ledge_x + 30.0, "real right input walks off the selected causeway ledge")
 	check(p.coyote > 0.0 and p.jumps_left == Content.P_MAX_JUMPS, "damage fixture begins inside real coyote time with the untouched grounded budget")
 	var ledge_hp_before := float(p.build.hp)
 	p.take_damage(12.0, Vector2.UP, 260.0)

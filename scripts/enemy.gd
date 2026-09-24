@@ -14,7 +14,7 @@ signal pyre_burst(pos: Vector2, radius: float)
 ## Windup announcement. The game voices this so an incoming hit is never a surprise.
 signal telegraphed(kind: String, pos: Vector2, elite: bool)
 
-enum Kind { STALKER, HOPPER, WISP, BRUTE, BOMBER }
+enum Kind { STALKER, HOPPER, WISP, BRUTE, BOMBER, CROW }
 enum EState { SPAWN, SEEK, WINDUP, ATTACK, RECOVER, STAGGER, DEAD }
 
 ## Telegraph id for an archetype's windup. The game resolves these to sounds, so
@@ -25,11 +25,18 @@ static func telegraph_id(p_kind: int) -> String:
 		Kind.WISP: return "wisp"
 		Kind.BRUTE: return "brute"
 		Kind.BOMBER: return "bomber"
+		Kind.CROW: return "crow"
 		_: return "stalker"
 
 ## Pyre boon damage, mirrored from the player's build by the game so a burning
 ## enemy can detonate against its neighbours without holding a player reference.
 static var pyre_damage := 0.0
+## Vows sworn for the current descent (id -> true), set by the game at run start.
+static var vows: Dictionary = {}
+
+## Damage multiplier from the Vow of Embers, for attacks that bypass `damage_mul`.
+static func vow_damage() -> float:
+	return 1.35 if vows.has("v_embers") else 1.0
 
 var kind: int = Kind.STALKER
 var data: Dictionary = {}
@@ -68,11 +75,41 @@ var _ledge_ray: RayCast2D
 var _air_time := 0.0  # visual only: drives the contact shadow
 var _anim_t := 0.0  # visual only: idle motion clock
 var _elite_anim := 0.0  # visual only: elite scale-up clock so elites pop instead of spawning big
+## Direction the last blow travelled; the paper-cut death splits along it.
+var _last_hit_dir := Vector2.RIGHT
+## Set when the bomber goes off: a blast leaves nothing to cut in half.
+var exploded_out := false
+## A drawing-only copy (no collision, no AI) used by the paper-cut death.
+var ghost := false
+
+## A frozen, collision-free copy of this creature's drawing, recoiling from the blow.
+func echo() -> Node2D:
+	var g: Enemy = Enemy.new()
+	g.ghost = true
+	g.kind = kind
+	g.data = data
+	g.elite = elite
+	g.facing = facing
+	g.state = EState.STAGGER
+	g.stagger_t = 0.18
+	g._anim_t = _anim_t
+	g._air_time = _air_time
+	g.hp = 1.0
+	g.hp_max = 1.0
+	g.shield_active = shield_active
+	g._hurt_flash = 0.1
+	return g
 
 ## `mods` may carry hp_mul, dmg_mul (difficulty curve) and elite (bool).
 func setup(p_kind: int, p_pos: Vector2, mods: Dictionary = {}) -> void:
 	kind = p_kind
 	data = Content.ENEMY[p_kind]
+	if vows.has("v_haste"):
+		# Vow of Haste: quicker feet, shorter tells, less rest between strikes.
+		data = data.duplicate()
+		data.speed = float(data.speed) * 1.15
+		data.windup = float(data.windup) * 0.85
+		data.cd = float(data.cd) * 0.9
 	elite = bool(mods.get("elite", false))
 	_elite_anim = 0.25 if elite else 0.0
 	var hp_mul := float(mods.get("hp_mul", 1.0)) * (Content.ELITE_HP_MUL if elite else 1.0)
@@ -93,6 +130,13 @@ func attack_damage() -> float:
 	return float(data.damage) * damage_mul
 
 func _ready() -> void:
+	if ghost:
+		set_physics_process(false)
+		collision_layer = 0
+		collision_mask = 0
+		if data.is_empty():
+			data = Content.ENEMY[Kind.STALKER]
+		return
 	collision_layer = Content.L_ENEMY_BODY
 	collision_mask = Content.L_WORLD
 	if data.is_empty():
@@ -135,9 +179,9 @@ func _ready() -> void:
 	_atk_area.set_meta("attack_kind", "melee")
 	_atk_area.set_meta("attack_active", false)
 	add_child(_atk_area)
-	if kind == Kind.WISP:
+	if kind == Kind.WISP or kind == Kind.CROW:
 		_wisp_y = global_position.y
-		collision_mask = 0  # wisp hovers, ignores world
+		collision_mask = 0  # flyers ignore the world
 	else:
 		_ledge_ray = RayCast2D.new()
 		_ledge_ray.collision_mask = Content.L_WORLD
@@ -191,6 +235,7 @@ func _step_seek(delta: float) -> void:
 		Kind.WISP: _seek_wisp(to_p, delta, player)
 		Kind.BRUTE: _seek_brute(to_p, delta)
 		Kind.BOMBER: _seek_bomber(to_p, delta)
+		Kind.CROW: _seek_crow(to_p, delta, player)
 
 func _seek_stalker(to_p: Vector2, delta: float) -> void:
 	_apply_gravity(delta)
@@ -231,6 +276,20 @@ func _seek_wisp(to_p: Vector2, delta: float, player) -> void:
 	if cd <= 0.0 and absf(to_p.x) < Content.WISP_RANGE and absf(to_p.y) < 200.0:
 		_begin_windup()
 
+## Circle above the knight, drifting from side to side; commit to a dive when
+## they are below and within reach.
+func _seek_crow(to_p: Vector2, delta: float, player) -> void:
+	_wisp_t += delta
+	var target: Vector2 = player.global_position + Vector2(sin(_wisp_t * 0.9 + float(_owner_id % 7)) * 150.0, -Content.CROW_HOVER + sin(_wisp_t * 1.8) * 16.0)
+	target.y = maxf(target.y, 90.0)
+	var want := (target - global_position)
+	var speed := float(data.speed)
+	var desired := want.normalized() * minf(speed, want.length() * 3.0)
+	velocity = velocity.move_toward(desired, 900.0 * delta)
+	global_position += velocity * delta
+	if cd <= 0.0 and to_p.y > 70.0 and absf(to_p.x) < 300.0 and _spawn_anim <= 0.0:
+		_begin_windup()
+
 func _seek_brute(to_p: Vector2, delta: float) -> void:
 	# Slow heavy melee approach
 	_apply_gravity(delta)
@@ -264,6 +323,17 @@ func _begin_windup() -> void:
 	emit_signal("telegraphed", telegraph_id(kind), global_position, elite)
 
 func _step_windup(delta: float) -> void:
+	if kind == Kind.CROW:
+		# Hang in the air, rising a little as the wings draw back.
+		velocity = velocity.move_toward(Vector2(0.0, -30.0), 1200.0 * delta)
+		global_position += velocity * delta
+		var p = _get_player()
+		if p != null and is_instance_valid(p):
+			facing = signf(p.global_position.x - global_position.x) if absf(p.global_position.x - global_position.x) > 4.0 else facing
+		st_timer -= delta
+		if st_timer <= 0.0:
+			_begin_dive()
+		return
 	_apply_gravity(delta)
 	_move_x(0.0, delta)
 	move_and_slide()
@@ -286,7 +356,49 @@ func _step_windup(delta: float) -> void:
 			_atk_area.monitoring = true
 			_atk_area.set_meta("attack_active", true)
 
+## The dive: a straight line at where the knight stood when the shriek ended.
+func _begin_dive() -> void:
+	var p = _get_player()
+	var aim := Vector2(facing, 1.2).normalized()
+	if p != null and is_instance_valid(p):
+		aim = (p.global_position - global_position).normalized()
+		if aim.y < 0.35:
+			aim = Vector2(signf(aim.x) if aim.x != 0.0 else facing, 0.35).normalized()
+	state = EState.ATTACK
+	velocity = aim * float(data.get("dive_speed", 720.0))
+	st_timer = 0.9
+	_atk_hit = false
+	_atk_shape.position = Vector2.ZERO
+	_atk_shape.disabled = false
+	_atk_area.monitoring = true
+	_atk_area.set_meta("attack_active", true)
+
+func _step_dive(delta: float) -> void:
+	global_position += velocity * delta
+	st_timer -= delta
+	if not _atk_hit:
+		for area in _atk_area.get_overlapping_areas():
+			if not is_instance_valid(area) or area.get_meta("team") == "enemy": continue
+			var tgt = area.get_meta("owner")
+			if tgt != null and is_instance_valid(tgt) and tgt.has_method("take_damage"):
+				tgt.take_damage(attack_damage(), Vector2(signf(velocity.x), -0.3), float(data.knock))
+				_atk_hit = true
+				break
+	var floor_hit := global_position.y >= Content.FLOOR_Y - float(data.h) * 0.5 - 6.0 and velocity.y > 0.0
+	if st_timer <= 0.0 or _atk_hit or floor_hit:
+		_atk_shape.disabled = true
+		_atk_area.monitoring = false
+		_atk_area.set_meta("attack_active", false)
+		state = EState.RECOVER
+		st_timer = float(data.recover)
+		cd = float(data.cd)
+		# Pull out of the dive and climb away.
+		velocity = Vector2(velocity.x * 0.35, -300.0)
+
 func _step_attack(delta: float) -> void:
+	if kind == Kind.CROW:
+		_step_dive(delta)
+		return
 	_apply_gravity(delta)
 	_move_x(facing * float(data.speed) * 0.3, delta)
 	move_and_slide()
@@ -333,10 +445,18 @@ func _do_explosion(reduced: bool = false) -> void:
 			var kdir: Vector2 = (player.global_position - global_position).normalized()
 			if kdir == Vector2.ZERO: kdir = Vector2.UP
 			player.take_damage(blast_damage, Vector2(kdir.x, -0.5), 380.0)
+	exploded_out = true
 	emit_signal("exploded", global_position, blast, blast_damage)
 	_die()
 
 func _step_recover(delta: float) -> void:
+	if kind == Kind.CROW:
+		velocity = velocity.move_toward(Vector2.ZERO, 520.0 * delta)
+		global_position += velocity * delta
+		st_timer -= delta
+		if st_timer <= 0.0:
+			state = EState.SEEK
+		return
 	_apply_gravity(delta)
 	_move_x(0.0, delta)
 	move_and_slide()
@@ -354,6 +474,7 @@ func _step_stagger(delta: float) -> void:
 
 func take_damage(amount: float, from_dir: Vector2, kb: float) -> void:
 	if dead: return
+	_last_hit_dir = from_dir
 	# Brute shield: frontal hits absorbed by shield first
 	if shield_active and kind == Kind.BRUTE:
 		# Frontal = attacker is on the side the brute is facing
@@ -389,7 +510,7 @@ func take_damage(amount: float, from_dir: Vector2, kb: float) -> void:
 	# Elites shrug off hits faster so they keep pressure on.
 	stagger_t = 0.12 if elite else 0.18
 	velocity = from_dir.normalized() * kb * (0.6 if elite else 1.0)
-	if kind == Kind.WISP:
+	if kind == Kind.WISP or kind == Kind.CROW:
 		velocity.y = from_dir.y * kb * 0.5
 	# An armed fuse deliberately keeps counting down through this stagger state.
 
@@ -456,7 +577,7 @@ func _die(award_reward: bool = true) -> void:
 	emit_signal("died", score if award_reward else 0)
 
 func _apply_gravity(delta: float) -> void:
-	if kind != Kind.WISP:
+	if kind != Kind.WISP and kind != Kind.CROW:
 		velocity.y += Content.GRAVITY * delta
 
 func _move_x(speed: float, delta: float) -> void:
@@ -514,6 +635,16 @@ func _draw() -> void:
 	if kind == Kind.WISP:
 		VFX.draw_contact_shadow(self, Vector2(0.0, w * 1.1), w * 0.9, 6.0, 1.0)
 		VFX.set_pose(self, Vector2.ZERO, facing, Vector2(pop, pop), 0.0)
+	elif kind == Kind.CROW:
+		# Flyers pivot on their centre; a dive tips the whole cut-out down its line.
+		var tilt := 0.0
+		if state == EState.ATTACK:
+			tilt = atan2(velocity.y, absf(velocity.x))
+		elif state == EState.WINDUP:
+			tilt = -0.25 * tw + (sin(_anim_t * 70.0) * 0.05 * tw if not Feedback.motion_reduced else 0.0)
+		elif state == EState.STAGGER:
+			tilt = -0.5
+		VFX.set_pose(self, Vector2.ZERO, facing, Vector2(pop, pop), tilt)
 	else:
 		VFX.draw_contact_shadow(self, Vector2(0.0, h * 0.5 + 1.0), w * 1.1 * (2.0 - squash), 8.0, air)
 		VFX.set_pose(self, Vector2(0.0, h * 0.5), facing, Vector2(pop * (2.0 - squash), pop * squash), lean)
@@ -537,7 +668,16 @@ func _draw() -> void:
 		Kind.WISP: _draw_wisp(w, base, mid, t, tw, flash)
 		Kind.BRUTE: _draw_brute(w, h, base, mid, t, tw, ta, flash)
 		Kind.BOMBER: _draw_bomber(w, h, base, mid, t, flash)
+		Kind.CROW: _draw_crow(w, h, base, mid, t, tw, flash)
 	draw_set_transform_matrix(Transform2D.IDENTITY)
+	# The committed line: in the last beat of the shriek, a faint dashed track
+	# shows where the dive will go, so a sidestep is a read, not a guess.
+	if kind == Kind.CROW and state == EState.WINDUP and tw > 0.45:
+		var pl = _get_player()
+		if pl != null and is_instance_valid(pl):
+			var to: Vector2 = (pl.global_position - global_position)
+			var k := clampf((tw - 0.45) / 0.55, 0.0, 1.0)
+			draw_dashed_line(Vector2.ZERO, to.normalized() * minf(to.length(), 260.0), Color(1.0, 0.45, 0.15, 0.18 + 0.3 * k), 2.0, 9.0)
 	# Bomber fuse telegraph: expanding ring toward the true blast radius.
 	if kind == Kind.BOMBER and _bomb_armed and _fuse_t > 0.0:
 		var ft: float = 1.0 - _fuse_t / _fuse_total
@@ -547,7 +687,7 @@ func _draw() -> void:
 			var pulse := 0.5 + sin(Time.get_ticks_msec() * 0.05) * 0.5
 			draw_circle(Vector2.ZERO, w * 0.5, Color(1.0, 0.3, 0.2, pulse * 0.4))
 	# Active melee reach: a ground arc under the true sweep, not a debug box.
-	if state == EState.ATTACK:
+	if state == EState.ATTACK and kind != Kind.CROW:
 		var reach := PackedVector2Array()
 		for i in range(17):
 			var u := float(i) / 16.0
@@ -772,3 +912,57 @@ func _draw_bomber(w: float, h: float, base: Color, mid: Color, t: float, flash: 
 	if _bomb_armed:
 		for k in range(3):
 			draw_circle(spark + Vector2(sin(t * 25.0 + float(k) * 2.0) * 6.0, -3.0 - fmod(t * 40.0 + float(k) * 7.0, 10.0)), 1.0, Color(VFX.HOT, 0.8))
+
+func _draw_crow(w: float, h: float, base: Color, mid: Color, t: float, tw: float, flash: bool) -> void:
+	# Wing beat: steady flaps while circling, raised and shivering on the shriek,
+	# swept back flat along the body in the dive.
+	var flap := sin(t * 13.0) * 0.85
+	if state == EState.WINDUP:
+		flap = 0.7 + sin(t * 60.0) * 0.12 * tw
+	elif state == EState.ATTACK:
+		flap = -0.95
+	elif state == EState.RECOVER:
+		flap = sin(t * 22.0) * 1.0
+	var shoulder := Vector2(-1.0, -h * 0.22)
+	var far := base if flash else base.darkened(0.3)
+	_crow_wing(shoulder + Vector2(3.0, -1.0), flap * 0.85 - 0.15, w * 0.95, far)
+	# Tail fan: three ragged feathers.
+	draw_colored_polygon(PackedVector2Array([
+		Vector2(-w * 0.35, -h * 0.12), Vector2(-w * 0.95, -h * 0.34), Vector2(-w * 0.82, -h * 0.08),
+		Vector2(-w * 1.0, h * 0.06), Vector2(-w * 0.8, h * 0.16), Vector2(-w * 0.9, h * 0.34), Vector2(-w * 0.32, h * 0.16),
+	]), base)
+	# Body: a sleek cut-paper teardrop from beak to tail root.
+	var body := PackedVector2Array([
+		Vector2(w * 0.5, -h * 0.1), Vector2(w * 0.36, -h * 0.42), Vector2(w * 0.08, -h * 0.5),
+		Vector2(-w * 0.3, -h * 0.3), Vector2(-w * 0.45, -h * 0.02), Vector2(-w * 0.26, h * 0.34),
+		Vector2(w * 0.12, h * 0.36), Vector2(w * 0.38, h * 0.14),
+	])
+	VFX.draw_shaded_polygon(self, body, mid, not flash)
+	VFX.draw_rim(self, body, 1.0, 0.9)
+	# Dark head band and a heavy bone beak.
+	draw_colored_polygon(PackedVector2Array([Vector2(w * 0.5, -h * 0.1), Vector2(w * 0.36, -h * 0.42), Vector2(w * 0.12, -h * 0.46), Vector2(w * 0.16, h * 0.02), Vector2(w * 0.38, h * 0.14)]), base)
+	var beak := Color("d8c7a4") if not flash else Color.WHITE
+	draw_colored_polygon(PackedVector2Array([Vector2(w * 0.46, -h * 0.2), Vector2(w * 0.86, -h * 0.02 + tw * 2.0), Vector2(w * 0.46, h * 0.06)]), beak)
+	if tw > 0.0:
+		# Beak parted mid-shriek.
+		draw_colored_polygon(PackedVector2Array([Vector2(w * 0.48, h * 0.02), Vector2(w * 0.8, h * 0.12 + tw * 4.0), Vector2(w * 0.46, h * 0.1)]), beak.darkened(0.2))
+	VFX.draw_ember_dot(self, Vector2(w * 0.3, -h * 0.2), 1.9 + tw * 1.2, VFX.GOLD, 0.8 + tw * 0.6)
+	# Talons tucked under, reaching forward in the dive.
+	var reach := 6.0 if state == EState.ATTACK else 0.0
+	for i in range(2):
+		var fx := w * (0.02 + 0.12 * float(i))
+		draw_line(Vector2(fx, h * 0.3), Vector2(fx + 3.0 + reach, h * 0.52), base, 2.0, true)
+	# Near wing over the body.
+	_crow_wing(shoulder, flap, w, mid.darkened(0.12) if not flash else mid)
+
+## One wing, pivoting at the shoulder: a leading edge and three primaries.
+func _crow_wing(shoulder: Vector2, angle: float, span: float, col: Color) -> void:
+	var pts := PackedVector2Array([
+		Vector2(4.0, 0.0), Vector2(-span * 0.1, -span * 0.52), Vector2(-span * 0.46, -span * 0.74),
+		Vector2(-span * 0.5, -span * 0.58), Vector2(-span * 0.66, -span * 0.6), Vector2(-span * 0.62, -span * 0.44),
+		Vector2(-span * 0.76, -span * 0.4), Vector2(-span * 0.58, -span * 0.24), Vector2(-span * 0.34, -span * 0.06),
+	])
+	var xf := Transform2D(angle, shoulder)
+	var wing := xf * pts
+	draw_colored_polygon(wing, col)
+	draw_polyline(PackedVector2Array([wing[0], wing[1], wing[2]]), Color(VFX.RIM, 0.35), 1.2, true)

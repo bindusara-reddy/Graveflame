@@ -4,6 +4,7 @@ extends Node2D
 
 const VFX := preload("res://scripts/vfx.gd")
 const CryptProp := preload("res://scripts/crypt_prop.gd")
+const Severed := preload("res://scripts/severed.gd")
 
 signal completed
 signal cleared(room_name: String)
@@ -19,6 +20,7 @@ signal pyre_burst(pos: Vector2, radius: float)
 signal telegraphed(kind: String, pos: Vector2, elite: bool)
 signal enemy_spawned(pos: Vector2, color: Color)
 signal prop_shattered(pos: Vector2, force: Vector2, color: Color)
+signal boss_shattered(pos: Vector2)
 
 var template: Dictionary = {}
 var enemies: Array[Node] = []
@@ -26,7 +28,18 @@ var props: Array[Area2D] = []
 var boss: Boss = null
 var is_boss: bool = false
 var exit_open: bool = false
+## The primary (boon) rift. Kept as its own rect for callers that only care
+## where "the way out" is; `exits` holds every rift the chamber opens.
 var _exit_rect := Rect2(0, 0, 50, 90)
+## What the doors out of this chamber lead to, set by the game before _ready.
+var exit_kinds: Array = ["boon"]
+## [{ "kind": String, "rect": Rect2 }], in the order they stand left to right.
+var exits: Array = []
+## The rift the knight actually walked into.
+var chosen_exit := "boon"
+## A Trial chamber: a guaranteed elite and an extra wave.
+var trial := false
+var _near_idx := -1
 var _rng := RandomNumberGenerator.new()
 var _player_ref: Node = null
 var _waves: Array = []
@@ -49,6 +62,7 @@ func setup(tmpl: Dictionary, p_is_boss: bool, player: Node, seed_val: int) -> vo
 
 func _ready() -> void:
 	_difficulty = Content.difficulty_for_room(_room_index_from_template())
+	_difficulty.dmg_mul = float(_difficulty.dmg_mul) * Enemy.vow_damage()
 	_build_geometry()
 	_build_walls()
 	_build_boundaries()
@@ -66,9 +80,18 @@ func _process(delta: float) -> void:
 			_wave_index += 1
 			_spawn_wave()
 	if exit_open and not is_boss and is_instance_valid(_player_ref):
-		_near_exit = _exit_rect.grow(42.0).has_point(_player_ref.global_position)
+		_near_idx = -1
+		var best := INF
+		for i in range(exits.size()):
+			var r: Rect2 = exits[i].rect
+			var d := absf(r.get_center().x - _player_ref.global_position.x)
+			if r.grow(42.0).has_point(_player_ref.global_position) and d < best:
+				best = d
+				_near_idx = i
+		_near_exit = _near_idx >= 0
 		if _near_exit and not _exit_used and Input.is_action_just_pressed("interact"):
 			_exit_used = true
+			chosen_exit = str(exits[_near_idx].kind)
 			emit_signal("completed")
 	queue_redraw()
 
@@ -97,6 +120,13 @@ func _build_props() -> void:
 			if props.size() >= 18: return
 			var point := Vector2(platform.position.x + platform.size.x * (float(i) + 0.5) / float(count), platform.position.y)
 			if absf(point.x - entry.x) < 85.0 or absf(point.x - exit.x) < 65.0:
+				continue
+			# Keep every rift's arch clear, not just the primary one.
+			var at_rift := false
+			for e in exits:
+				if absf(point.x - (e.rect as Rect2).get_center().x) < 65.0:
+					at_rift = true
+			if at_rift:
 				continue
 			var blocked := false
 			for wall: Rect2 in template.get("walls", []):
@@ -159,11 +189,19 @@ func _build_hazards() -> void:
 func _on_hazard_body(body: Node) -> void:
 	if body is Player:
 		# Damage cancels combat hitboxes; defer it until physics queries finish.
-		body.take_damage.call_deferred(18.0, Vector2(0.0, -1.0), 260.0)
+		body.hit_hazard.call_deferred(18.0)
 
+## The boon rift stands at the template's exit; an alternative, when offered,
+## stands 170px nearer the room so the knight passes it on the way.
 func _setup_exit() -> void:
 	var ex: Vector2 = template.get("exit", Vector2(1180, Content.FLOOR_Y - 80))
 	_exit_rect = Rect2(ex.x - 25.0, ex.y - 45.0, 50.0, 90.0)
+	exits.clear()
+	for kind in exit_kinds:
+		if str(kind) == "boon":
+			continue
+		exits.append({ "kind": str(kind), "rect": Rect2(ex.x - 195.0, ex.y - 45.0, 50.0, 90.0) })
+	exits.append({ "kind": "boon", "rect": _exit_rect })
 
 func _spawn_encounter() -> void:
 	if is_boss:
@@ -172,8 +210,13 @@ func _spawn_encounter() -> void:
 	var idx := _room_index_from_template()
 	_waves = Content.generate_waves(idx, _rng)
 	_wave_index = 0
+	if trial and not _waves.is_empty():
+		# A Trial doubles down: one more wave, and it always carries an elite.
+		_waves.append((_waves[_waves.size() - 1] as Array).duplicate())
+		_difficulty.hp_mul = float(_difficulty.hp_mul) * 1.15
 	# At most one elite per room, placed in a random wave slot.
-	if not _waves.is_empty() and _rng.randf() < Content.elite_chance(idx):
+	var gilded := Enemy.vows.has("v_gilded")
+	if not _waves.is_empty() and (trial or gilded or _rng.randf() < Content.elite_chance(idx)):
 		var w := _rng.randi_range(0, _waves.size() - 1)
 		var wave: Array = _waves[w]
 		_elite_slot = Vector2i(w, _rng.randi_range(0, wave.size() - 1))
@@ -243,6 +286,7 @@ func _spawn_boss() -> void:
 	boss.exploded.connect(_on_enemy_exploded)
 	boss.summon_requested.connect(_on_boss_summon)
 	boss.telegraphed.connect(_on_enemy_telegraphed)
+	boss.shattered.connect(func(pos: Vector2): boss_shattered.emit(pos))
 	emit_signal("boss_spawned")
 
 func _on_boss_summon(kind: int, pos: Vector2) -> void:
@@ -261,6 +305,10 @@ func _on_enemy_died(score: int, who: Node) -> void:
 			tier = 2
 		elif bool(who.get("elite")):
 			tier = 1
+		# A creature cut down by the knight comes apart along the blow; one that
+		# fell into the pit or blew itself up leaves nothing to split.
+		if score > 0 and tier < 2 and not bool(who.get("exploded_out")):
+			Severed.spawn(self, who, who._last_hit_dir, int(who.get_instance_id()))
 	emit_signal("enemy_died", score, pos, tier, color)
 	_clean_dead()
 	if is_boss:
@@ -301,7 +349,27 @@ func get_entry_point() -> Vector2:
 	return Vector2(template.get("entry", Vector2(180, Content.FLOOR_Y - 80)))
 
 func is_at_exit(pos: Vector2) -> bool:
-	return exit_open and _exit_rect.has_point(pos)
+	if not exit_open:
+		return false
+	for e in exits:
+		if (e.rect as Rect2).has_point(pos):
+			return true
+	return false
+
+## Every open rift's centre, for the lights.
+func exit_centers() -> PackedVector2Array:
+	var out := PackedVector2Array()
+	for e in exits:
+		out.append((e.rect as Rect2).get_center())
+	return out
+
+## Rift colour and label by what lies beyond it.
+static func exit_style(kind: String) -> Dictionary:
+	match kind:
+		"font": return { "color": Color("2be4c8"), "label": "HEALING FONT", "sigil": "rift_font" }
+		"cache": return { "color": Color("ffd166"), "label": "FORGE CACHE", "sigil": "rift_cache" }
+		"trial": return { "color": Color("e8405c"), "label": "TRIAL", "sigil": "rift_trial" }
+	return { "color": Color("ff8a2a"), "label": "BOON", "sigil": "rift_boon" }
 
 func _accent_for(tag: String) -> Color:
 	match tag:
@@ -536,14 +604,20 @@ func _draw_hazard(r: Rect2, m: Dictionary) -> void:
 		var ember_y := r.position.y + 10.0 - fmod(t * (12.0 + float(i) * 2.0) + float(i * 9), 34.0)
 		draw_circle(Vector2(ember_x, ember_y), 1.5 + float(i % 2), Color(1.0, 0.35, 0.12, 0.55))
 
-## Rift gate: runed pillars, a keystone arch and, once unsealed, a turning vortex.
+## Rift gates: runed pillars, a keystone arch and, once unsealed, a turning
+## vortex in the colour of what lies beyond, with its sigil hung over the arch.
 func _draw_exit(m: Dictionary) -> void:
 	if is_boss:
 		return  # The throne room has no rift; the Warden's death ends the run.
+	for i in range(exits.size()):
+		_draw_rift((exits[i].rect as Rect2).get_center(), str(exits[i].kind), m, i == _near_idx, i)
+
+func _draw_rift(c: Vector2, kind: String, m: Dictionary, near: bool, salt: int) -> void:
 	var t := _ambient_t if not Feedback.motion_reduced else 0.0
-	var ec: Color = Content.PAL.exit if exit_open else Color("555560")
-	var c := _exit_rect.get_center()
+	var style := exit_style(kind)
+	var ec: Color = style.color if exit_open else Color("555560")
 	var stone: Color = (m.stone as Color).lightened(0.1)
+	var ph := float(salt) * 1.7
 	# Pillars with rune notches that light when the way is open.
 	for side: float in [-1.0, 1.0]:
 		var px := c.x + side * 30.0
@@ -551,28 +625,39 @@ func _draw_exit(m: Dictionary) -> void:
 		draw_rect(Rect2(px - 7.0, c.y - 48.0, 14.0, 6.0), stone.lightened(0.1))
 		for i in range(4):
 			var ry := c.y - 32.0 + float(i) * 18.0
-			var lit := exit_open and (fmod(t * 2.0 + float(i) * 0.7, 4.0) < 3.0)
+			var lit := exit_open and (fmod(t * 2.0 + float(i) * 0.7 + ph, 4.0) < 3.0)
 			draw_rect(Rect2(px - 2.5, ry, 5.0, 8.0), Color(ec, 0.9 if lit else 0.35))
 	draw_arc(c + Vector2(0.0, -28.0), 30.0, PI, TAU, 20, stone.darkened(0.1), 8.0)
 	draw_rect(Rect2(c.x - 5.0, c.y - 62.0, 10.0, 8.0), Color(ec, 0.9 if exit_open else 0.4))
 	if exit_open:
-		var pulse := 0.82 + sin(t * 5.0) * 0.12
+		var pulse := 0.82 + sin(t * 5.0 + ph) * 0.12
 		draw_circle(c, 30.0 * pulse, Color(ec, 0.14))
 		draw_colored_polygon(PackedVector2Array([
 			c + Vector2(0.0, -30.0), c + Vector2(18.0, 0.0),
 			c + Vector2(0.0, 30.0), c + Vector2(-18.0, 0.0),
 		]), Color(ec, 0.2))
 		for i in range(3):
-			var a0 := t * 1.6 + float(i) * TAU / 3.0
+			var a0 := t * 1.6 + float(i) * TAU / 3.0 + ph
 			draw_arc(c, 9.0 + float(i) * 6.0, a0, a0 + PI * 1.2, 18, Color(ec, 0.75 - float(i) * 0.18), 2.5)
 			draw_arc(c, 26.0 - float(i) * 4.0, -a0 * 1.3, -a0 * 1.3 + PI * 0.9, 14, Color(VFX.HOT, 0.3), 1.5)
-		draw_circle(c, 5.0 + sin(t * 8.0) * 1.5, Color(VFX.HOT, 0.85))
+		draw_circle(c, 5.0 + sin(t * 8.0 + ph) * 1.5, Color(VFX.HOT, 0.85))
 		for i in range(7):
 			var rise := fmod(t * (28.0 + float(i) * 6.0) + float(i * 13), 72.0)
 			var mx := c.x + sin(t * 2.0 + float(i) * 1.1) * 12.0
 			draw_circle(Vector2(mx, c.y + 34.0 - rise), 1.6, Color(ec, 0.7 * (1.0 - rise / 72.0)))
-		if _near_exit:
-			draw_string(ThemeDB.fallback_font, c + Vector2(-70.0, -76.0), "[E]  ENTER RIFT", HorizontalAlignment.HORIZONTAL_ALIGNMENT_CENTER, 140.0, 28, ec)
+		# The promise over the arch: a medallion carrying what lies beyond.
+		var bob := sin(t * 2.2 + ph) * 3.0
+		var mc := c + Vector2(0.0, -96.0 + bob)
+		draw_circle(mc + Vector2(2.0, 3.0), 19.0, Color(0.0, 0.0, 0.0, 0.45))
+		draw_circle(mc, 19.0, Color("120e19"))
+		draw_arc(mc, 19.0, 0.0, TAU, 32, Color(ec, 0.9), 2.0, true)
+		BoonArt.draw(self, str(style.sigil), mc, 12.0, ec)
+		if near:
+			var font := ThemeDB.fallback_font
+			var label := "[E]  " + str(style.label)
+			var w := font.get_string_size(label, HORIZONTAL_ALIGNMENT_LEFT, -1, 22).x
+			draw_string_outline(font, mc + Vector2(-w * 0.5, -30.0), label, HORIZONTAL_ALIGNMENT_LEFT, -1, 22, 5, Color("100c1b"))
+			draw_string(font, mc + Vector2(-w * 0.5, -30.0), label, HORIZONTAL_ALIGNMENT_LEFT, -1, 22, ec)
 	else:
 		# Sealed: iron bar across the gate and a dim lock glyph.
 		draw_line(Vector2(c.x - 34.0, c.y - 6.0), Vector2(c.x + 34.0, c.y - 6.0), Color("2a2430"), 5.0)

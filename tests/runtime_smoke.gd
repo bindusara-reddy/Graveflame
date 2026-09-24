@@ -548,10 +548,11 @@ func _test_room_dressing() -> void:
 func _test_music_renders() -> void:
 	var music = MusicSynth.new()
 	root.add_child(music)
-	var waited := 0
-	while not music.is_ready() and waited < 1800:
+	# The score renders on worker threads (a few seconds on a cold cache), so
+	# the budget is wall-clock time rather than a frame count.
+	var started := Time.get_ticks_msec()
+	while not music.is_ready() and Time.get_ticks_msec() - started < 60000:
 		await process_frame
-		waited += 1
 	check(music.is_ready(), "procedural score finishes rendering in the background")
 	if music.is_ready():
 		for name in ["explore", "boss"]:

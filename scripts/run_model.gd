@@ -10,6 +10,10 @@ var build: Dictionary = {}
 var offered: Dictionary = {}      # upgrade ids already offered (to reduce repeats)
 var taken: Dictionary = {}        # upgrade ids applied this run (unique boons leave the pool)
 var rooms_cleared: int = 0
+## Set by taking a Trial rift: the next chamber is harder, the boon was better.
+var trial_next := false
+## Boons shown per offer (the Seer's Eye relic adds one).
+var offer_count := Content.UPGRADES_PER_OFFER
 
 func _init(s: int = 0) -> void:
 	seed_value = s if s != 0 else int(Time.get_ticks_msec())
@@ -49,6 +53,13 @@ static func base_build() -> Dictionary:
 		"pyre_dmg": 0.0,
 		"finisher_wave": false,
 		"thorns": 0.0,
+		# --- Move-changing boons ---
+		"cinder_trail": false,
+		"flare_parry": 0.0,
+		"twin_lance": false,
+		"phoenix": 0.0,
+		"brand": 0.0,
+		"skyfall": false,
 	}
 
 func _reset_build() -> void:
@@ -107,12 +118,14 @@ func available_upgrades() -> Array:
 		return not (bool(u.get("unique", false)) and taken.has(u.id))
 	)
 
-## Offer UPGRADES_PER_OFFER distinct upgrades. Rarity weights the draw, and boons
+## Offer `offer_count` distinct upgrades. Rarity weights the draw, and boons
 ## offered earlier in the run are down-weighted so choices keep feeling fresh.
-func roll_upgrades() -> Array:
+func roll_upgrades(floor_rarity: String = "") -> Array:
 	var avail: Array = available_upgrades()
+	if floor_rarity == "rare":
+		avail = avail.filter(func(u): return Content.upgrade_rarity(u) != "common")
 	var out: Array = []
-	for i in range(mini(Content.UPGRADES_PER_OFFER, avail.size())):
+	for i in range(mini(offer_count, avail.size())):
 		var total := 0.0
 		var weights: Array = []
 		for u in avail:
@@ -190,6 +203,36 @@ func apply_upgrade(u: Dictionary) -> void:
 			build.finisher_wave = true
 		"thorns":
 			build.thorns += u.value
+		"cinder_trail":
+			build.cinder_trail = true
+		"flare_parry":
+			build.flare_parry = maxf(float(build.flare_parry), u.value)
+		"twin_lance":
+			build.twin_lance = true
+		"phoenix":
+			build.phoenix = maxf(float(build.phoenix), u.value)
+		"brand":
+			build.brand += u.value
+		"skyfall":
+			build.skyfall = true
+
+## What the doors out of a cleared chamber offer. One always leads to a boon;
+## the other trades that for health, cells, or a harder road to a better boon.
+## Hurt knights are shown the font more often. Seeded, so a seed replays.
+func roll_exits(hp_frac: float) -> Array:
+	var options := ["font", "cache", "trial"]
+	var weights := [0.6 + 3.0 * clampf(1.0 - hp_frac, 0.0, 1.0), 1.0, 0.0 if room_index < 1 else 1.1]
+	var total := 0.0
+	for w in weights:
+		total += float(w)
+	var roll := rng.randf() * total
+	var pick: String = options[0]
+	for i in range(options.size()):
+		roll -= float(weights[i])
+		if roll <= 0.0:
+			pick = options[i]
+			break
+	return ["boon", pick]
 
 func is_dead() -> bool:
 	return build.hp <= 0.0
@@ -200,6 +243,7 @@ func reset_run(new_seed: int) -> void:
 	rng.seed = seed_value
 	room_index = -1
 	rooms_cleared = 0
+	trial_next = false
 	offered.clear()
 	taken.clear()
 	_reset_build()

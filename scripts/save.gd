@@ -70,6 +70,7 @@ static func set_best_score(s: int) -> void:
 const DEFAULT_OPTIONS := {
 	"master": 0.9, "music": 0.75, "sfx": 0.9, "music_on": true,
 	"fullscreen": false, "reduced_motion": false, "reduced_flash": false,
+	"vibration": true,
 }
 
 ## Player key rebindings, stored as action -> physical keycode. Only actions in
@@ -127,7 +128,7 @@ static func get_options() -> Dictionary:
 	# Coerce: a hand-edited or older file must never poison the audio server.
 	for key in ["master", "music", "sfx"]:
 		out[key] = clampf(float(out[key]), 0.0, 1.0)
-	for key in ["fullscreen", "reduced_motion", "reduced_flash", "music_on"]:
+	for key in ["fullscreen", "reduced_motion", "reduced_flash", "music_on", "vibration"]:
 		out[key] = bool(out[key])
 	return out
 
@@ -147,21 +148,21 @@ static func get_purchased_meta() -> Array:
 		return m
 	return []
 
+## Ranks are stored as repeated ids, so a save from before ranks existed reads
+## as rank 1 of everything it bought.
+static func get_meta_rank(id: String) -> int:
+	return get_purchased_meta().count(id)
+
 static func is_meta_purchased(id: String) -> bool:
-	return get_purchased_meta().has(id)
+	return get_meta_rank(id) > 0
 
 static func purchase_meta(id: String) -> bool:
-	if is_meta_purchased(id):
-		return false
-	# Find the upgrade def to get cost
-	var def: Dictionary = {}
-	for u in Content.META_UPGRADES:
-		if u.id == id:
-			def = u
-			break
+	var def := Content.meta_def(id)
 	if def.is_empty():
 		return false
-	var cost: int = int(def.cost)
+	var cost := Content.meta_next_cost(def, get_meta_rank(id))
+	if cost < 0:
+		return false
 	if not spend_cells(cost):
 		return false
 	var d := load_save()
@@ -174,16 +175,53 @@ static func purchase_meta(id: String) -> bool:
 
 ## Returns a build-dict delta from all purchased meta upgrades, applied at run start.
 static func get_meta_modifiers() -> Dictionary:
-	var out := {"max_hp": 0.0, "speed_mul": 0.0, "dmg_mul": 0.0, "flask": 0, "special_start": 0.0}
-	var purchased: Array = get_purchased_meta()
-	for id in purchased:
-		for u in Content.META_UPGRADES:
-			if u.id == id:
-				match u.kind:
-					"max_hp": out.max_hp += float(u.value)
-					"speed_mul": out.speed_mul += float(u.value)
-					"dmg_mul": out.dmg_mul += float(u.value)
-					"flask": out.flask += int(u.value)
-					"special_start": out.special_start = maxf(float(out.special_start), float(u.value))
-				break
+	var out := {"max_hp": 0.0, "speed_mul": 0.0, "dmg_mul": 0.0, "flask": 0, "special_start": 0.0,
+		"start_boon": false, "offer_count": 0, "cell_mul": 0.0}
+	for id in get_purchased_meta():
+		var u := Content.meta_def(str(id))
+		if u.is_empty():
+			continue
+		match str(u.kind):
+			"max_hp": out.max_hp += float(u.value)
+			"speed_mul": out.speed_mul += float(u.value)
+			"dmg_mul": out.dmg_mul += float(u.value)
+			"flask": out.flask += int(u.value)
+			"special_start": out.special_start = minf(Content.P_SPECIAL_MAX, float(out.special_start) + float(u.value))
+			"start_boon": out.start_boon = true
+			"offer_count": out.offer_count = mini(int(out.offer_count) + int(u.value), 2)
+			"cell_mul": out.cell_mul += float(u.value)
 	return out
+
+## Vows currently sworn (ids from Content.VOWS).
+static func get_vows() -> Array:
+	var v = load_save().get("vows", [])
+	var out: Array = []
+	if v is Array:
+		for id in v:
+			for def in Content.VOWS:
+				if str(def.id) == str(id) and not out.has(str(id)):
+					out.append(str(id))
+	return out
+
+static func set_vow(id: String, sworn: bool) -> void:
+	var d := load_save()
+	var arr: Array = get_vows()
+	if sworn and not arr.has(id):
+		arr.append(id)
+	elif not sworn:
+		arr.erase(id)
+	d["vows"] = arr
+	save_save(d)
+
+static func get_victories() -> int:
+	return int(load_save().get("victories", 0))
+
+## Record a won descent and the most vows it has been won under.
+static func add_victory(vows_kept: int) -> void:
+	var d := load_save()
+	d["victories"] = int(d.get("victories", 0)) + 1
+	d["best_vows"] = maxi(int(d.get("best_vows", 0)), vows_kept)
+	save_save(d)
+
+static func vows_unlocked() -> bool:
+	return get_victories() > 0

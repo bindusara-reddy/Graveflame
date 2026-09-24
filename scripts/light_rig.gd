@@ -15,6 +15,7 @@ var game: Game
 var _modulate: CanvasModulate
 var _player_light: PointLight2D
 var _exit_light: PointLight2D
+var _exit_light2: PointLight2D
 var _boss_light: PointLight2D
 var _torches: Array[PointLight2D] = []
 var _room_lights: Array[PointLight2D] = []
@@ -47,6 +48,7 @@ func _ready() -> void:
 	add_child(_modulate)
 	_player_light = _make_light("KnightFlame", Color(1.0, 0.72, 0.42), 1.3, 4.8)
 	_exit_light = _make_light("RiftLight", Content.PAL.exit, 1.0, 3.4)
+	_exit_light2 = _make_light("RiftLight2", Content.PAL.exit, 1.0, 3.4)
 	_boss_light = _make_light("BossLight", VFX.EMBER, 0.9, 4.2)
 	for i in range(TORCH_POOL):
 		_torches.append(_make_light("Torch%d" % i, VFX.GOLD, 1.2, 3.6))
@@ -118,12 +120,17 @@ func _process(delta: float) -> void:
 			l.energy = float(lp.alpha) * 3.6 * gain * (1.0 + (sin(_t * float(lp.get("rate", 8.0)) + float(lp.get("phase", 0.0))) * 0.08 if moving else 0.0))
 		else:
 			l.enabled = false
-	if playing and is_instance_valid(room) and room.exit_open and not room.is_boss:
-		_exit_light.enabled = true
-		_exit_light.global_position = room.exit_center()
-		_exit_light.energy = (1.1 + (sin(_t * 3.0) * 0.1 if moving else 0.0)) * gain
-	else:
-		_exit_light.enabled = false
+	var rifts: Array = room.exits if playing and is_instance_valid(room) and room.exit_open and not room.is_boss else []
+	var rift_lights := [_exit_light, _exit_light2]
+	for i in range(rift_lights.size()):
+		var l: PointLight2D = rift_lights[i]
+		if i < rifts.size():
+			l.enabled = true
+			l.global_position = (rifts[i].rect as Rect2).get_center()
+			l.color = Room.exit_style(str(rifts[i].kind)).color
+			l.energy = (1.1 + (sin(_t * 3.0 + float(i)) * 0.1 if moving else 0.0)) * gain
+		else:
+			l.enabled = false
 	if playing and is_instance_valid(room) and room.boss != null and is_instance_valid(room.boss) and not room.boss.dead:
 		_boss_light.enabled = true
 		_boss_light.global_position = room.boss.global_position

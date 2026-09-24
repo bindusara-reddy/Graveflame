@@ -6,6 +6,8 @@ const VFX := preload("res://scripts/vfx.gd")
 const MusicSynth := preload("res://scripts/music.gd")
 const BackdropPainter := preload("res://scripts/backdrop.gd")
 const LightRig := preload("res://scripts/light_rig.gd")
+const KnightArt := preload("res://scripts/knight_art.gd")
+const GroundFire := preload("res://scripts/ground_fire.gd")
 
 enum GState { TITLE, PLAYING, REWARD, GAME_OVER, VICTORY }
 
@@ -23,6 +25,11 @@ var paused: bool = false
 var _pending_upgrades: Array = []
 var _seed: int = 0
 var _run_cells: int = 0
+## Tithe relic: every cell award is scaled by this.
+var _cell_mul := 1.0
+## Vows sworn for this descent, and the score multiplier they earn.
+var _vows: Array = []
+var _vow_mult := 1.0
 # Kill streak: chained kills inside STREAK_WINDOW multiply score.
 var _streak_kills := 0
 var _streak_t := 0.0
@@ -63,6 +70,15 @@ var _backdrop: Node2D
 var _lights: Node2D
 var _view_center := Vector2(Content.VIEW_W, Content.VIEW_H) * 0.5
 var _atmo_t := 0.0
+## End-of-run beat. The run's state flips the instant it ends (death or the
+## Warden falling), but the result screen waits: the world keeps playing in slow
+## motion under a closing camera so the moment lands before the menu does.
+const DEATH_BEAT := 1.9
+const VICTORY_BEAT := 3.2
+var _beat_kind := ""
+var _beat_t := 0.0
+var _beat_focus := Vector2.ZERO
+var _beat_embers_at := 0.0
 
 func _ready() -> void:
 	process_mode = Node.PROCESS_MODE_ALWAYS
@@ -126,6 +142,7 @@ func _ready() -> void:
 	# something to mix. Master already exists as bus 0.
 	_ensure_audio_bus("Music")
 	_ensure_audio_bus("SFX")
+	_dress_audio_buses()
 	# Procedural score (always; keeps playing under pause menus)
 	music = MusicSynth.new()
 	music.name = "Music"
@@ -164,6 +181,7 @@ func _ready() -> void:
 	ui.keys_requested.connect(_on_keys_requested)
 	ui.back_from_keys_requested.connect(_on_back_from_keys)
 	ui.binding_changed.connect(_on_binding_changed)
+	ui.vow_toggled.connect(_on_vow_toggled)
 	# Show saved cells + best score on the HUD
 	ui.set_cells(Save.get_cells())
 	ui.set_best(Save.get_best_score())
@@ -183,6 +201,7 @@ func _restore_options() -> void:
 	feedback.set_reduced_motion(bool(opts.reduced_motion))
 	_atmosphere.set_reduced_motion(bool(opts.reduced_motion))
 	feedback.set_reduced_flash(bool(opts.reduced_flash))
+	Feedback.vibration = bool(opts.get("vibration", true))
 	if _vignette_rect != null and _vignette_rect.material is ShaderMaterial:
 		(_vignette_rect.material as ShaderMaterial).set_shader_parameter("grain", 0.0 if bool(opts.reduced_flash) else VFX.GRAIN_DEFAULT)
 	music.set_enabled(bool(opts.music_on))
@@ -193,6 +212,34 @@ func _restore_options() -> void:
 		DisplayServer.WINDOW_MODE_FULLSCREEN if bool(opts.fullscreen) else DisplayServer.WINDOW_MODE_WINDOWED
 	)
 
+
+## The keep's acoustics: the score sits in a large stone hall, effects in a
+## smaller, drier one so combat stays sharp, and a limiter on Master keeps a
+## pile-up of impacts from clipping. Idempotent across reloads.
+func _dress_audio_buses() -> void:
+	var music := AudioServer.get_bus_index("Music")
+	if music >= 0 and AudioServer.get_bus_effect_count(music) == 0:
+		var hall := AudioEffectReverb.new()
+		hall.room_size = 0.78
+		hall.damping = 0.55
+		hall.spread = 0.9
+		hall.wet = 0.26
+		hall.dry = 0.9
+		hall.predelay_msec = 40.0
+		AudioServer.add_bus_effect(music, hall)
+	var sfx := AudioServer.get_bus_index("SFX")
+	if sfx >= 0 and AudioServer.get_bus_effect_count(sfx) == 0:
+		var room := AudioEffectReverb.new()
+		room.room_size = 0.42
+		room.damping = 0.7
+		room.wet = 0.1
+		room.dry = 1.0
+		room.predelay_msec = 12.0
+		AudioServer.add_bus_effect(sfx, room)
+	if AudioServer.get_bus_effect_count(0) == 0:
+		var limiter := AudioEffectHardLimiter.new()
+		limiter.ceiling_db = -0.5
+		AudioServer.add_bus_effect(0, limiter)
 
 ## Idempotent: a missing bus is added with the existing Master as its parent.
 func _ensure_audio_bus(bus_name: String) -> void:
@@ -216,6 +263,9 @@ func _process(delta: float) -> void:
 	_atmosphere.global_position = _view_center
 	if not get_tree().paused and not Feedback.motion_reduced:
 		_atmo_t += delta
+	if not _beat_kind.is_empty():
+		_step_beat(delta)
+		return
 	if state == GState.PLAYING and is_instance_valid(player):
 		# Camera follows player, clamped to room bounds
 		var cam := feedback.camera
@@ -235,6 +285,60 @@ func _process(delta: float) -> void:
 	else:
 		_set_vignette(VIGNETTE_EDGE)
 
+
+func _begin_beat(kind: String, focus: Vector2) -> void:
+	ui.set_hud_faded(true)
+	_beat_kind = kind
+	_beat_t = 0.0
+	_beat_focus = focus
+	_beat_embers_at = 0.0
+
+## Runs in unscaled time: Engine.time_scale is low for most of the beat.
+func _step_beat(delta: float) -> void:
+	var real_dt := minf(0.05, delta / maxf(Engine.time_scale, 0.001))
+	_beat_t += real_dt
+	var t := _beat_t
+	var length := DEATH_BEAT if _beat_kind == "death" else VICTORY_BEAT
+	var k := clampf(t / length, 0.0, 1.0)
+	var cam := feedback.camera
+	if not Feedback.motion_reduced:
+		# Close in on the fallen (or the felled) and hold there.
+		var push := 1.32 if _beat_kind == "death" else 1.2
+		var zoom_to := Content.CAM_ZOOM / Content.PIXEL_SCALE * push
+		cam.zoom = cam.zoom.lerp(Vector2.ONE * zoom_to, 1.0 - exp(-3.2 * real_dt))
+		var focus := _beat_focus
+		if _beat_kind == "death" and is_instance_valid(player):
+			focus = player.global_position + Vector2(0.0, -18.0)
+		cam.global_position = cam.global_position.lerp(focus, 1.0 - exp(-4.0 * real_dt))
+	if _beat_kind == "death":
+		# The frame bleeds to the low-health red, then toward the void.
+		_set_vignette(VIGNETTE_LOW_HP.lerp(Color(0.02, 0.0, 0.02, 0.97), clampf((k - 0.45) / 0.55, 0.0, 1.0)))
+	else:
+		_set_vignette(VIGNETTE_EDGE)
+		# Embers keep breaking off the Warden until it shatters.
+		if is_instance_valid(room) and room.boss != null and is_instance_valid(room.boss) and room.boss.visible and t >= _beat_embers_at:
+			_beat_embers_at = t + 0.12
+			var bp: Vector2 = room.boss.global_position + Vector2(randf_range(-40.0, 40.0), randf_range(-60.0, 30.0))
+			feedback.burst_sparks(bp, 6, 260.0, Content.PAL.player_accent)
+	if t >= length:
+		_finish_beat()
+
+func _finish_beat() -> void:
+	var kind := _beat_kind
+	_beat_kind = ""
+	feedback.end_slow_motion()
+	get_tree().paused = true
+	if kind == "death":
+		ui.show_panel("gameover", 0.6)
+		music.play_track("title")
+	elif kind == "victory":
+		ui.show_panel("victory", 0.6)
+
+## Put the camera back to the locked play framing (after a beat pushed it in).
+func _reset_camera() -> void:
+	ui.set_hud_faded(false)
+	feedback.end_slow_motion()
+	feedback.camera.zoom = Vector2.ONE * Content.CAM_ZOOM / Content.PIXEL_SCALE
 
 ## Contextual first-run teaching. Each lesson fires the first time the situation
 ## that makes it useful actually arises, then never again for that save. The
@@ -709,6 +813,8 @@ func _on_restart() -> void:
 
 func _begin_run() -> void:
 	# cleanup
+	_beat_kind = ""
+	_reset_camera()
 	_clear_room()
 	_clear_projectiles()
 	if is_instance_valid(player):
@@ -730,6 +836,23 @@ func _begin_run() -> void:
 	run.build.dmg_mul = float(run.build.dmg_mul) + float(meta.get("dmg_mul", 0.0))
 	run.build.flask_charges = int(run.build.flask_charges) + int(meta.get("flask", 0))
 	run.build.special_start = float(meta.get("special_start", 0.0))
+	run.offer_count = Content.UPGRADES_PER_OFFER + int(meta.get("offer_count", 0))
+	_cell_mul = 1.0 + float(meta.get("cell_mul", 0.0))
+	# Vows only bind once the Warden has fallen at least once.
+	_vows = Save.get_vows() if Save.vows_unlocked() else []
+	Enemy.vows = {}
+	for v in _vows:
+		Enemy.vows[v] = true
+	_vow_mult = Content.vow_score_multiplier(_vows)
+	_cell_mul += 0.1 * float(_vows.size())
+	var kindled := ""
+	if bool(meta.get("start_boon", false)):
+		# Kindled Blood: one common boon, drawn from the run's own seed.
+		var commons: Array = Content.UPGRADES.filter(func(u): return Content.upgrade_rarity(u) == "common" and str(u.kind) != "heal" and str(u.kind) != "max_hp")
+		if not commons.is_empty():
+			var gift: Dictionary = commons[run.rng.randi_range(0, commons.size() - 1)]
+			run.apply_upgrade(gift)
+			kindled = str(gift.title)
 	# create player
 	player = Player.new()
 	# Physics order is independent of painter order. The player processes first
@@ -760,6 +883,8 @@ func _begin_run() -> void:
 	paused = false
 	state = GState.PLAYING
 	music.play_track("explore")
+	if not kindled.is_empty():
+		feedback.damage_number(player.global_position + Vector2(0.0, -70.0), 0.0, "elite", "KINDLED: " + kindled.to_upper())
 
 func _advance_room() -> void:
 	_clear_room()
@@ -773,6 +898,11 @@ func _advance_room() -> void:
 	room = Room.new()
 	room.mood = mood
 	room.setup(tmpl, is_boss, player, run.rng.randi())
+	if not is_boss:
+		var hp_frac := float(run.build.hp) / maxf(1.0, float(run.build.max_hp))
+		room.exit_kinds = run.roll_exits(hp_frac)
+		room.trial = run.trial_next
+	run.trial_next = false
 	room.set_meta("room_index", run.room_index)
 	# Connect before _ready() because boss_spawned and the first wave happen there.
 	room.completed.connect(_on_room_completed)
@@ -788,6 +918,7 @@ func _advance_room() -> void:
 	room.wave_started.connect(_on_wave_started)
 	room.telegraphed.connect(_on_enemy_telegraphed)
 	room.prop_shattered.connect(feedback.shatter)
+	room.boss_shattered.connect(_on_boss_shattered)
 	Enemy.pyre_damage = float(run.build.get("pyre_dmg", 0.0))
 	world.add_child(room)
 	# position player at entry
@@ -798,9 +929,11 @@ func _advance_room() -> void:
 	feedback.camera.global_position = _camera_target_for(entry)
 	# UI
 	ui.set_room(run.room_index, run.rooms_total())
-	ui.fade_from_black(0.45)
+	# The page burns open from where the knight arrives.
+	var arrive := (entry - feedback.camera.global_position) * feedback.camera.zoom + Vector2(Content.VIEW_W, Content.VIEW_H) * 0.5
+	ui.fade_from_black(0.45, arrive / Vector2(Content.VIEW_W, Content.VIEW_H))
 	if not is_boss:
-		ui.show_room_intro(run.room_index, run.rooms_total(), Content.room_name(tmpl))
+		ui.show_room_intro(run.room_index, run.rooms_total(), Content.room_name(tmpl), room.trial)
 	else:
 		# The throne room is one continuous fight, so it carries no wave counter.
 		ui.hide_wave()
@@ -812,8 +945,12 @@ func _camera_target_for(pos: Vector2) -> Vector2:
 	# Look-ahead in the facing direction gives the swing room to land on screen.
 	if is_instance_valid(player) and state == GState.PLAYING:
 		target.x += player.facing * 56.0
-	var lim_l := Content.ROOM_LEFT + Content.VIEW_W * 0.5
-	var lim_r := Content.ROOM_RIGHT - Content.VIEW_W * 0.5
+	# The zoom narrows the view, so the half-width the clamp keeps inside the room
+	# is the zoomed one; the unzoomed width hid ~85px at each end of every room,
+	# where the knight and enemies could stand and fight entirely off-screen.
+	var half_w := Content.VIEW_W * 0.5 / Content.CAM_ZOOM
+	var lim_l := Content.ROOM_LEFT + half_w
+	var lim_r := Content.ROOM_RIGHT - half_w
 	target.x = clampf(target.x, lim_l, lim_r)
 	target.y = clampf(target.y, 200.0, Content.FLOOR_Y - 140.0)
 	return target
@@ -833,12 +970,14 @@ func _on_player_hit(dmg: float, pos: Vector2, heavy: bool) -> void:
 	feedback.impact(pos, Content.PAL.player_accent if player._flame_time > 0.0 else Content.PAL.attack, heavy)
 	feedback.hit_stop(0.065 if heavy else 0.045)
 	feedback.shake(6.0 if heavy else 3.0, 0.14 if heavy else 0.08)
-	feedback.play("hit")
+	feedback.play("hit_heavy" if heavy else "hit")
+	feedback.rumble(0.35 if heavy else 0.2, 0.25 if heavy else 0.0, 0.08)
 
 func _on_player_hurt(amount: float, pos: Vector2) -> void:
 	feedback.flash_hurt(pos)
 	feedback.shake(7.0, 0.18)
 	feedback.play("hurt")
+	feedback.rumble(0.3, 0.7, 0.2)
 	feedback.damage_number(pos + Vector2(0.0, -44.0), amount, "hurt")
 	_stats.damage_taken += amount
 
@@ -889,22 +1028,24 @@ func _on_pyre_burst(pos: Vector2, radius: float) -> void:
 func _on_player_action(kind: String, pos: Vector2) -> void:
 	match kind:
 		"swing":
-			feedback.play("riposte" if player._riposte_attack else "swing")
+			var heavy_swing := player.attack_index == Content.COMBO.size() - 1
+			feedback.play("riposte" if player._riposte_attack else ("swing_heavy" if heavy_swing else "swing"))
 			if not player._riposte_attack:
 				feedback.slash(pos + Vector2(player.facing * 28.0, -8.0), player.facing, Content.PAL.player_accent if player._flame_time > 0.0 else Content.PAL.attack, player.attack_index == Content.COMBO.size() - 1)
 		"swing_active":
-			# Additive sweep afterglow matching the live hitbox arc.
+			# Additive afterglow along the sweep the blade is about to travel.
 			var def: Dictionary = player.get_meta("atk_def")
 			if player._riposte_attack:
 				feedback.riposte_cut(pos + Vector2(player.facing * 8.0, -8.0), player.facing, float(def.range))
 			else:
-				feedback.slash_arc(pos + Vector2(player.facing * 8.0, -8.0), player.facing, float(def.range), float(def.arc), player.attack_index == Content.COMBO.size() - 1)
+				var sweep: Array = KnightArt.SWINGS[KnightArt.swing_name(player)].smear
+				feedback.slash_arc(pos + Vector2(player.facing * 7.0, -9.0), player.facing, float(def.range), float(sweep[0]), float(sweep[1]), player.attack_index == Content.COMBO.size() - 1)
 		"jump": feedback.play("jump")
 		"dash":
 			feedback.play("dash")
-			feedback.afterimage(pos, player.facing, Content.PAL.player)
+			feedback.afterimage(pos, player.facing, Content.PAL.player, player._pose)
 		"dash_trail":
-			feedback.afterimage(pos, player.facing, Content.PAL.player_accent)
+			feedback.afterimage(pos, player.facing, Content.PAL.player_accent, player._pose)
 		"parry_start": feedback.play("shield")
 		"heal":
 			feedback.play("heal")
@@ -913,7 +1054,22 @@ func _on_player_action(kind: String, pos: Vector2) -> void:
 			feedback.play("flame")
 			feedback.burst(pos, 28, Content.PAL.player_accent, 300.0)
 			feedback.shake(5.0, 0.2)
-		"slam": feedback.play("swing")
+		"slam": feedback.play("swing_heavy", 0.85)
+		"land": feedback.play("land")
+		"cinder":
+			var fire := GroundFire.new()
+			projectiles.add_child(fire)
+			fire.global_position = pos
+		"nova":
+			feedback.blast(pos, 130.0)
+			feedback.burst(pos, 26, Content.PAL.player_accent, 360.0)
+			feedback.shake(6.0, 0.18)
+			feedback.play("pyre", 1.15)
+		"rescued":
+			# The rift spits the knight back onto the ledge.
+			feedback.spawn_rift(pos, Content.PAL.exit)
+			feedback.play("rift", 1.3)
+		"step": feedback.play("step")
 		"second_wind":
 			feedback.play("second_wind")
 			feedback.parry_flash(pos)
@@ -938,6 +1094,18 @@ func _spawn_projectile(team: String, pos: Vector2, vel: Vector2, dmg: float, kb:
 	p.setup(team, pos, vel, dmg, kb, pierce, life, color)
 	projectiles.add_child(p)
 
+## Flask charges a cleared chamber returns (none under the Vow of Thirst).
+func _flask_per_room() -> int:
+	return 0 if Enemy.vows.has("v_thirst") else Content.FLASK_PER_ROOM
+
+## Bank cells (scaled by Tithe) and return how many actually landed.
+func _award_cells(base: int) -> int:
+	var n := maxi(1, roundi(float(base) * _cell_mul))
+	_run_cells += n
+	Save.add_cells(n)
+	ui.set_cells(Save.get_cells())
+	return n
+
 ## tier: 0 regular, 1 elite, 2 boss.
 func _on_enemy_died(sc: int, pos: Vector2, tier: int, color: Color) -> void:
 	# Falling out of a pit is cleanup, not a player kill or a cell reward.
@@ -945,7 +1113,7 @@ func _on_enemy_died(sc: int, pos: Vector2, tier: int, color: Color) -> void:
 		return
 	_register_kill()
 	var mult := Content.streak_multiplier(_streak_kills)
-	score += int(round(float(sc) * mult))
+	score += int(round(float(sc) * mult * _vow_mult))
 	ui.set_score(score)
 	_stats.kills += 1
 	if is_instance_valid(player):
@@ -958,12 +1126,11 @@ func _on_enemy_died(sc: int, pos: Vector2, tier: int, color: Color) -> void:
 			_stats.elites += 1
 		2:
 			cells_gain = 10
-	_run_cells += cells_gain
-	Save.add_cells(cells_gain)
-	ui.set_cells(Save.get_cells())
+	cells_gain = _award_cells(cells_gain)
 	match tier:
 		2:
-			feedback.flash_death(pos, Content.BOSS_COLOR, true)
+			# The killing blow lands hard; the Warden's own shattering is the payoff.
+			feedback.impact(pos + Vector2(0.0, -30.0), Content.PAL.player_accent, true)
 			feedback.shake(16.0, 0.5)
 			feedback.hit_stop(0.16)
 			feedback.play("die")
@@ -972,13 +1139,13 @@ func _on_enemy_died(sc: int, pos: Vector2, tier: int, color: Color) -> void:
 			feedback.flash_death(pos, Content.ELITE_COLOR, true)
 			feedback.shake(9.0, 0.26)
 			feedback.hit_stop(0.09)
-			feedback.play("die")
+			feedback.play("tear", 0.85)
 			feedback.play("elite")
 			feedback.damage_number(pos + Vector2(0.0, -66.0), 0.0, "elite", "ELITE SLAIN  +%d CELLS" % cells_gain)
 		_:
 			feedback.flash_death(pos, color)
 			feedback.shake(6.0, 0.18)
-			feedback.play("die")
+			feedback.play("tear")
 
 func _on_room_cleared(room_name: String) -> void:
 	feedback.play("clear")
@@ -996,12 +1163,47 @@ func _on_room_completed() -> void:
 	if run.is_boss_room():
 		_victory()
 		return
-	# offer upgrades
-	_pending_upgrades = run.roll_upgrades()
+	ui.hide_banners()
+	var rift := room.chosen_exit if is_instance_valid(room) else "boon"
+	match rift:
+		"font", "cache":
+			_take_rift_gift(rift)
+			return
+		"trial":
+			# The harder road: a better boon now, and the next chamber pays for it.
+			run.trial_next = true
+			_pending_upgrades = run.roll_upgrades("rare")
+		_:
+			_pending_upgrades = run.roll_upgrades()
 	ui.setup_upgrades(_pending_upgrades)
 	ui.show_panel("reward")
 	get_tree().paused = true
 	state = GState.REWARD
+
+## Font and Cache rifts carry their gift straight through into the next chamber.
+func _take_rift_gift(kind: String) -> void:
+	run.room_cleared()
+	var text := ""
+	if kind == "font":
+		# The font restores the flame fully, refills every flask, and leaves the
+		# flame a little larger.
+		run.build.max_hp = float(run.build.max_hp) + 5.0
+		var healed := float(run.build.max_hp) - float(run.build.hp)
+		run.build.hp = run.build.max_hp
+		text = "+%d HEALTH" % roundi(healed)
+	else:
+		var cells := _award_cells(10 + 3 * maxi(0, run.room_index))
+		text = "+%d CELLS" % cells
+	player.build = run.build
+	ui.set_hp(float(run.build.hp), float(run.build.max_hp))
+	_advance_room()
+	if kind == "font":
+		player.refill_flask()
+	elif Content.FLASK_REFILL_ON_CLEAR:
+		player.refill_flask(_flask_per_room())
+	feedback.play("heal" if kind == "font" else "pickup")
+	feedback.damage_number(player.global_position + Vector2(0.0, -70.0), 0.0, "heal" if kind == "font" else "elite", text)
+	state = GState.PLAYING
 
 func _on_upgrade_selected(idx: int) -> void:
 	if idx < 0 or idx >= _pending_upgrades.size():
@@ -1010,16 +1212,19 @@ func _on_upgrade_selected(idx: int) -> void:
 	player.build = run.build
 	Enemy.pyre_damage = float(run.build.get("pyre_dmg", 0.0))
 	ui.set_hp(float(run.build.hp), float(run.build.max_hp))
-	# Flask charges may have changed via upgrade
+	# A Witch Flask arrives full; other boons leave the belt as it was.
+	var taken: Dictionary = _pending_upgrades[idx]
 	if run.build.has("flask_charges"):
 		player.flask_max = int(run.build.flask_charges)
+		if str(taken.get("kind", "")) == "flask_charge":
+			player.flask_charges = mini(player.flask_max, player.flask_charges + int(taken.get("value", 1)))
 	_pending_upgrades.clear()
 	ui.hide_panel("reward")
 	run.room_cleared()
 	_advance_room()
-	# Refill flask between rooms (Dead Cells-style)
+	# A charge returns with every chamber cleared.
 	if Content.FLASK_REFILL_ON_CLEAR:
-		player.refill_flask()
+		player.refill_flask(_flask_per_room())
 	get_tree().paused = false
 	state = GState.PLAYING
 
@@ -1033,9 +1238,17 @@ func _finalize_summary() -> void:
 	_stats["score"] = score
 	_stats["best"] = best
 	_stats["new_best"] = score > previous_best
+	var pick := absi(_seed) + int(_stats.kills)
+	if state == GState.VICTORY:
+		_stats["line"] = Content.VICTORY_LINES[pick % Content.VICTORY_LINES.size()]
+	elif run != null and run.is_boss_room():
+		_stats["line"] = Content.EPITAPH_THRONE
+	else:
+		_stats["line"] = Content.EPITAPHS[pick % Content.EPITAPHS.size()]
 
 func _on_player_died() -> void:
-	feedback.flash_death(player.global_position, Content.PAL.player)
+	# Embers and paper shards, not a burst: the flame is going out.
+	feedback.burst(player.global_position + Vector2(0.0, -28.0), 16, Content.PAL.player_accent, 180.0)
 	feedback.shake(12.0, 0.4)
 	# A toll rather than a hit: the run itself has ended, not just the player.
 	feedback.play("defeat")
@@ -1044,15 +1257,17 @@ func _on_player_died() -> void:
 	ui.show_run_summary(_stats, "gameover")
 	ui.hide_streak()
 	ui.hide_banners()
-	get_tree().paused = true
+	ui.hide_hint()
 	state = GState.GAME_OVER
 	ui.hide_boss_bar()
-	ui.show_panel("gameover")
-	music.play_track("title")
+	# The score drops out under the toll; the title theme returns with the screen.
+	music.play_track("")
+	feedback.slow_motion(0.3, DEATH_BEAT * 0.85)
+	_begin_beat("death", player.global_position)
 
 func _on_boss_spawned() -> void:
 	if is_instance_valid(room) and room.boss != null:
-		ui.show_boss_bar(Content.BOSS_HP)
+		ui.show_boss_bar(room.boss.max_hp)
 		ui.show_boss_intro("The Ember Warden", "Keeper of the Ember Throne")
 		feedback.shake(8.0, 0.3)
 		feedback.play("boss")
@@ -1065,15 +1280,30 @@ func _on_boss_phase(phase: int) -> void:
 		# Phase-2 callout renders as a compact floating tag above the boss bar,
 		# never as a center-screen card over the fighters.
 		ui.flash_boss_phase("THE WARDEN IGNITES")
+		# The battle theme's second layer comes up with the fire.
+		music.set_intensity(1.0)
 		feedback.hit_stop(0.1)
 		if is_instance_valid(room) and room.boss != null and is_instance_valid(room.boss):
 			feedback.blast(room.boss.global_position, 200.0)
+
+## The Warden comes apart: the run's last and loudest beat.
+func _on_boss_shattered(pos: Vector2) -> void:
+	feedback.flash_death(pos, Content.BOSS_COLOR, true)
+	feedback.flash_death(pos + Vector2(0.0, -40.0), Content.PAL.player_accent, true)
+	feedback.blast(pos, 280.0)
+	feedback.burst(pos, 40, Content.PAL.player_accent, 520.0)
+	feedback.shake(18.0, 0.6)
+	feedback.play("pyre")
+	feedback.play("elite", 0.7)
+	feedback.rumble(0.8, 1.0, 0.6)
+	ui.show_victory_card()
 
 func _on_slam_landed(pos: Vector2, radius: float) -> void:
 	feedback.shake(8.0, 0.22)
 	feedback.burst(pos, 18, Content.PAL.attack, 320.0)
 	feedback.land_dust(pos, 1.4)
-	feedback.play("land")
+	feedback.play("slam")
+	feedback.rumble(0.4, 0.8, 0.18)
 
 func _on_parried(pos: Vector2, success: bool) -> void:
 	if success:
@@ -1081,6 +1311,9 @@ func _on_parried(pos: Vector2, success: bool) -> void:
 		feedback.hit_stop(0.065)
 		feedback.shake(4.0, 0.1)
 		feedback.play("parry")
+		feedback.rumble(0.8, 0.2, 0.1)
+		if is_instance_valid(player) and float(run.build.get("flare_parry", 0.0)) > 0.0:
+			player.nova(float(run.build.flare_parry), 120.0)
 		# The counter window is open right now. Queue the lesson rather than
 		# writing the save file from inside the player's physics step.
 		_queued_lesson = "riposte"
@@ -1089,29 +1322,40 @@ func _on_enemy_exploded(pos: Vector2, radius: float, damage: float) -> void:
 	if damage <= 0.0:
 		feedback.shake(6.0, 0.16)
 		feedback.land_dust(pos, clampf(radius / 70.0, 1.0, 2.0))
-		feedback.play("land")
+		feedback.play("slam", 0.8)
 		return
 	feedback.shake(10.0, 0.3)
 	feedback.burst(pos, 26, Color("ff7a18"), 360.0)
 	feedback.blast(pos, radius)
-	feedback.play("die")
+	feedback.play("boom")
 
 func _victory() -> void:
 	# Bonus cells for clearing the run
-	var bonus := 20
-	_run_cells += bonus
-	Save.add_cells(bonus)
-	get_tree().paused = true
+	_award_cells(20)
+	Save.add_victory(_vows.size())
 	state = GState.VICTORY
 	ui.hide_boss_bar()
 	ui.hide_streak()
 	ui.hide_banners()
 	_finalize_summary()
-	ui.show_run_cells(_run_cells, "victory")
+	ui.show_run_cells(_run_cells, "victory", _vows.size())
 	ui.show_run_summary(_stats, "victory")
-	ui.show_panel("victory")
 	feedback.play("victory")
 	music.play_track("title")
+	# The knight has won; nothing left in the hall may still hurt them.
+	if is_instance_valid(player):
+		player.iframes = 99.0
+	_clear_projectiles()
+	var focus := Vector2(640.0, Content.FLOOR_Y - 120.0)
+	if is_instance_valid(room):
+		for e in room.enemies:
+			if is_instance_valid(e) and not e.dead:
+				feedback.flash_death(e.global_position, e.data.color)
+				e._die(false)
+		if room.boss != null and is_instance_valid(room.boss):
+			focus = room.boss.global_position + Vector2(0.0, -30.0)
+	feedback.slow_motion(0.25, 1.6)
+	_begin_beat("victory", focus)
 
 # --- Pause ---
 func _on_resume() -> void:
@@ -1125,6 +1369,8 @@ func _on_resume() -> void:
 func _on_quit_to_title() -> void:
 	get_tree().paused = false
 	paused = false
+	_beat_kind = ""
+	_reset_camera()
 	_clear_room()
 	_clear_projectiles()
 	if is_instance_valid(player):
@@ -1158,6 +1404,8 @@ func _on_option_toggled(key: String, value: bool) -> void:
 		"music":
 			Save.set_option("music_on", value)
 			music.set_enabled(value)
+		"vibration":
+			Feedback.vibration = value
 	_apply_audio_options()
 
 func _on_forge_requested() -> void:
@@ -1247,6 +1495,13 @@ func _on_buy_meta(idx: int) -> void:
 	# Refresh the forge panel + HUD
 	ui.setup_forge(Save.get_cells())
 	ui.set_cells(Save.get_cells())
+
+func _on_vow_toggled(id: String) -> void:
+	if not Save.vows_unlocked():
+		return
+	Save.set_vow(id, not Save.get_vows().has(id))
+	feedback.play("elite" if Save.get_vows().has(id) else "ui_back", 1.2)
+	ui.setup_forge(Save.get_cells())
 
 func _on_back_from_forge() -> void:
 	ui.hide_all_panels()

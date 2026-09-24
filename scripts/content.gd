@@ -87,7 +87,10 @@ const RIPOSTE := {
 # --- Healing flask (Dead Cells-style) ---
 const FLASK_MAX := 3
 const FLASK_HEAL := 45.0
-const FLASK_REFILL_ON_CLEAR := true  # refill to max when a room is cleared
+const FLASK_REFILL_ON_CLEAR := true  # flasks recover when a room is cleared...
+## ...but only this many charges per chamber, so health is carried through the
+## run and a Healing Font (which refills them all) is a real choice.
+const FLASK_PER_ROOM := 1
 
 # --- Combo: three swings. Times in seconds. ---
 const COMBO := [
@@ -98,14 +101,18 @@ const COMBO := [
 const COMBO_RESET := 0.55
 
 # --- Enemy archetypes ---
-enum EnemyKind { STALKER, HOPPER, WISP, BRUTE, BOMBER }
+enum EnemyKind { STALKER, HOPPER, WISP, BRUTE, BOMBER, CROW }
 const ENEMY := {
 	EnemyKind.STALKER: { "hp": 40.0,  "speed": 150.0, "damage": 14.0, "knock": 240.0, "cd": 1.3, "windup": 0.45, "recover": 0.5,  "score": 12, "w": 34.0, "h": 46.0, "color": Color("c44b3f") },
 	EnemyKind.HOPPER:  { "hp": 28.0,  "speed": 210.0, "damage": 12.0, "knock": 200.0, "cd": 1.6, "windup": 0.30, "recover": 0.4,  "score": 14, "w": 32.0, "h": 38.0, "color": Color("d98c2b") },
 	EnemyKind.WISP:    { "hp": 20.0,  "speed": 120.0, "damage": 10.0, "knock": 160.0, "cd": 2.0, "windup": 0.55, "recover": 0.45, "score": 18, "w": 30.0, "h": 30.0, "color": Color("7b6bd1") },
 	EnemyKind.BRUTE:   { "hp": 80.0,  "speed": 95.0,  "damage": 20.0, "knock": 360.0, "cd": 1.8, "windup": 0.60, "recover": 0.65, "score": 24, "w": 48.0, "h": 58.0, "color": Color("5a7a3a"), "shielded": true, "shield_hp": 30.0 },
-	EnemyKind.BOMBER:  { "hp": 22.0,  "speed": 170.0, "damage": 26.0, "knock": 100.0, "cd": 1.4, "windup": 0.80, "recover": 0.0,  "score": 20, "w": 34.0, "h": 36.0, "color": Color("b85c2e"), "explodes": true, "fuse": 0.8, "blast_radius": 90.0 },
+	EnemyKind.BOMBER:  { "hp": 22.0,  "speed": 170.0, "damage": 20.0, "knock": 100.0, "cd": 1.4, "windup": 0.80, "recover": 0.0,  "score": 20, "w": 34.0, "h": 36.0, "color": Color("b85c2e"), "explodes": true, "fuse": 0.8, "blast_radius": 90.0 },
+	## Carrion crow: circles overhead, shrieks while it hangs in the air, then
+	## dives along a line it commits to. Sidestep the line or parry it down.
+	EnemyKind.CROW:    { "hp": 24.0,  "speed": 230.0, "damage": 13.0, "knock": 220.0, "cd": 1.9, "windup": 0.55, "recover": 0.55, "score": 18, "w": 34.0, "h": 26.0, "color": Color("5a4a78"), "dive_speed": 760.0, "flies": true },
 }
+const CROW_HOVER := 165.0
 const ENEMY_RANGED := EnemyKind.WISP
 const WISP_SHOT_SPEED := 460.0
 const WISP_SHOT_LIFE := 2.4
@@ -269,7 +276,7 @@ static var UPGRADES: Array = [
 	{ "id": "ember",     "title": "Ember Heart","desc": "Heal 20 HP now.",                  "kind": "heal",       "value": 20.0, "rarity": "common" },
 	{ "id": "slam",      "title": "Crater",     "desc": "Down-slam deals +60% damage & wider blast.", "kind": "slam_mul", "value": 0.60, "rarity": "rare" },
 	{ "id": "parry",     "title": "Riposte",    "desc": "Parry window +50% and deflects deal +12 dmg.", "kind": "parry", "value": 12.0, "rarity": "rare" },
-	{ "id": "flask",     "title": "Witch Flask","desc": "+1 flask charge (refills between rooms).", "kind": "flask_charge", "value": 1.0, "rarity": "rare" },
+	{ "id": "flask",     "title": "Witch Flask","desc": "+1 flask charge, filled now.", "kind": "flask_charge", "value": 1.0, "rarity": "rare" },
 	{ "id": "dashmaster","title": "Dashmaster", "desc": "Dash cooldown halved, longer i-frames.", "kind": "dash_master", "value": 0.5, "rarity": "epic", "unique": true },
 	# --- Synergy boons ---
 	{ "id": "backdraft", "title": "Backdraft",  "desc": "A successful parry refunds 30 Graveflame.", "kind": "parry_special", "value": 30.0, "rarity": "rare" },
@@ -281,6 +288,13 @@ static var UPGRADES: Array = [
 	{ "id": "pyre",      "title": "Pyre",       "desc": "Burning enemies explode on death for 60 damage.", "kind": "pyre", "value": 60.0, "rarity": "epic", "unique": true },
 	{ "id": "emberwave", "title": "Emberwave",  "desc": "Every combo finisher hurls a flame wave.", "kind": "finisher_wave", "value": 1.0, "rarity": "epic", "unique": true },
 	{ "id": "thorns",    "title": "Cinder Skin","desc": "Taking a hit scorches nearby enemies for 15.", "kind": "thorns", "value": 15.0, "rarity": "common" },
+	# --- Move-changing boons: they alter what an action does, not just a number ---
+	{ "id": "cindertrail", "title": "Cinder Trail", "desc": "Dashing leaves burning ground that sets foes alight.", "kind": "cinder_trail", "value": 1.0, "rarity": "rare", "unique": true },
+	{ "id": "flareparry",  "title": "Flare Parry",  "desc": "A perfect parry bursts in flame, 22 damage around you.", "kind": "flare_parry", "value": 22.0, "rarity": "rare", "unique": true },
+	{ "id": "twinlance",   "title": "Twin Lance",   "desc": "The flame lance looses two bolts.", "kind": "twin_lance", "value": 1.0, "rarity": "rare", "unique": true },
+	{ "id": "phoenix",     "title": "Phoenix Flask", "desc": "Drinking a flask ignites you and bursts for 30 damage.", "kind": "phoenix", "value": 30.0, "rarity": "epic", "unique": true },
+	{ "id": "brand",       "title": "Ember Brand",  "desc": "Burning enemies take +25% damage.", "kind": "brand", "value": 0.25, "rarity": "common" },
+	{ "id": "skyfall",     "title": "Skyfall",      "desc": "Down-slams send shockwaves racing along the floor.", "kind": "skyfall", "value": 1.0, "rarity": "rare", "unique": true },
 ]
 
 static func upgrade_rarity(u: Dictionary) -> String:
@@ -304,7 +318,10 @@ static var ROOM_TEMPLATES: Array = [
 		"tag": "gap",
 		"name": "BROKEN CAUSEWAY",
 		"platforms": [
-			Rect2(ROOM_LEFT, FLOOR_Y, 620, 120),
+			# Near floors run right up to their pit's spikes. They were authored when
+			# ROOM_LEFT was 0; measured from -200 they stopped 200px short, leaving
+			# a bottomless strip with no spikes in front of every pit.
+			Rect2(ROOM_LEFT, FLOOR_Y, 620 - ROOM_LEFT, 120),
 			Rect2(860, FLOOR_Y, ROOM_RIGHT - 860, 120),
 			Rect2(680, FLOOR_Y - 180, 140, 40),
 		],
@@ -344,7 +361,7 @@ static var ROOM_TEMPLATES: Array = [
 		"tag": "platforms",
 		"name": "CINDERWORKS",
 		"platforms": [
-			Rect2(ROOM_LEFT, FLOOR_Y, 460, 120),
+			Rect2(ROOM_LEFT, FLOOR_Y, 460 - ROOM_LEFT, 120),
 			Rect2(820, FLOOR_Y, ROOM_RIGHT - 820, 120),
 			Rect2(440, FLOOR_Y - 160, 120, 34),
 			Rect2(700, FLOOR_Y - 160, 120, 34),
@@ -360,7 +377,7 @@ static var ROOM_TEMPLATES: Array = [
 		"tag": "chamber",
 		"name": "HOLLOW SHAFT",
 		"platforms": [
-			Rect2(ROOM_LEFT, FLOOR_Y, 320, 120),
+			Rect2(ROOM_LEFT, FLOOR_Y, 320 - ROOM_LEFT, 120),
 			Rect2(960, FLOOR_Y, ROOM_RIGHT - 960, 120),
 			Rect2(320, FLOOR_Y, 80, 500),   # left wall block
 			Rect2(880, FLOOR_Y, 80, 500),   # right wall block
@@ -379,7 +396,7 @@ static var ROOM_TEMPLATES: Array = [
 		"tag": "crossfire",
 		"name": "GALLOW CROSSING",
 		"platforms": [
-			Rect2(ROOM_LEFT, FLOOR_Y, 360, 120),
+			Rect2(ROOM_LEFT, FLOOR_Y, 360 - ROOM_LEFT, 120),
 			Rect2(920, FLOOR_Y, ROOM_RIGHT - 920, 120),
 			Rect2(220, FLOOR_Y - 220, 220, 34),
 			Rect2(840, FLOOR_Y - 220, 220, 34),
@@ -416,15 +433,18 @@ static func encounter_waves_for_room(room_index: int) -> Array:
 
 ## Threat costs used by the wave generator. Heavier archetypes unlock with depth.
 const THREAT_COST := {
-	EnemyKind.STALKER: 2.0, EnemyKind.HOPPER: 2.0, EnemyKind.WISP: 2.5, EnemyKind.BRUTE: 4.0, EnemyKind.BOMBER: 3.0,
+	EnemyKind.STALKER: 2.0, EnemyKind.HOPPER: 2.0, EnemyKind.WISP: 2.5, EnemyKind.BRUTE: 4.0, EnemyKind.BOMBER: 3.0, EnemyKind.CROW: 2.5,
 }
 const WAVE_MAX_ENEMIES := 4
 
 static func _unlocked_kinds(room_index: int) -> Array:
 	var kinds: Array = [EnemyKind.STALKER, EnemyKind.HOPPER, EnemyKind.WISP]
+	# One new threat per chamber: bombers, then crows, then brutes.
 	if room_index >= 2:
 		kinds.append(EnemyKind.BOMBER)
 	if room_index >= 3:
+		kinds.append(EnemyKind.CROW)
+	if room_index >= 4:
 		kinds.append(EnemyKind.BRUTE)
 	return kinds
 
@@ -452,6 +472,9 @@ static func generate_waves(room_index: int, rng: RandomNumberGenerator) -> Array
 				break
 			# At most one brute and one bomber per wave keeps waves readable.
 			if (kind == EnemyKind.BRUTE or kind == EnemyKind.BOMBER) and wave.has(kind):
+				continue
+			# Two divers at once is a coin flip, not a read.
+			if kind == EnemyKind.CROW and wave.count(kind) >= 2:
 				continue
 			wave.append(kind)
 			spent += cost
@@ -499,14 +522,73 @@ const HINTS := {
 	"riposte": "Deflected!  A counter is banked — press J to riposte.",
 	"slam": "DOWN + J in the air — down-slam onto a crowd.",
 	"wall_jump": "Against a wall, jump again to kick away.",
-	"flask": "F — FLASK.  Charges refill when a chamber is cleared.",
+	"flask": "F — FLASK.  One charge returns with every chamber cleared.",
 }
 
-# --- Cells meta-progression (currency kept across runs, Dead Cells-style) ---
-const META_UPGRADES: Array = [
-	{ "id": "m_max_hp",   "title": "Ember Soul",   "desc": "+10 starting HP.",          "cost": 5,  "kind": "max_hp",    "value": 10.0 },
-	{ "id": "m_flask",    "title": "Potion Belt",  "desc": "+1 starting flask charge.", "cost": 8,  "kind": "flask",     "value": 1.0 },
-	{ "id": "m_speed",    "title": "Quickened",    "desc": "+8% starting move speed.",  "cost": 6,  "kind": "speed_mul", "value": 0.08 },
-	{ "id": "m_dmg",      "title": "Sharpened",    "desc": "+10% starting melee dmg.",  "cost": 7,  "kind": "dmg_mul",   "value": 0.10 },
-	{ "id": "m_special",  "title": "Arcane Spark", "desc": "Start each run with 25 special.", "cost": 6, "kind": "special_start", "value": 25.0 },
+# --- Vows (unlocked by the first victory) ---
+## Burdens sworn before a descent. Each makes the keep harsher and pays for it
+## in score and cells. `score` is the added score multiplier.
+const VOWS := [
+	{ "id": "v_embers", "title": "Vow of Embers",     "desc": "Enemies strike 35% harder.",                  "score": 0.30 },
+	{ "id": "v_thirst", "title": "Vow of Thirst",     "desc": "Cleared chambers return no flask charges.",   "score": 0.25 },
+	{ "id": "v_gilded", "title": "Vow of the Gilded", "desc": "Every chamber carries an elite.",             "score": 0.25 },
+	{ "id": "v_haste",  "title": "Vow of Haste",      "desc": "Enemies move and wind up faster.",            "score": 0.30 },
+	{ "id": "v_pyre",   "title": "Vow of the Pyre",   "desc": "The Warden rises already ignited, and hardier.", "score": 0.30 },
 ]
+
+static func vow_score_multiplier(sworn: Array) -> float:
+	var m := 1.0
+	for v in VOWS:
+		if sworn.has(v.id):
+			m += float(v.score)
+	return m
+
+# --- Epitaphs ---
+## The line under the verdict. A run that ends differently reads differently;
+## the pick is seeded by the run so a replayed seed says the same thing.
+const EPITAPHS := [
+	"Ash remembers every attempt.",
+	"The keep keeps what it takes.",
+	"A crown of fire. A crown of cinders.",
+	"The flame gutters. It does not go out.",
+	"Every knight before you fell here too.",
+	"Even embers remember the shape of the fire.",
+	"The descent is patient.",
+	"Somewhere below, the throne grows warmer.",
+]
+const EPITAPH_THRONE := "The Warden stokes its throne with your flame."
+const VICTORY_LINES := [
+	"The keep falls silent, but the descent is never the same twice.",
+	"The throne is cold. For now.",
+	"Your flame burns where the Warden's did.",
+	"The Ember Throne answers to no one tonight.",
+]
+
+# --- Cells meta-progression (currency kept across runs, Dead Cells-style) ---
+## Ranked relics. `costs[r]` buys rank r+1; `value` applies once per rank owned.
+## `cost` mirrors the first rank for older callers. Costs climb so cells keep
+## meaning something long after the first few runs.
+const META_UPGRADES: Array = [
+	{ "id": "m_max_hp",  "title": "Ember Soul",    "desc": "+10 starting health per rank.",       "cost": 5,  "costs": [5, 12, 22, 36, 55], "kind": "max_hp",        "value": 10.0 },
+	{ "id": "m_dmg",     "title": "Sharpened",     "desc": "+6% melee damage per rank.",          "cost": 7,  "costs": [7, 16, 28, 44, 64], "kind": "dmg_mul",       "value": 0.06 },
+	{ "id": "m_flask",   "title": "Potion Belt",   "desc": "+1 flask charge per rank.",           "cost": 8,  "costs": [8, 30],             "kind": "flask",         "value": 1.0 },
+	{ "id": "m_speed",   "title": "Quickened",     "desc": "+4% move speed per rank.",            "cost": 6,  "costs": [6, 14, 26],         "kind": "speed_mul",     "value": 0.04 },
+	{ "id": "m_special", "title": "Arcane Spark",  "desc": "Start each run with +20 Graveflame per rank.", "cost": 6, "costs": [6, 14, 26], "kind": "special_start", "value": 20.0 },
+	{ "id": "m_kindled", "title": "Kindled Blood", "desc": "Begin every run carrying a common boon.", "cost": 30, "costs": [30],          "kind": "start_boon",    "value": 1.0 },
+	{ "id": "m_seer",    "title": "Seer's Eye",    "desc": "Boon offers show a fourth choice.",    "cost": 45, "costs": [45],             "kind": "offer_count",   "value": 1.0 },
+	{ "id": "m_tithe",   "title": "Tithe",         "desc": "+25% cells from every source per rank.", "cost": 20, "costs": [20, 50],        "kind": "cell_mul",      "value": 0.25 },
+]
+
+static func meta_def(id: String) -> Dictionary:
+	for u in META_UPGRADES:
+		if str(u.id) == id:
+			return u
+	return {}
+
+static func meta_max_rank(u: Dictionary) -> int:
+	return (u.get("costs", [u.get("cost", 0)]) as Array).size()
+
+## Cost of the next rank, or -1 when the relic is mastered.
+static func meta_next_cost(u: Dictionary, rank: int) -> int:
+	var costs: Array = u.get("costs", [u.get("cost", 0)])
+	return int(costs[rank]) if rank < costs.size() else -1
