@@ -390,7 +390,7 @@ func _choose_action(player) -> void:
 	var action: int = options[randi() % options.size()]
 	if action == Action.LUNGE and randf() < STRING_CHANCE[phase]:
 		# A lunge runs on into a point-blank fan; the Last Ember lunges twice first.
-		_string = [Action.LUNGE, Action.FAN] if phase == BPhase.THREE else [Action.FAN]
+		_string.assign([Action.LUNGE, Action.FAN] if phase == BPhase.THREE else [Action.FAN])
 	_start(action)
 
 ## Wind up `action` and announce it at the decision point, so every entry into

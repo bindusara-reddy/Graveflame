@@ -115,6 +115,15 @@ func _test_moveset() -> void:
 	boss._history = [Boss.Action.LUNGE, Boss.Action.LUNGE]
 	boss._choose_action(null)
 	check(boss.action_idx != Boss.Action.LUNGE, "no move comes three times running")
+	boss.phase = Boss.BPhase.THREE
+	seed(7)
+	var strung := false
+	for i in range(40):
+		boss._history.clear()
+		boss._string.clear()
+		boss._choose_action(null)
+		strung = strung or (boss._string.size() == 2 and boss._string[1] == Boss.Action.FAN)
+	check(strung, "the Last Ember strings a lunge into lunge and fan")
 	boss.queue_free()
 	var knight := _knight(700.0)
 	root.add_child(knight)
