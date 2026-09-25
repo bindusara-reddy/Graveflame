@@ -1,4 +1,4 @@
-extends SceneTree
+extends "res://tests/harness.gd"
 ## Opening-scene contract on the REAL presented window and the real main.tscn:
 ## a purpose-built title tableau exists and fills the native viewport, the knight
 ## silhouette is framed away from the menu column, the arrival reveal never blocks
@@ -7,43 +7,8 @@ extends SceneTree
 ## title never leak scene nodes. Needs a display:
 ##   godot4 --path . --audio-driver Dummy --script res://tests/opening_scene_contract.gd
 
-var checks := 0
-var failures := 0
-var game: Game
 var ui: UI
 var starts := 0
-
-
-func _init() -> void:
-	call_deferred("_run")
-
-
-func check(cond: bool, message: String) -> void:
-	checks += 1
-	if not cond:
-		failures += 1
-		printerr("FAIL: " + message)
-
-
-func _frames(count: int) -> void:
-	for i in range(count):
-		await physics_frame
-		await process_frame
-
-
-func _key(keycode: Key) -> void:
-	for pressed in [true, false]:
-		var event := InputEventKey.new()
-		event.keycode = keycode
-		event.physical_keycode = keycode
-		event.pressed = pressed
-		Input.parse_input_event(event)
-		await _frames(2)
-
-
-func _focus_name() -> String:
-	var owner := root.gui_get_focus_owner()
-	return owner.name if owner != null else "<none>"
 
 
 func _count(node: Node) -> int:
@@ -61,14 +26,6 @@ func _find_type(node: Node, type_name: String) -> Node:
 		if hit != null:
 			return hit
 	return null
-
-
-func _set_viewport(size: Vector2i) -> void:
-	DisplayServer.window_set_mode(DisplayServer.WINDOW_MODE_WINDOWED)
-	DisplayServer.window_set_position(Vector2i(160, 120))
-	DisplayServer.window_set_size(size)
-	await _frames(8)
-	check(root.size == size, "presented viewport is %s (got %s)" % [size, root.size])
 
 
 func _tableau() -> Control:
@@ -129,17 +86,15 @@ func _luma(c: Color) -> float:
 	return 0.2126 * c.r + 0.7152 * c.g + 0.0722 * c.b
 
 
-func _run() -> void:
+func run() -> void:
 	if DisplayServer.get_name() == "headless":
 		printerr("OPENING_SCENE requires a real display")
 		quit(2)
 		return
-	Save.path = "user://opening_scene_contract.json"
+	use_scratch_save("opening_scene_contract")
 	DisplayServer.window_set_flag(DisplayServer.WINDOW_FLAG_ALWAYS_ON_TOP, true)
-	await _set_viewport(Vector2i(1280, 720))
-	game = load("res://main.tscn").instantiate()
-	root.add_child(game)
-	await _frames(6)
+	await set_window_size(Vector2i(1280, 720))
+	await load_main_scene(6)
 	ui = game.ui
 	ui.start_requested.connect(func(): starts += 1)
 	check(game.state == Game.GState.TITLE, "boots to the title")
@@ -149,8 +104,7 @@ func _run() -> void:
 	var tableau := _tableau()
 	check(tableau != null, "purpose-built TitleTableau lives under the title screen")
 	if tableau == null:
-		print("OPENING_SCENE_RESULT: FAIL (%d checks, %d failures)" % [checks, failures])
-		quit(1)
+		await finish("OPENING_SCENE")
 		return
 	var script := tableau.get_script() as Script
 	check(script != null and script.resource_path == "res://scripts/title_tableau.gd", "tableau is the menu-specific title_tableau.gd")
@@ -166,18 +120,18 @@ func _run() -> void:
 	# --- Arrival reveal never blocks input ---
 	ui.hide_all_panels()
 	ui.show_panel("title")
-	await _frames(2)
+	await ticks(2)
 	check(tableau.is_visible_in_tree(), "tableau visible with the title")
 	check(tableau.reveal > 0.0 and tableau.reveal < 1.0, "title arrival starts a reveal (reveal=%.2f)" % tableau.reveal)
-	check(_focus_name() == "start", "BEGIN focused during the reveal (got %s)" % _focus_name())
-	await _key(KEY_ENTER)
-	await _frames(4)
+	check(focus_name() == "start", "BEGIN focused during the reveal (got %s)" % focus_name())
+	await tap_key(KEY_ENTER)
+	await ticks(4)
 	check(starts == 1 and game.state == Game.GState.PLAYING, "Enter during the reveal starts a run immediately")
 
 	# --- Title-only lifetime and untouched gameplay actor ---
 	check(not tableau.is_visible_in_tree(), "tableau hidden once the run starts")
 	var clock_a: float = tableau.time
-	await _frames(6)
+	await ticks(6)
 	check(is_equal_approx(clock_a, tableau.time), "tableau clock stops while hidden")
 	check(is_instance_valid(game.player) and game.player is Player, "run spawns the real Player")
 	var player_script := game.player.get_script() as Script
@@ -188,13 +142,13 @@ func _run() -> void:
 	# --- Repeated title return leaks nothing ---
 	for i in range(3):
 		ui.quit_to_title_requested.emit()
-		await _frames(4)
+		await ticks(4)
 		check(game.state == Game.GState.TITLE and tableau.is_visible_in_tree(), "return %d: title shows the tableau again" % i)
 		ui.forge_requested.emit()
-		await _frames(2)
+		await ticks(2)
 		check(not tableau.is_visible_in_tree(), "return %d: forge hides the tableau" % i)
 		ui.back_from_forge_requested.emit()
-		await _frames(2)
+		await ticks(2)
 	check(_count(title) == count_before, "repeated title return leaks no nodes (%d -> %d)" % [count_before, _count(title)])
 	var tableaus := 0
 	for child in title.get_children():
@@ -205,28 +159,28 @@ func _run() -> void:
 
 	# --- Reduced motion is static ---
 	ui._reduced_motion_check.button_pressed = true
-	await _frames(3)
+	await ticks(3)
 	check(Feedback.motion_reduced, "reduced motion option reaches Feedback")
 	ui.hide_all_panels()
 	ui.show_panel("title")
-	await _frames(2)
+	await ticks(2)
 	check(tableau.reveal >= 1.0, "reduced motion skips the reveal")
 	var sig_a: Array = tableau.motion_signature()
-	await _frames(6)
+	await ticks(6)
 	var sig_b: Array = tableau.motion_signature()
 	check(sig_a == sig_b, "reduced motion freezes the tableau (%s vs %s)" % [sig_a, sig_b])
 	var embers := tableau.get_node_or_null("Embers") as CPUParticles2D
 	check(embers != null and not embers.visible, "reduced motion hides the embers")
 	ui._reduced_motion_check.button_pressed = false
-	await _frames(6)
+	await ticks(6)
 	check(tableau.motion_signature() != sig_b, "motion resumes when the option is cleared")
 	check(embers != null and embers.visible, "embers return with motion")
 
 	# --- Framing holds at a smaller presented size ---
-	await _set_viewport(Vector2i(960, 540))
+	await set_window_size(Vector2i(960, 540))
 	await _check_framing("960x540")
-	await _set_viewport(Vector2i(1280, 720))
-	await _frames(60)
+	await set_window_size(Vector2i(1280, 720))
+	await ticks(60)
 
 	# --- Real rendered frame: warm knight flame in a dark, non-uniform scene ---
 	await RenderingServer.frame_post_draw
@@ -267,7 +221,4 @@ func _run() -> void:
 	check(mean > 0.03 and mean < 0.35, "scene is moody, not black or washed (mean luma %.3f)" % mean)
 	check(lit > samples / 12 and lit < samples * 3 / 4, "scene has lit structure and deep shadow (%d/%d lit)" % [lit, samples])
 
-	print("OPENING_SCENE_RESULT: %s (%d checks, %d failures)" % ["PASS" if failures == 0 else "FAIL", checks, failures])
-	game.queue_free()
-	await process_frame
-	quit(0 if failures == 0 else 1)
+	await finish("OPENING_SCENE")
