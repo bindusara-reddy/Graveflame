@@ -60,8 +60,9 @@ func deal(upgrades: Array) -> void:
 	_deal_in(buttons)
 	# The cards arm once the deal has landed, so a jump pressed on the way
 	# through the rift cannot take a boon unread.
+	var landed := 0.35 if T.still() else 0.36 + 0.08 * float(count - 1)
 	if not buttons.is_empty():
-		stage.arm_buttons(buttons, 0.35 if T.still() else 0.36 + 0.08 * float(count - 1), buttons[0])
+		stage.arm_buttons(buttons, landed, buttons[0])
 
 
 ## One boon: the kit's dealt card around the boon's medallion. Resting

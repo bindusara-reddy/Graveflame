@@ -46,7 +46,9 @@ func build() -> void:
 		frame.anchor_left = 0.5
 		frame.offset_left = T.S5
 
-	var kicker := Kit.label(ENDINGS[""][0] if _crown else "THE KNIGHT FALLS", T.CAPS, ENDINGS[""][1] if _crown else T.BLOOD)
+	# The crown's kicker is rewritten by set_extras once the ending is known.
+	var opening: Array = ENDINGS[""] if _crown else ["THE KNIGHT FALLS", T.BLOOD]
+	var kicker := Kit.label(str(opening[0]), T.CAPS, opening[1])
 	column.add_child(kicker)
 	set_meta("kicker_label", kicker)
 	column.add_child(Kit.label("The Graveflame Endures" if _crown else "The Flame Fades", T.TITLE, T.BONE))
