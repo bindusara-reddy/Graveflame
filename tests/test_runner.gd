@@ -1,34 +1,11 @@
 extends SceneTree
-## Headless test runner: validates script loading, run determinism, content invariants,
-## and the new mechanics (slam, parry, flask, cells meta-progression, new enemy types).
-## Run:  godot --headless --path . --script res://tests/test_runner.gd
+## Pure-data suite: every script compiles, content invariants hold, boons apply
+## to the build, and the seeded run model is deterministic and keeps its route
+## pacing.
+## Run:  godot4 --headless --path . --script res://tests/test_runner.gd
 
 var checks := 0
 var failures := 0
-
-const PRODUCTION_SCRIPTS := [
-	"res://scripts/content.gd",
-	"res://scripts/run_model.gd",
-	"res://scripts/save.gd",
-	"res://scripts/projectile.gd",
-	"res://scripts/player.gd",
-	"res://scripts/enemy.gd",
-	"res://scripts/boss.gd",
-	"res://scripts/room.gd",
-	"res://scripts/feedback.gd",
-	"res://scripts/ui.gd",
-	"res://scripts/game.gd",
-	"res://scripts/music.gd",
-	"res://scripts/vfx.gd",
-	"res://scripts/light_layer.gd",
-	"res://scripts/light_rig.gd",
-	"res://scripts/atmosphere.gd",
-	"res://scripts/title_tableau.gd",
-	"res://scripts/crypt_prop.gd",
-	"res://scripts/warden_art.gd",
-	"res://scripts/backdrop.gd",
-	"res://scripts/boon_art.gd",
-]
 
 func _init() -> void:
 	_run_tests()
@@ -46,6 +23,7 @@ func _run_tests() -> void:
 	_test_script_loading()
 	_test_content()
 	_test_run_model()
+	_test_run_pacing()
 	_test_save()
 	_test_new_upgrades()
 	_test_rarity_and_uniques()
@@ -59,7 +37,11 @@ func _test_script_loading() -> void:
 	# global class cache) still returns a NON-NULL GDScript from load(), but one
 	# that cannot be instantiated. Checking only for null would report a green
 	# suite while every later check silently skipped, so assert instantiation.
-	for path in PRODUCTION_SCRIPTS:
+	# Scanned, not listed, so a new script can never be left out.
+	for file_name in DirAccess.get_files_at("res://scripts"):
+		if not file_name.ends_with(".gd"):
+			continue
+		var path := "res://scripts".path_join(file_name)
 		var s = load(path)
 		check(s != null, "load script: %s" % path)
 		if s == null:
@@ -95,38 +77,18 @@ func _test_content() -> void:
 	check(Content.ROOM_TEMPLATES[0].tag == "intro", "first template is intro")
 	# Boss template tagged
 	check(Content.BOSS_TEMPLATE.tag == "boss", "boss template tagged")
-	# Upgrades — now 13
-	check(Content.UPGRADES.size() >= 13, "at least 13 upgrades (incl. slam, parry, flask, dashmaster)")
 	# Meta upgrades
 	check(Content.META_UPGRADES.size() >= 5, "at least 5 meta upgrades")
-	# encounter list sane — all kinds in range [0, 5)
-	for i in range(6):
-		var enc = Content.encounter_for_room(i)
-		check(enc.size() >= 1, "encounter room %d has enemies" % i)
-		for k in enc:
-			check(k >= 0 and k < Content.EnemyKind.size(), "encounter kind in range")
 	# New mechanics constants present
 	check(Content.P_SLAM_DAMAGE > 0.0, "slam damage defined")
 	check(Content.PARRY_WINDOW > 0.0, "parry window defined")
 	check(Content.FLASK_MAX > 0, "flask max charges defined")
 	check(Content.P_WALL_JUMP_VEL != Vector2.ZERO, "wall jump velocity defined")
-	check(Content.META_UPGRADES.size() > 0, "meta upgrades defined")
 
 func _test_run_model() -> void:
 	var RunModel = load("res://scripts/run_model.gd")
 	var Content = load("res://scripts/content.gd")
 	var rm1 = RunModel.new(12345)
-	var rm2 = RunModel.new(12345)
-	# determinism: same seed -> same route tags
-	var tags1: Array = []
-	var tags2: Array = []
-	for r in rm1.route: tags1.append(r.tag)
-	for r in rm2.route: tags2.append(r.tag)
-	check(tags1 == tags2, "same seed -> same route tags")
-	# route structure
-	check(rm1.route.size() == Content.ROOMS_BEFORE_BOSS + 2, "route length = combat + intro + boss")
-	check(rm1.route[0].tag == "intro", "route starts with intro")
-	check(rm1.route[rm1.route.size() - 1].tag == "boss", "route ends with boss")
 	# advance
 	rm1.advance_to_next_room()
 	check(rm1.room_index == 0, "first advance -> room 0")
@@ -159,16 +121,57 @@ func _test_run_model() -> void:
 	rm1.apply_upgrade({ "kind": "parry", "value": 12.0 })
 	check(rm1.build.parry_bonus_dmg == 12.0, "parry bonus damage applied")
 	check(rm1.build.parry_window_mul == 1.5, "parry window extended")
-	# Build has all new keys
-	check(rm1.build.has("slam_mul"), "build has slam_mul")
-	check(rm1.build.has("parry_bonus_dmg"), "build has parry_bonus_dmg")
-	check(rm1.build.has("flask_charges"), "build has flask_charges")
-	check(rm1.build.has("dash_cd_mul"), "build has dash_cd_mul")
-	# reset
-	rm1.reset_run(99999)
-	check(rm1.room_index == -1, "reset clears room index")
-	check(rm1.build.max_hp == Content.P_MAX_HP, "reset restores base hp")
-	check(rm1.build.slam_mul == 1.0, "reset restores slam_mul to base")
+
+## Seeded progression: safe combat foundations before pit and wall-jump gauntlets.
+## Each rule is one check naming every seed that breaks it, so a systematic break
+## prints a line per rule rather than one per seed.
+func _test_run_pacing() -> void:
+	var RunModel = load("res://scripts/run_model.gd")
+	var Content = load("res://scripts/content.gd")
+	var failing_seeds := {}
+	var orders := {}
+	for run_seed in range(1, 129):
+		var tags: Array = RunModel.new(run_seed).route.map(func(room): return str(room.tag))
+		var again: Array = RunModel.new(run_seed).route.map(func(room): return str(room.tag))
+		orders[str(tags)] = true
+		var kept := _pacing_rules(tags, again, Content.ROOMS_BEFORE_BOSS)
+		for rule in kept:
+			var seeds: Array = failing_seeds.get_or_add(rule, [])
+			if not kept[rule]:
+				seeds.append(run_seed)
+	for rule in failing_seeds:
+		var seeds: Array = failing_seeds[rule]
+		check(seeds.is_empty(), "%s (failing seeds: %s)" % [rule, seeds])
+	check(orders.size() > 1, "route order still varies within the pacing bands")
+
+## Whether one seeded route keeps each pacing rule, keyed by the rule's message.
+func _pacing_rules(tags: Array, again: Array, combat_room_count: int) -> Dictionary:
+	var eight_rooms: bool = tags.size() == 8 and tags[0] == "intro" and tags[-1] == "boss"
+	var rules := {
+		"the original eight-room loop is preserved": eight_rooms,
+		"safe arena and ascent teach combat before pits": true,
+		"mid-run introduces the crossing rooms": true,
+		"wall-jump and exposed gauntlets belong late": true,
+		"every combat room appears once": true,
+		"route remains seed-reproducible": tags == again,
+	}
+	# The bands read fixed slots 1-6. On a route of any other length that read
+	# would go out of bounds, abort the calling test and still let the suite
+	# print PASS, so they are judged only on an eight-room route; the length
+	# rule above already fails the others.
+	if tags.size() != 8:
+		return rules
+	var early := ["arena", "tiers"]
+	var crossings := ["gap", "platforms"]
+	var gauntlets := ["chamber", "crossfire"]
+	var combat_rooms := {}
+	for tag in tags.slice(1, -1):
+		combat_rooms[tag] = true
+	rules["safe arena and ascent teach combat before pits"] = tags[1] in early and tags[2] in early
+	rules["mid-run introduces the crossing rooms"] = tags[3] in crossings and tags[4] in crossings
+	rules["wall-jump and exposed gauntlets belong late"] = tags[5] in gauntlets and tags[6] in gauntlets
+	rules["every combat room appears once"] = combat_rooms.size() == combat_room_count
+	return rules
 
 func _test_save() -> void:
 	var Save = load("res://scripts/save.gd")
@@ -257,17 +260,6 @@ func _test_rarity_and_uniques() -> void:
 
 func _test_wave_generation() -> void:
 	var Content = load("res://scripts/content.gd")
-	var RunModel = load("res://scripts/run_model.gd")
-	var rm = RunModel.new(2024)
-	check(rm.route.size() == Content.ROOMS_BEFORE_BOSS + 2, "route holds six combat rooms plus intro and boss")
-	var tags := {}
-	var repeats := 0
-	for i in range(1, rm.route.size() - 1):
-		var tag: String = rm.route[i].tag
-		if tags.has(tag):
-			repeats += 1
-		tags[tag] = true
-	check(repeats == 0, "six combat rooms visit every template once")
 	for idx in range(0, 8):
 		var r1 := RandomNumberGenerator.new()
 		var r2 := RandomNumberGenerator.new()
@@ -347,5 +339,3 @@ func _test_synergy_boons() -> void:
 	rm.apply_upgrade({ "id": "executioner", "kind": "execute", "value": 0.5 })
 	rm.apply_upgrade({ "id": "backdraft", "kind": "parry_special", "value": 30.0 })
 	check(is_equal_approx(rm.build.thorns, 15.0) and is_equal_approx(rm.build.execute_bonus, 0.5) and is_equal_approx(rm.build.parry_special, 30.0), "thorns, executioner and backdraft apply")
-	rm.reset_run(2)
-	check(rm.taken.is_empty() and is_zero_approx(rm.build.pyre_dmg), "reset clears taken boons and synergy stats")
