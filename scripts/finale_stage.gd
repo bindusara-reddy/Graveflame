@@ -19,10 +19,12 @@ extends Node2D
 ##                 `revealed`).
 ##   PlaybillText  (text layer) the bill's type, drawn in screen space so the
 ##                 serif stays crisp at any camera zoom.
-## Each animated var's setter queues a redraw of only the node it affects; static
-## geometry lives on nodes that draw once, so an idle theatre never repaints.
-## Reduced motion turns travelling curtains and the lowering bill into fades and
-## freezes every flicker clock; reduced flash darkens fire and dims halos.
+## Each piece paints through a PaperMesh, one draw call however many shapes it
+## holds. Each animated var's setter queues a redraw of only the node it
+## affects; static geometry lives on nodes that paint once, so an idle theatre
+## never repaints. Reduced motion turns travelling curtains and the lowering
+## bill into fades and freezes every flicker clock; reduced flash darkens fire
+## and dims halos.
 
 const VFX := preload("res://scripts/vfx.gd")
 
@@ -125,6 +127,7 @@ const CHARCOAL := Color("1c1016")
 const ASH_EDGE := Color("3a2a30")
 const PIPE := Color("2a1d2a")
 const ROPE := Color("3a2c3a")
+const SANDBAG := Color("2a1f26")
 const VELVET_LO := Color("3a0b16")
 const VELVET_HI := Color("7a1a2a")
 const BOARD := Color("24151d")
@@ -132,6 +135,7 @@ const GILT := Color("b8873a")
 const GILT_HI := Color("f2cf7c")
 const GILT_LO := Color("5c3e1c")
 const EMBER_EDGE := Color(1.0, 0.45, 0.1)
+const LAMP_FIRE := Color("ff7a18")
 const SHADOW := Color(0.0, 0.0, 0.0, 0.4)
 
 ## Open-curtain inner edge travels this far from centre; closed pleats overlap a little.
@@ -145,15 +149,18 @@ var closed := 0.0:
 		closed = value
 		_traveler.queue_redraw()
 		_back.visible = closed < 1.0
-		_remnant_glow.visible = closed < 1.0
-## Ember glow on the burnt remnants' edges, 1 = just burnt, 0 = cold ash.
+## Ember glow on the burnt remnants' edges, 1 = just burnt, 0 = cold ash. The
+## embers fade over the ash edges, so cooling never repaints.
 var remnant_heat := 1.0:
 	set(value):
 		remnant_heat = value
-		_remnant_glow.queue_redraw()
+		var glow := Color(1.0, 1.0, 1.0, clampf(value, 0.0, 1.0))
+		_embers.modulate = glow
+		_sparks.modulate = glow
 
 var _back: Node2D
-var _remnant_glow: Node2D
+var _embers: Node2D
+var _sparks: Node2D
 var _traveler: Node2D
 var _remnants: Array[PackedVector2Array] = []
 
@@ -163,7 +170,8 @@ func _init() -> void:
 	for b in range(BATTEN_YS.size()):
 		_remnants.append(_remnant_edge(b))
 	_back = painter(self, _draw_back)
-	_remnant_glow = painter(self, _draw_remnant_glow)
+	_embers = painter(_back, _draw_embers)
+	_sparks = painter(_back, _draw_sparks, VFX.radial_material())
 	_traveler = painter(self, _draw_traveler)
 	painter(self, _draw_floor)
 
@@ -214,28 +222,15 @@ static func fire(c: Color) -> Color:
 	return c.darkened(0.22) if Feedback.flash_reduced else c
 
 
-## Paper cut-out: a soft offset shadow, a top-lit fill and a pale bevel on the upper edges.
-static func cutout(ci: CanvasItem, pts: PackedVector2Array, fill: Color, shadow: Vector2 = Vector2(4.0, 5.0)) -> void:
-	ci.draw_colored_polygon(Transform2D(0.0, shadow) * pts, Color(SHADOW, SHADOW.a * fill.a))
-	ci.draw_polygon(pts, VFX.shaded_colors(pts, fill, 1.18, 0.78))
-	VFX.draw_rim(ci, pts, 0.0, 0.8 * fill.a)
-
-
-## The quads between two matching point rows as one triangle list: a single draw
-## command, with no triangulation, for pleats, bands and washes.
-static func band(ci: CanvasItem, a: PackedVector2Array, b: PackedVector2Array, a_cols: PackedColorArray, b_cols: PackedColorArray) -> void:
-	var n := a.size()
-	var quads := PackedInt32Array()
-	for i in range(n - 1):
-		quads.append_array(PackedInt32Array([i, i + 1, n + i + 1, i, n + i + 1, n + i]))
-	RenderingServer.canvas_item_add_triangle_array(ci.get_canvas_item(), quads, a + b, a_cols + b_cols)
-
-
 static func flat(c: Color, n: int) -> PackedColorArray:
 	var cols := PackedColorArray()
 	cols.resize(n)
 	cols.fill(c)
 	return cols
+
+
+static func box(r: Rect2) -> PackedVector2Array:
+	return PackedVector2Array([r.position, Vector2(r.end.x, r.position.y), r.end, Vector2(r.position.x, r.end.y)])
 
 
 ## Ragged lower edge of the painted drop that burnt off batten `b`.
@@ -252,36 +247,43 @@ func _remnant_edge(b: int) -> PackedVector2Array:
 
 
 func _draw_back(ci: CanvasItem) -> void:
-	VFX.draw_vgradient(ci, Rect2(-700.0, -900.0, 2680.0, 1600.0), WALL_TOP, WALL_BOTTOM)
+	var m := PaperMesh.new()
+	m.gradient(Rect2(-700.0, -900.0, 2680.0, 1600.0), WALL_TOP, WALL_BOTTOM)
 	# Battens hung with what the fire left of the painted drops.
 	for b in range(BATTEN_YS.size()):
 		var y: float = BATTEN_YS[b]
 		var hang := PackedVector2Array([Vector2(-420.0, y)])
 		hang.append_array(_remnants[b])
 		hang.append(Vector2(1700.0, y))
-		ci.draw_colored_polygon(hang, CHARCOAL.lightened(0.04 * float(b)))
-		ci.draw_line(Vector2(-420.0, y), Vector2(1700.0, y), PIPE, 6.0)
-		ci.draw_line(Vector2(-420.0, y - 2.0), Vector2(1700.0, y - 2.0), Color(VFX.RIM, 0.25), 1.0)
+		m.fill(hang, CHARCOAL.lightened(0.04 * float(b)))
+		m.stroke(_remnants[b], Color(ASH_EDGE, 0.55), 1.5)
+		m.line(Vector2(-420.0, y), Vector2(1700.0, y), PIPE, 6.0)
+		m.line(Vector2(-420.0, y - 2.0), Vector2(1700.0, y - 2.0), Color(VFX.RIM, 0.25), 1.0)
 	# Fly lines with their sandbags, kept clear of the rostrum.
 	for r in range(6):
 		var x := 90.0 + float(r) * 222.0 + (40.0 if r >= 3 else 0.0)
-		var end := 330.0 + float(r % 3) * 70.0
-		ci.draw_line(Vector2(x, -900.0), Vector2(x, end), ROPE, 1.5)
-		VFX.draw_ellipse(ci, Vector2(x, end + 11.0), 8.0, 12.0, Color("2a1f26"))
-		ci.draw_arc(Vector2(x, end + 11.0), 8.0, PI * 1.1, PI * 1.9, 6, Color(VFX.RIM, 0.3), 1.2)
+		var bag := Vector2(x, 341.0 + float(r % 3) * 70.0)
+		m.line(Vector2(x, -900.0), bag - Vector2(0.0, 11.0), ROPE, 1.5)
+		m.fill(VFX.ellipse_points(bag, 8.0, 12.0), SANDBAG)
+		m.arc(bag, 8.0, PI * 1.1, PI * 1.9, Color(VFX.RIM, 0.3), 1.2)
+	m.commit(ci)
 
 
-func _draw_remnant_glow(ci: CanvasItem) -> void:
-	var heat := clampf(remnant_heat, 0.0, 1.0)
-	var edge := ASH_EDGE.lerp(fire(EMBER_EDGE), heat)
+## The still-burning edges of the remnants, laid over their ash edges.
+func _draw_embers(ci: CanvasItem) -> void:
+	var m := PaperMesh.new()
 	for pts in _remnants:
-		ci.draw_polyline(pts, Color(edge, 0.55 + 0.3 * heat), 1.5, true)
-		if heat <= 0.0:
-			continue
-		ci.draw_polyline(pts, Color(fire(VFX.GOLD), heat * heat * 0.8), 0.8, true)
-		# Sparks caught in the lowest tatters stay lit longest.
+		m.stroke(pts, Color(fire(EMBER_EDGE), 0.85), 1.5)
+		m.stroke(pts, Color(fire(VFX.GOLD), 0.6), 0.8)
+	m.commit(ci)
+
+
+## Sparks caught in the tatters, cooling with the edges they hang on.
+func _draw_sparks(ci: CanvasItem) -> void:
+	for pts in _remnants:
 		for i in range(0, pts.size(), 5):
-			VFX.draw_ember_dot(ci, pts[i], 1.4, fire(VFX.ORANGE), heat)
+			VFX.draw_radial(ci, pts[i], 6.0, Color(fire(VFX.ORANGE), 0.7))
+			VFX.draw_radial(ci, pts[i], 2.5, Color(VFX.HOT, 0.8))
 
 
 func _draw_traveler(ci: CanvasItem) -> void:
@@ -291,6 +293,7 @@ func _draw_traveler(ci: CanvasItem) -> void:
 	var still := Feedback.motion_reduced
 	var amount := 1.0 if still else clampf(closed, 0.0, 1.0)
 	var alpha := clampf(closed, 0.0, 1.0) if still else 1.0
+	var m := PaperMesh.new()
 	for side: float in [-1.0, 1.0]:
 		var inner := CENTER_X + side * (TRAVELER_OPEN * (1.0 - amount) - TRAVELER_OVERLAP * amount)
 		var outer := CENTER_X + side * (CENTER_X + 20.0)
@@ -308,30 +311,163 @@ func _draw_traveler(ci: CanvasItem) -> void:
 			hems.append(Vector2(x + trail * (1.0 - u), FLOOR_Y))
 			shade.append(c.darkened(0.45))
 			lit.append(c)
-		band(ci, tops, hems, shade, lit)
-		ci.draw_line(tops[0], hems[0], Color(VELVET_HI.lightened(0.25), 0.6 * alpha), 1.5, true)
-		ci.draw_line(hems[0] + Vector2(0.0, -10.0), Vector2(outer, FLOOR_Y - 10.0), Color(GILT_LO, 0.8 * alpha), 2.0)
+		m.band(tops, hems, shade, lit)
+		m.line(tops[0], hems[0], Color(VELVET_HI.lightened(0.25), 0.6 * alpha), 1.5)
+		m.line(hems[0] + Vector2(0.0, -10.0), Vector2(outer, FLOOR_Y - 10.0), Color(GILT_LO, 0.8 * alpha), 2.0)
+	m.commit(ci)
 
 
 ## Stage floor in front of the traveler: plank face under a gilt lip, the pit below.
 func _draw_floor(ci: CanvasItem) -> void:
-	ci.draw_rect(Rect2(-700.0, FLOOR_Y, 2680.0, APRON_Y - FLOOR_Y), BOARD)
-	var seams := PackedVector2Array()
+	var m := PaperMesh.new()
 	for i in range(58):
 		var x := -700.0 + float(i) * 48.0
-		ci.draw_rect(Rect2(x, FLOOR_Y, 48.0, APRON_Y - FLOOR_Y), BOARD.lightened(0.04 * VFX.hash01(i, 9)))
-		seams.append_array(PackedVector2Array([Vector2(x, FLOOR_Y), Vector2(x, APRON_Y)]))
-	ci.draw_multiline(seams, Color("120a10"), 1.0)
-	ci.draw_line(Vector2(-700.0, FLOOR_Y + 3.0), Vector2(1980.0, FLOOR_Y + 3.0), Color(0.0, 0.0, 0.0, 0.5), 3.0)
-	ci.draw_line(Vector2(-700.0, FLOOR_Y), Vector2(1980.0, FLOOR_Y), Color(GILT, 0.8), 2.0)
-	VFX.draw_vgradient(ci, Rect2(-700.0, APRON_Y, 2680.0, 500.0), Color("0c070c"), Color("030204"))
+		m.rect(Rect2(x, FLOOR_Y, 48.0, APRON_Y - FLOOR_Y), BOARD.lightened(0.04 * VFX.hash01(i, 9)))
+		m.line(Vector2(x, FLOOR_Y), Vector2(x, APRON_Y), Color("120a10"), 1.0)
+	m.line(Vector2(-700.0, FLOOR_Y + 3.0), Vector2(1980.0, FLOOR_Y + 3.0), Color(0.0, 0.0, 0.0, 0.5), 3.0)
+	m.line(Vector2(-700.0, FLOOR_Y), Vector2(1980.0, FLOOR_Y), Color(GILT, 0.8), 2.0)
+	m.gradient(Rect2(-700.0, APRON_Y, 2680.0, 500.0), Color("0c070c"), Color("030204"))
+	m.commit(ci)
+
+
+## Paper shapes gathered into one vertex-coloured triangle list and handed to
+## the canvas as a single command. The GL Compatibility renderer gives every
+## polygon, circle and antialiased line a draw call of its own (a smooth line
+## takes three), so a proscenium painted shape by shape costs hundreds of calls
+## a frame; painted through a PaperMesh it costs one. Strokes feather their
+## sides over a pixel, standing in for the renderer's antialiasing.
+class PaperMesh extends RefCounted:
+	const FEATHER := 1.0
+	var _points := PackedVector2Array()
+	var _colors := PackedColorArray()
+	var _indices := PackedInt32Array()
+
+	## Hands everything gathered so far to `ci` as one draw command.
+	func commit(ci: CanvasItem) -> void:
+		if not _indices.is_empty():
+			RenderingServer.canvas_item_add_triangle_array(ci.get_canvas_item(), _indices, _points, _colors)
+
+	## A polygon with a colour per point (see VFX.shaded_colors).
+	func polygon(pts: PackedVector2Array, cols: PackedColorArray) -> void:
+		_add(pts, cols, Geometry2D.triangulate_polygon(pts))
+
+	func fill(pts: PackedVector2Array, color: Color) -> void:
+		polygon(pts, FinaleStage.flat(color, pts.size()))
+
+	func rect(r: Rect2, color: Color) -> void:
+		fill(FinaleStage.box(r), color)
+
+	## `r` shaded from `top` down to `bottom`.
+	func gradient(r: Rect2, top: Color, bottom: Color) -> void:
+		polygon(FinaleStage.box(r), PackedColorArray([top, top, bottom, bottom]))
+
+	func circle(c: Vector2, r: float, color: Color) -> void:
+		fill(VFX.ellipse_points(c, r, r), color)
+
+	## Quads between two matching rows of points: pleats, bands and washes.
+	func band(a: PackedVector2Array, b: PackedVector2Array, a_cols: PackedColorArray, b_cols: PackedColorArray) -> void:
+		var base := _points.size()
+		var n := a.size()
+		_points.append_array(a)
+		_points.append_array(b)
+		_colors.append_array(a_cols)
+		_colors.append_array(b_cols)
+		for i in range(base, base + n - 1):
+			_indices.append_array(PackedInt32Array([i, i + 1, i + n + 1, i, i + n + 1, i + n]))
+
+	## A line `width` wide along `pts`, mitred at the joints, its sides fading
+	## to clear over FEATHER. Hairlines stay a pixel wide and fade instead.
+	## Each point becomes a column of four vertices: feather, edge, edge, feather.
+	func stroke(pts: PackedVector2Array, color: Color, width: float, closed := false) -> void:
+		var n := pts.size()
+		if n < 2:
+			return
+		var ink := Color(color, color.a * minf(width, 1.0))
+		var column := PackedColorArray([Color(ink, 0.0), ink, ink, Color(ink, 0.0)])
+		var half := maxf(width, 1.0) * 0.5
+		var base := _points.size()
+		var count := n + int(closed)
+		for i in range(count):
+			var p := pts[i % n]
+			var side := _miter(pts, i % n, closed)
+			_points.append_array(PackedVector2Array([p + side * (half + FEATHER), p + side * half, p - side * half, p - side * (half + FEATHER)]))
+			_colors.append_array(column)
+		for a in range(base, base + (count - 1) * 4, 4):
+			_indices.append_array(PackedInt32Array([a, a + 1, a + 5, a, a + 5, a + 4,
+				a + 1, a + 2, a + 6, a + 1, a + 6, a + 5, a + 2, a + 3, a + 7, a + 2, a + 7, a + 6]))
+
+	func line(a: Vector2, b: Vector2, color: Color, width: float) -> void:
+		stroke(PackedVector2Array([a, b]), color, width)
+
+	## An arc about `c` from angle `from` to `to`; a full turn closes on itself.
+	func arc(c: Vector2, r: float, from: float, to: float, color: Color, width: float) -> void:
+		var full := absf(to - from) >= TAU - 0.001
+		var steps := maxi(6, ceili(absf(to - from) / TAU * 40.0))
+		var pts := PackedVector2Array()
+		for i in range(steps if full else steps + 1):
+			pts.append(c + Vector2(r, 0.0).rotated(lerpf(from, to, float(i) / steps)))
+		stroke(pts, color, width, full)
+
+	## Paper cut-out: a soft offset shadow, a top-lit fill and a pale bevel on its upper edges.
+	func cutout(pts: PackedVector2Array, fill_color: Color, shadow := Vector2(4.0, 5.0)) -> void:
+		fill(Transform2D(0.0, shadow) * pts, Color(SHADOW, SHADOW.a * fill_color.a))
+		polygon(pts, VFX.shaded_colors(pts, fill_color, 1.18, 0.78))
+		bevel(pts, 0.8 * fill_color.a)
+
+	## The catch-light a paper edge takes from above: VFX.draw_rim's upward
+	## edges, with no side light (the stage is lit from the front).
+	func bevel(pts: PackedVector2Array, strength: float) -> void:
+		var centre := Vector2.ZERO
+		for p in pts:
+			centre += p
+		centre /= float(pts.size())
+		for i in range(pts.size()):
+			var a := pts[i]
+			var b := pts[(i + 1) % pts.size()]
+			if a.distance_squared_to(b) < 1.0:
+				continue
+			var normal := (b - a).orthogonal().normalized()
+			if normal.dot((a + b) * 0.5 - centre) < 0.0:
+				normal = -normal
+			if -normal.y > 0.6:
+				line(a, b, Color(VFX.RIM, 0.35 * strength * -normal.y), 1.0)
+
+	## VFX.draw_flame, batched.
+	func flame(base: Vector2, height: float, width: float, t: float, phase: float, outer: Color, inner: Color) -> void:
+		var tongues := VFX.flame_tongues(base, height, width, t, phase)
+		fill(tongues[0], outer)
+		fill(tongues[1], inner)
+
+	## Unit side offset at point `i`, lengthened at a corner so both edges keep their width.
+	static func _miter(pts: PackedVector2Array, i: int, closed: bool) -> Vector2:
+		var n := pts.size()
+		var prev := pts[(i + n - 1) % n] if closed or i > 0 else pts[i]
+		var next := pts[(i + 1) % n] if closed or i < n - 1 else pts[i]
+		var dir_in := (pts[i] - prev).normalized()
+		var dir_out := (next - pts[i]).normalized()
+		var along := dir_out if dir_out != Vector2.ZERO else dir_in
+		var tangent := (dir_in + dir_out).normalized()
+		if tangent == Vector2.ZERO:
+			tangent = along
+		var normal := tangent.orthogonal()
+		return normal / maxf(normal.dot(along.orthogonal()), 0.3)
+
+	func _add(pts: PackedVector2Array, cols: PackedColorArray, tris: PackedInt32Array) -> void:
+		var base := _points.size()
+		_points.append_array(pts)
+		_colors.append_array(cols)
+		for i in range(tris.size()):
+			tris[i] += base
+		_indices.append_array(tris)
 
 
 ## Everything in front of the actors: the gilt proscenium, its main curtain, the
-## footlights on the apron and the house. The frame paints once; the live node
-## repaints only while a lamp or crown is burning (every flicker clock stops
-## under reduced motion). `lamps` and `vow_lit` may be edited in place: any
-## change is picked up next frame.
+## footlights on the apron and the house. The frame paints once; the lamps
+## repaint only while one is burning and the audience's crowns while it sits
+## (every flicker clock stops under reduced motion). The footlights are the
+## house's only light: the frame, curtain and audience come up as they kindle
+## and go black as they gutter, by modulation, with no repaint. `lamps` and
+## `vow_lit` may be edited in place: any change is picked up next frame.
 class FinaleFront extends Node2D:
 	const LAMPS := 18
 	const LAMP_X0 := 80.0
@@ -341,9 +477,13 @@ class FinaleFront extends Node2D:
 	const KEYSTONE := Vector2(640.0, -88.0)
 	const SWAGS := 12
 	const TIE_Y := 300.0
-	## Main curtain hem when flown, hidden behind the frame's head.
+	## Main curtain hem when flown (hidden behind the frame's head) and when down.
 	const DROP_UP := -150.0
+	const DROP_HEM := FLOOR_Y + 2.0
 	const DROP_FOLDS := 30
+	## The curtain's embroidered crest sits this far above its hem, clear of
+	## where the knight's last flame comes to rest.
+	const CREST_RISE := 400.0
 	## Seat rows: floor y, seats, seat-back width. Past victors fill them centre-out.
 	const SEAT_ROWS := [[655.0, 11, 70.0], [685.0, 12, 78.0]]
 	const SEAT_PITCH := 104.0
@@ -351,12 +491,14 @@ class FinaleFront extends Node2D:
 	const RISE_PX := 14.0
 	## The follow-spot lands on the rostrum's top step, where the knight bows.
 	const SPOT_FOOT := 560.0
+	## How much of the house stays visible with every footlight out.
+	const UNLIT := 0.2
 	const FRAME := Color("1c1024")
 	const LACQUER := Color("2e1c38")
 	const TRACERY := Color("0a0610")
 	const MAIN_HI := Color("8c2234")
 	const MAIN_LO := Color("40101c")
-	const TIN := Color("5e5868")
+	const TIN := Color("3c3844")
 	const SEAT := Color("0d0911")
 	const PATRON := Color("120c18")
 	const SOCKET := Color("3a2a44")
@@ -368,11 +510,16 @@ class FinaleFront extends Node2D:
 	var lamps: Array[float] = []
 	## One keystone socket per vow, in Content.VOWS order.
 	var vow_lit: Array[bool] = []
-	## Great curtain, 0 = flown, 1 = down on the stage (a little past 1 reads as its bounce).
+	## Great curtain, 0 = flown, 1 = down on the stage (a little past 1 reads as
+	## its bounce). It is painted once, hanging, and flown by moving it; reduced
+	## motion fades it in where it hangs instead.
 	var main_drop := 0.0:
 		set(value):
 			main_drop = value
-			_drop.queue_redraw()
+			var still := Feedback.motion_reduced
+			_drop.visible = value > 0.0
+			_drop.position.y = 0.0 if still else (DROP_UP - DROP_HEM) * (1.0 - value)
+			_drop.modulate.a = clampf(value, 0.0, 1.0) if still else 1.0
 	## Follow-spot strength 0..1 and the x it points at.
 	var spot := 0.0:
 		set(value):
@@ -389,22 +536,27 @@ class FinaleFront extends Node2D:
 		set(value):
 			house_count = value
 			_house.queue_redraw()
+			_crowns.queue_redraw()
 	var rise := 0.0:
 		set(value):
 			rise = value
 			_house.queue_redraw()
+			_crowns.queue_redraw()
 
 	var _t := 0.0
 	var _drawn_lamps: Array[float] = []
 	var _drawn_vows: Array[bool] = []
 	var _seats: Array[Rect2] = []
-	var _fill_order: Array[int] = []
+	## Each seat's place in the centre-out fill order.
+	var _fill_rank: Array[int] = []
 	var _drop: Node2D
 	var _frame: Node2D
-	var _live: Node2D
+	var _flames: Node2D
+	var _lamps: Node2D
 	var _glow: Node2D
 	var _beam: Node2D
 	var _house: Node2D
+	var _crowns: Node2D
 
 	func _init() -> void:
 		name = "FinaleFront"
@@ -419,19 +571,27 @@ class FinaleFront extends Node2D:
 				var x := CENTER_X + (float(i) - float(n - 1) * 0.5) * SEAT_PITCH
 				_seats.append(Rect2(x - w * 0.5, float(row[0]) - w * SEAT_HEIGHT, w, w * SEAT_HEIGHT))
 		# Centre-out, nearer the stage first on a tie, so the first watcher sits below the bow.
-		for i in range(_seats.size()):
-			_fill_order.append(i)
-		_fill_order.sort_custom(func(a: int, b: int) -> bool:
+		var order := range(_seats.size())
+		order.sort_custom(func(a: int, b: int) -> bool:
 			return _seat_rank(a) < _seat_rank(b))
+		_fill_rank.resize(_seats.size())
+		for place in range(order.size()):
+			_fill_rank[order[place]] = place
 		_drop = FinaleStage.painter(self, _draw_drop)
+		_drop.visible = false
 		_frame = FinaleStage.painter(self, _draw_frame)
-		_live = FinaleStage.painter(self, _draw_live)
+		_flames = FinaleStage.painter(self, _draw_flames)
+		_lamps = FinaleStage.painter(self, _draw_lamps)
 		_glow = FinaleStage.painter(self, _draw_glow, VFX.radial_material())
 		_beam = FinaleStage.painter(self, _draw_beam, VFX.additive_material())
 		_house = FinaleStage.painter(self, _draw_house)
+		_crowns = FinaleStage.painter(self, _draw_crowns)
 
 	func _seat_rank(i: int) -> float:
 		return absf(_seats[i].get_center().x - CENTER_X) + float(i) * 0.01
+
+	func _seated(i: int) -> bool:
+		return _fill_rank[i] < house_count
 
 	func _process(delta: float) -> void:
 		var changed := lamps != _drawn_lamps or vow_lit != _drawn_vows
@@ -443,22 +603,26 @@ class FinaleFront extends Node2D:
 		if changed:
 			_drawn_lamps = lamps.duplicate()
 			_drawn_vows = vow_lit.duplicate()
+			_lamps.queue_redraw()
 			_beam.queue_redraw()
+			_light_house()
 		if changed or burning:
-			_live.queue_redraw()
+			_flames.queue_redraw()
 			_glow.queue_redraw()
-		if crowned or (changed and house_count > 0):
-			_house.queue_redraw()
+		if crowned:
+			_crowns.queue_redraw()
 
-	func _clock() -> float:
-		return 0.0 if Feedback.motion_reduced else _t
-
-	## Mean footlight level: how brightly the stage rims the audience.
-	func _stage_light() -> float:
+	## The frame, the curtain and the audience take their light from the lamps.
+	func _light_house() -> void:
 		var sum := 0.0
 		for l in lamps:
 			sum += clampf(l, 0.0, 1.0)
-		return sum / float(LAMPS)
+		var k := lerpf(UNLIT, 1.0, sum / float(LAMPS))
+		for piece: Node2D in [_drop, _frame, _house]:
+			piece.modulate = Color(k, k, k, piece.modulate.a)
+
+	func _clock() -> float:
+		return 0.0 if Feedback.motion_reduced else _t
 
 	func _lamp_base(i: int) -> Vector2:
 		return Vector2(LAMP_X0 + LAMP_STEP * float(i), LAMP_Y)
@@ -473,17 +637,11 @@ class FinaleFront extends Node2D:
 	func _halo_scale() -> float:
 		return 0.75 if Feedback.flash_reduced else 1.0
 
-	static func _box(r: Rect2) -> PackedVector2Array:
-		return PackedVector2Array([r.position, Vector2(r.end.x, r.position.y), r.end, Vector2(r.position.x, r.end.y)])
-
 	# --- Main curtain ------------------------------------------------------------
 
 	func _draw_drop(ci: CanvasItem) -> void:
-		if main_drop <= 0.0:
-			return
-		var still := Feedback.motion_reduced
-		var hem := lerpf(DROP_UP, FLOOR_Y + 2.0, 1.0 if still else main_drop)
-		var alpha := clampf(main_drop, 0.0, 1.0) if still else 1.0
+		var hem := DROP_HEM
+		var m := FinaleStage.PaperMesh.new()
 		var tops := PackedVector2Array()
 		var hems := PackedVector2Array()
 		var shade := PackedColorArray()
@@ -492,82 +650,85 @@ class FinaleFront extends Node2D:
 			var u := float(i) / DROP_FOLDS
 			var x := lerpf(OPEN_L - 20.0, OPEN_R + 20.0, u)
 			var fold := 0.5 + 0.5 * cos(u * DROP_FOLDS * PI)
-			var c := Color(MAIN_LO.lerp(MAIN_HI, fold), alpha)
+			var c := MAIN_LO.lerp(MAIN_HI, fold)
 			tops.append(Vector2(x, hem - 1300.0))
 			hems.append(Vector2(x, hem + 4.0 * fold))
 			shade.append(c.darkened(0.5))
 			lit.append(c)
-		FinaleStage.band(ci, tops, hems, shade, lit)
+		m.band(tops, hems, shade, lit)
 		# Embroidered border, bullion fringe and the gilt flame crest at the centre.
-		ci.draw_polyline(Transform2D(0.0, Vector2(0.0, -34.0)) * hems, Color(GILT, alpha), 3.0, true)
-		ci.draw_polyline(Transform2D(0.0, Vector2(0.0, -26.0)) * hems, Color(GILT_LO, alpha), 1.5, true)
-		_fringe(ci, hems, 8, 10.0, alpha)
-		var crest := Vector2(CENTER_X, hem - 330.0)
-		ci.draw_circle(crest, 46.0, Color(MAIN_LO.darkened(0.35), alpha))
-		ci.draw_arc(crest, 46.0, 0.0, TAU, 48, Color(GILT, alpha), 3.0, true)
-		ci.draw_arc(crest, 39.0, 0.0, TAU, 48, Color(GILT_LO, alpha), 1.5, true)
+		m.stroke(Transform2D(0.0, Vector2(0.0, -34.0)) * hems, GILT, 3.0)
+		m.stroke(Transform2D(0.0, Vector2(0.0, -26.0)) * hems, GILT_LO, 1.5)
+		_fringe(m, hems, 8, 10.0)
+		var crest := Vector2(CENTER_X, hem - CREST_RISE)
+		m.circle(crest, 46.0, MAIN_LO.darkened(0.35))
+		m.arc(crest, 46.0, 0.0, TAU, GILT, 3.0)
+		m.arc(crest, 39.0, 0.0, TAU, GILT_LO, 1.5)
 		for s in range(16):
-			ci.draw_circle(crest + Vector2(53.0, 0.0).rotated(TAU * float(s) / 16.0), 2.5, Color(GILT, alpha))
+			m.circle(crest + Vector2(53.0, 0.0).rotated(TAU * float(s) / 16.0), 2.5, GILT)
 		# The knight's flame crown, worked in gold thread.
 		for k in range(4):
 			var x := (float(k) - 1.5) * 10.0
-			VFX.draw_flame(ci, crest + Vector2(x, 14.0), 36.0 - absf(x) * 0.7, 11.0, 0.0, float(k) * 2.1, Color(GILT, alpha), Color(GILT_HI, alpha))
-		ci.draw_rect(Rect2(crest + Vector2(-22.0, 14.0), Vector2(44.0, 7.0)), Color(GILT, alpha))
+			m.flame(crest + Vector2(x, 14.0), 36.0 - absf(x) * 0.7, 11.0, 0.0, float(k) * 2.1, GILT, GILT_HI)
+		m.rect(Rect2(crest + Vector2(-22.0, 14.0), Vector2(44.0, 7.0)), GILT)
+		m.commit(ci)
 
-	## Bullion fringe hung under `line`: `per` alternating gold threads per segment, in two draw commands.
-	func _fringe(ci: CanvasItem, line: PackedVector2Array, per: int, length: float, alpha: float = 1.0) -> void:
-		var threads: Array[PackedVector2Array] = [PackedVector2Array(), PackedVector2Array()]
+	## Bullion fringe hung under `line`: `per` straight threads per segment, alternating gold and shadow.
+	func _fringe(m: FinaleStage.PaperMesh, line: PackedVector2Array, per: int, length: float) -> void:
 		for i in range(line.size() - 1):
 			for j in range(per):
 				var p := line[i].lerp(line[i + 1], float(j) / float(per))
-				threads[j % 2].append_array(PackedVector2Array([p, p + Vector2(0.0, length)]))
-		ci.draw_multiline(threads[0], Color(GILT, alpha), 1.8)
-		ci.draw_multiline(threads[1], Color(GILT_LO, alpha), 1.8)
+				m.rect(Rect2(p.x - 0.9, p.y, 1.8, length), GILT if j % 2 == 0 else GILT_LO)
 
 	# --- Proscenium (static) -----------------------------------------------------
 
 	func _draw_frame(ci: CanvasItem) -> void:
+		var m := FinaleStage.PaperMesh.new()
 		# The frame's own shadow on the stage, just inside the opening.
 		var lip := FinaleStage.opening_edge(0.0, FLOOR_Y)
-		FinaleStage.band(ci, lip, FinaleStage.opening_edge(34.0, FLOOR_Y), FinaleStage.flat(SHADOW, lip.size()), FinaleStage.flat(Color(SHADOW, 0.0), lip.size()))
+		m.band(lip, FinaleStage.opening_edge(34.0, FLOOR_Y), FinaleStage.flat(SHADOW, lip.size()), FinaleStage.flat(Color(SHADOW, 0.0), lip.size()))
 		# Posts and head: lacquered board, lit a little from the footlights below.
 		for x in [-700.0, OPEN_R]:
-			var post := _box(Rect2(x, -400.0, 740.0, 1300.0))
-			ci.draw_polygon(post, VFX.shaded_colors(post, FRAME, 0.8, 1.25))
+			var post := FinaleStage.box(Rect2(x, -400.0, 740.0, 1300.0))
+			m.polygon(post, VFX.shaded_colors(post, FRAME, 0.8, 1.25))
 		var arch := FinaleStage.opening_edge(0.0).slice(1, ARCH_STEPS + 2)
 		arch.reverse()
 		var head := PackedVector2Array([Vector2(OPEN_L, -900.0), Vector2(OPEN_R, -900.0)])
 		head.append_array(arch)
-		ci.draw_colored_polygon(head, FRAME.darkened(0.2))
+		m.fill(head, FRAME.darkened(0.2))
 		# Bevel bands: outer gilt rim, lacquer, then the bright gilt moulding at the opening.
-		ci.draw_polyline(FinaleStage.opening_edge(-22.0), Color(GILT_LO, 0.9), 2.0, true)
-		ci.draw_polyline(FinaleStage.opening_edge(-13.0), LACQUER, 10.0, true)
-		ci.draw_polyline(FinaleStage.opening_edge(-3.5), GILT, 7.0, true)
-		ci.draw_polyline(FinaleStage.opening_edge(-6.5), Color(GILT_HI, 0.8), 1.2, true)
-		ci.draw_polyline(FinaleStage.opening_edge(-0.5), GILT_LO, 1.2, true)
+		m.stroke(FinaleStage.opening_edge(-22.0), Color(GILT_LO, 0.9), 2.0)
+		m.stroke(FinaleStage.opening_edge(-13.0), LACQUER, 10.0)
+		m.stroke(FinaleStage.opening_edge(-3.5), GILT, 7.0)
+		m.stroke(FinaleStage.opening_edge(-6.5), Color(GILT_HI, 0.8), 1.2)
+		m.stroke(FinaleStage.opening_edge(-0.5), GILT_LO, 1.2)
 		# Pierced quatrefoils in the spandrels; the ninth frames the keystone's sigil.
 		for k in range(1, 5):
 			for side: float in [-1.0, 1.0]:
 				var x := CENTER_X + side * 130.0 * float(k)
-				_quatrefoil(ci, Vector2(x, FinaleStage.arch_y(x) - 44.0), 11.0)
-		_draw_swags(ci)
-		_draw_keystone(ci)
+				_quatrefoil(m, Vector2(x, FinaleStage.arch_y(x) - 44.0), 11.0)
+		_draw_swags(m)
+		_draw_keystone(m)
+		for v in range(VOWS):
+			m.circle(_socket(v), 7.5, GILT_LO)
+			m.arc(_socket(v), 7.5, 0.0, TAU, GILT, 1.5)
 		for side: float in [-1.0, 1.0]:
-			_draw_side_drape(ci, side)
-			_draw_pilaster(ci, side)
+			_draw_side_drape(m, side)
+			_draw_pilaster(m, side)
 		# Plinths fall away into the dark house; the footlight trough runs along the apron.
 		for x in [-700.0, OPEN_R]:
-			VFX.draw_vgradient(ci, Rect2(x, FLOOR_Y, 740.0, 300.0), LACQUER, VFX.VOID)
-			ci.draw_line(Vector2(x, FLOOR_Y), Vector2(x + 740.0, FLOOR_Y), GILT, 2.0)
-		FinaleStage.cutout(ci, _box(Rect2(OPEN_L, 604.0, OPEN_R - OPEN_L, 16.0)), LACQUER.darkened(0.2), Vector2(0.0, 4.0))
-		ci.draw_line(Vector2(OPEN_L, 604.0), Vector2(OPEN_R, 604.0), GILT, 2.0)
+			m.gradient(Rect2(x, FLOOR_Y, 740.0, 300.0), LACQUER, VFX.VOID)
+			m.line(Vector2(x, FLOOR_Y), Vector2(x + 740.0, FLOOR_Y), GILT, 2.0)
+		m.cutout(FinaleStage.box(Rect2(OPEN_L, 604.0, OPEN_R - OPEN_L, 16.0)), LACQUER.darkened(0.2), Vector2(0.0, 4.0))
+		m.line(Vector2(OPEN_L, 604.0), Vector2(OPEN_R, 604.0), GILT, 2.0)
+		m.commit(ci)
 
 	## A gilt-edged pilaster on each post with a lancet recess, so the frame reads carved.
-	func _draw_pilaster(ci: CanvasItem, side: float) -> void:
+	func _draw_pilaster(m: FinaleStage.PaperMesh, side: float) -> void:
 		var cx := OPEN_L - 46.0 if side < 0.0 else OPEN_R + 46.0
 		var shaft := Rect2(cx - 28.0, 96.0, 56.0, FLOOR_Y - 96.0)
-		FinaleStage.cutout(ci, _box(shaft), LACQUER, Vector2(-side * 5.0, 5.0))
-		ci.draw_rect(shaft.grow(-4.0), Color(GILT_LO, 0.9), false, 1.5)
+		m.cutout(FinaleStage.box(shaft), LACQUER, Vector2(-side * 5.0, 5.0))
+		m.stroke(FinaleStage.box(shaft.grow(-4.0)), Color(GILT_LO, 0.9), 1.5, true)
 		# Pointed lancet: two arcs struck from the opposite springing points.
 		var lancet := PackedVector2Array([Vector2(cx - 15.0, 560.0)])
 		for j in range(7):
@@ -577,23 +738,22 @@ class FinaleFront extends Node2D:
 			var a := float(6 - j) / 6.0 * PI / 3.0
 			lancet.append(Vector2(cx - 15.0 + 30.0 * cos(a), 160.0 - 30.0 * sin(a)))
 		lancet.append(Vector2(cx + 15.0, 560.0))
-		ci.draw_colored_polygon(lancet, TRACERY)
-		lancet.append(lancet[0])
-		ci.draw_polyline(lancet, GILT, 1.5, true)
-		ci.draw_line(Vector2(cx, 172.0), Vector2(cx, 548.0), Color(GILT_LO, 0.8), 1.5)
+		m.fill(lancet, TRACERY)
+		m.stroke(lancet, GILT, 1.5, true)
+		m.line(Vector2(cx, 172.0), Vector2(cx, 548.0), Color(GILT_LO, 0.8), 1.5)
 		for y: float in [76.0, FLOOR_Y - 20.0]:
-			FinaleStage.cutout(ci, _box(Rect2(cx - 36.0, y, 72.0, 20.0)), GILT_LO, Vector2(-side * 3.0, 4.0))
-			ci.draw_line(Vector2(cx - 36.0, y + 1.0), Vector2(cx + 36.0, y + 1.0), GILT_HI, 1.5)
+			m.cutout(FinaleStage.box(Rect2(cx - 36.0, y, 72.0, 20.0)), GILT_LO, Vector2(-side * 3.0, 4.0))
+			m.line(Vector2(cx - 36.0, y + 1.0), Vector2(cx + 36.0, y + 1.0), GILT_HI, 1.5)
 
-	func _quatrefoil(ci: CanvasItem, c: Vector2, r: float) -> void:
+	func _quatrefoil(m: FinaleStage.PaperMesh, c: Vector2, r: float) -> void:
 		for a in range(4):
-			ci.draw_circle(c + Vector2(r, 0.0).rotated(float(a) * PI * 0.5), r * 0.86, TRACERY)
+			m.circle(c + Vector2(r, 0.0).rotated(float(a) * PI * 0.5), r * 0.86, TRACERY)
 		for a in range(4):
 			var turn := float(a) * PI * 0.5
-			ci.draw_arc(c + Vector2(r, 0.0).rotated(turn), r * 0.86 + 1.0, turn - 1.9, turn + 1.9, 12, Color(GILT, 0.75), 1.5, true)
-		ci.draw_arc(c, r * 2.25, 0.0, TAU, 28, Color(GILT_LO, 0.9), 1.5, true)
+			m.arc(c + Vector2(r, 0.0).rotated(turn), r * 0.86 + 1.0, turn - 1.9, turn + 1.9, Color(GILT, 0.75), 1.5)
+		m.arc(c, r * 2.25, 0.0, TAU, Color(GILT_LO, 0.9), 1.5)
 
-	func _draw_swags(ci: CanvasItem) -> void:
+	func _draw_swags(m: FinaleStage.PaperMesh) -> void:
 		var step := (OPEN_R - OPEN_L) / float(SWAGS)
 		var hem := PackedVector2Array()
 		for i in range(SWAGS):
@@ -608,35 +768,35 @@ class FinaleFront extends Node2D:
 			var under := sag.duplicate()
 			under.reverse()
 			body.append_array(under)
-			FinaleStage.cutout(ci, body, VELVET_HI, Vector2(0.0, 6.0))
+			m.cutout(body, VELVET_HI, Vector2(0.0, 6.0))
 			# Two folds echo the sag.
 			for f: float in [0.45, 0.75]:
 				var fold := PackedVector2Array()
 				for j in range(1, 12):
 					fold.append(top[j].lerp(sag[j], f))
-				ci.draw_polyline(fold, Color(VELVET_LO, 0.7), 2.0, true)
+				m.stroke(fold, Color(VELVET_LO, 0.7), 2.0)
 			hem.append_array(sag)
-		_fringe(ci, hem, 3, 6.0)
+		_fringe(m, hem, 3, 6.0)
 		# Gilt rosettes and tassels where the swags meet.
 		for i in range(1, SWAGS):
 			var x := OPEN_L + step * float(i)
 			var knot := Vector2(x, FinaleStage.arch_y(x) + 30.0)
-			ci.draw_colored_polygon(PackedVector2Array([knot, knot + Vector2(-5.0, 18.0), knot + Vector2(5.0, 18.0)]), GILT_LO)
-			ci.draw_circle(knot, 5.0, GILT)
-			ci.draw_circle(knot + Vector2(-1.5, -1.5), 1.8, GILT_HI)
+			m.fill(PackedVector2Array([knot, knot + Vector2(-5.0, 18.0), knot + Vector2(5.0, 18.0)]), GILT_LO)
+			m.circle(knot, 5.0, GILT)
+			m.circle(knot + Vector2(-1.5, -1.5), 1.8, GILT_HI)
 
-	func _draw_keystone(ci: CanvasItem) -> void:
+	func _draw_keystone(m: FinaleStage.PaperMesh) -> void:
 		var k := KEYSTONE
 		var stone := PackedVector2Array([k + Vector2(-46.0, -46.0), k + Vector2(46.0, -46.0), k + Vector2(32.0, 44.0), k + Vector2(0.0, 58.0), k + Vector2(-32.0, 44.0)])
-		FinaleStage.cutout(ci, stone, LACQUER, Vector2(3.0, 6.0))
-		ci.draw_polyline(stone + PackedVector2Array([stone[0]]), GILT, 2.5, true)
+		m.cutout(stone, LACQUER, Vector2(3.0, 6.0))
+		m.stroke(stone, GILT, 2.5, true)
 		var c := k + Vector2(0.0, 2.0)
-		_quatrefoil(ci, c, 13.0)
+		_quatrefoil(m, c, 13.0)
 		# The throne's ember sigil, carved and painted rather than burning.
-		ci.draw_arc(c, 17.0, 0.0, TAU, 24, Color(FinaleStage.fire(VFX.ORANGE), 0.45), 1.5, true)
-		VFX.draw_flame(ci, c + Vector2(0.0, 12.0), 30.0, 17.0, 0.0, 0.4, FinaleStage.fire(Color("ff7a18")), FinaleStage.fire(VFX.GOLD))
+		m.arc(c, 17.0, 0.0, TAU, Color(FinaleStage.fire(VFX.ORANGE), 0.45), 1.5)
+		m.flame(c + Vector2(0.0, 12.0), 30.0, 17.0, 0.0, 0.4, FinaleStage.fire(LAMP_FIRE), FinaleStage.fire(VFX.GOLD))
 
-	func _draw_side_drape(ci: CanvasItem, side: float) -> void:
+	func _draw_side_drape(m: FinaleStage.PaperMesh, side: float) -> void:
 		var post := OPEN_L if side < 0.0 else OPEN_R
 		var into := -side
 		var top_y := FinaleStage.arch_y(post + into * 150.0) + 18.0
@@ -660,41 +820,54 @@ class FinaleFront extends Node2D:
 			for j in range(inner.size()):
 				a.append(outer[j].lerp(inner[j], float(p) / 4.0))
 				b.append(outer[j].lerp(inner[j], float(p + 1) / 4.0))
-			FinaleStage.band(ci, a, b, ridge, hollow)
-		ci.draw_polyline(inner, Color(VELVET_HI.lightened(0.3), 0.8), 1.5, true)
+			m.band(a, b, ridge, hollow)
+		m.stroke(inner, Color(VELVET_HI.lightened(0.3), 0.8), 1.5)
 		# Gilt tie-back rope and its tassel.
 		var tie := Vector2(post + into * 66.0, TIE_Y - 2.0)
-		ci.draw_line(Vector2(post, TIE_Y - 4.0), tie, GILT, 5.0, true)
-		ci.draw_line(Vector2(post, TIE_Y - 5.5), tie - Vector2(0.0, 1.5), Color(GILT_HI, 0.7), 1.2, true)
+		m.line(Vector2(post, TIE_Y - 4.0), tie, GILT, 5.0)
+		m.line(Vector2(post, TIE_Y - 5.5), tie - Vector2(0.0, 1.5), Color(GILT_HI, 0.7), 1.2)
 		var tassel := Vector2(post + into * 12.0, TIE_Y)
-		ci.draw_colored_polygon(PackedVector2Array([tassel, tassel + Vector2(-7.0, 30.0), tassel + Vector2(7.0, 30.0)]), GILT_LO)
-		_fringe(ci, PackedVector2Array([tassel + Vector2(-6.0, 14.0), tassel + Vector2(6.0, 14.0)]), 5, 16.0)
-		ci.draw_circle(tassel + Vector2(0.0, 3.0), 5.0, GILT)
+		m.fill(PackedVector2Array([tassel, tassel + Vector2(-7.0, 30.0), tassel + Vector2(7.0, 30.0)]), GILT_LO)
+		_fringe(m, PackedVector2Array([tassel + Vector2(-6.0, 14.0), tassel + Vector2(6.0, 14.0)]), 5, 16.0)
+		m.circle(tassel + Vector2(0.0, 3.0), 5.0, GILT)
 
 	# --- Footlights, sockets, glow and the follow-spot ---------------------------
 
-	func _draw_live(ci: CanvasItem) -> void:
+	## The footlights' flames, the only part of them that flickers.
+	func _draw_flames(ci: CanvasItem) -> void:
+		var m := FinaleStage.PaperMesh.new()
 		var t := _clock()
+		for i in range(LAMPS):
+			var l := clampf(lamps[i], 0.0, 1.0)
+			if l > 0.0:
+				m.flame(_lamp_base(i), 22.0 * l, 8.0 * (0.6 + 0.4 * l), t, float(i) * 1.7, FinaleStage.fire(LAMP_FIRE), FinaleStage.fire(VFX.GOLD))
+		m.commit(ci)
+
+	## The lamps' tin and the keystone's gems, repainted only when one changes.
+	func _draw_lamps(ci: CanvasItem) -> void:
+		var m := FinaleStage.PaperMesh.new()
 		for i in range(LAMPS):
 			var base := _lamp_base(i)
 			var l := clampf(lamps[i], 0.0, 1.0)
-			if l > 0.0:
-				VFX.draw_flame(ci, base, 22.0 * l, 8.0 * (0.6 + 0.4 * l), t, float(i) * 1.7, FinaleStage.fire(Color("ff7a18")), FinaleStage.fire(VFX.GOLD))
-			else:
-				ci.draw_line(base, base + Vector2(0.0, -8.0), ASH_EDGE, 1.5)
-			# The tin reflector faces the stage, so the house sees its back hiding the wick.
-			var hood := PackedVector2Array([base + Vector2(-11.0, 12.0), base + Vector2(-10.0, 0.0), base + Vector2(-5.0, -4.0), base + Vector2(0.0, -5.0),
-				base + Vector2(5.0, -4.0), base + Vector2(10.0, 0.0), base + Vector2(11.0, 12.0)])
-			ci.draw_polygon(hood, VFX.shaded_colors(hood, TIN, 1.2, 0.45))
-			ci.draw_polyline(hood.slice(1, 6), Color(GILT_HI, 0.25 + 0.6 * l), 1.5, true)
+			if l <= 0.0:
+				m.line(base, base + Vector2(0.0, -8.0), ASH_EDGE, 1.5)
+			# A scallop-shell reflector turns its back to the house and hides
+			# the wick; its ribs and lip catch the flame behind it.
+			var hinge := base + Vector2(0.0, 5.0)
+			var shell := PackedVector2Array([base + Vector2(8.0, 13.0), base + Vector2(-8.0, 13.0)])
+			for k in range(9):
+				shell.append(hinge + Vector2(-12.0, 0.0).rotated(float(k) / 8.0 * PI))
+			m.polygon(shell, VFX.shaded_colors(shell, TIN, 1.0, 0.55))
+			for k in range(1, 8, 2):
+				m.line(base + Vector2(0.0, 10.0), hinge + Vector2(-11.0, 0.0).rotated(float(k) / 8.0 * PI), Color(VFX.VOID, 0.5), 1.0)
+			m.stroke(shell.slice(2), Color(GILT_HI, 0.15 + 0.75 * l), 1.5)
 		for v in range(VOWS):
 			var p := _socket(v)
-			ci.draw_circle(p, 7.5, GILT_LO)
-			ci.draw_arc(p, 7.5, 0.0, TAU, 16, GILT, 1.5, true)
 			var gem := PackedVector2Array([p + Vector2(0.0, -5.0), p + Vector2(4.0, 0.0), p + Vector2(0.0, 5.0), p + Vector2(-4.0, 0.0)])
-			ci.draw_colored_polygon(gem, SOCKET_LIT if vow_lit[v] else SOCKET)
+			m.fill(gem, SOCKET_LIT if vow_lit[v] else SOCKET)
 			if vow_lit[v]:
-				ci.draw_circle(p + Vector2(-1.2, -1.6), 1.3, VFX.HOT)
+				m.circle(p + Vector2(-1.2, -1.6), 1.3, VFX.HOT)
+		m.commit(ci)
 
 	func _draw_glow(ci: CanvasItem) -> void:
 		var k := _halo_scale()
@@ -709,11 +882,12 @@ class FinaleFront extends Node2D:
 		if spot > 0.0:
 			# The spot's pool where the beam lands on the rostrum: a flattened radial.
 			var pool := Vector2(spot_x, SPOT_FOOT)
-			ci.draw_primitive(Transform2D(0.0, Vector2(200.0, 44.0), 0.0, pool - Vector2(100.0, 22.0)) * PackedVector2Array(QUAD_UV),
+			ci.draw_primitive(Transform2D(0.0, Vector2(240.0, 48.0), 0.0, pool - Vector2(120.0, 24.0)) * PackedVector2Array(QUAD_UV),
 				FinaleStage.flat(Color(VFX.HOT, 0.32 * spot * k), 4), PackedVector2Array(QUAD_UV))
 
 	func _draw_beam(ci: CanvasItem) -> void:
 		var k := _halo_scale()
+		var m := FinaleStage.PaperMesh.new()
 		# Footlight wash climbing the curtain, fed by each lamp so it grows as they kindle.
 		if lamps.any(func(l: float) -> bool: return l > 0.0):
 			var tops := PackedVector2Array()
@@ -723,31 +897,28 @@ class FinaleFront extends Node2D:
 				tops.append(Vector2(_lamp_base(i).x, 380.0))
 				feet.append(_lamp_base(i))
 				warm.append(Color(VFX.GOLD, 0.07 * clampf(lamps[i], 0.0, 1.0) * k))
-			FinaleStage.band(ci, tops, feet, FinaleStage.flat(Color(VFX.GOLD, 0.0), LAMPS), warm)
-		if spot <= 0.0:
-			return
-		# Follow-spot from the booth: bright core, feathered edges.
-		var clear := Color(BEAM, 0.0)
-		FinaleStage.band(ci,
-			PackedVector2Array([Vector2(spot_x - 30.0, -100.0), Vector2(spot_x, -100.0), Vector2(spot_x + 30.0, -100.0)]),
-			PackedVector2Array([Vector2(spot_x - 80.0, SPOT_FOOT), Vector2(spot_x, SPOT_FOOT), Vector2(spot_x + 80.0, SPOT_FOOT)]),
-			PackedColorArray([clear, Color(BEAM, 0.06 * spot * k), clear]), PackedColorArray([clear, Color(BEAM, 0.12 * spot * k), clear]))
+			m.band(tops, feet, FinaleStage.flat(Color(VFX.GOLD, 0.0), LAMPS), warm)
+		if spot > 0.0:
+			# Follow-spot from the booth: an even shaft, brighter where it lands, with feathered sides.
+			var clear := Color(BEAM, 0.0)
+			var high := Color(BEAM, 0.06 * spot * k)
+			var low := Color(BEAM, 0.12 * spot * k)
+			m.band(PackedVector2Array([Vector2(spot_x - 48.0, -100.0), Vector2(spot_x - 30.0, -100.0), Vector2(spot_x + 30.0, -100.0), Vector2(spot_x + 48.0, -100.0)]),
+				PackedVector2Array([Vector2(spot_x - 112.0, SPOT_FOOT), Vector2(spot_x - 80.0, SPOT_FOOT), Vector2(spot_x + 80.0, SPOT_FOOT), Vector2(spot_x + 112.0, SPOT_FOOT)]),
+				PackedColorArray([clear, high, high, clear]), PackedColorArray([clear, low, low, clear]))
+		m.commit(ci)
 
 	# --- The house -----------------------------------------------------------------
 
 	func _draw_house(ci: CanvasItem) -> void:
-		var seated := {}
-		for n in range(mini(house_count, _fill_order.size())):
-			seated[_fill_order[n]] = true
-		var lit := _stage_light()
-		var t := _clock()
+		var m := FinaleStage.PaperMesh.new()
 		var first := 0
 		for row in SEAT_ROWS:
 			var count: int = row[1]
 			# Each row's patrons sit behind their own seat-backs and in front of the row before.
 			for i in range(first, first + count):
-				if seated.has(i):
-					_draw_patron(ci, _seats[i], lit, t, i)
+				if _seated(i):
+					_draw_patron(m, _seats[i])
 			for i in range(first, first + count):
 				var r := _seats[i]
 				var dome := r.position + Vector2(r.size.x * 0.5, r.size.y * 0.5)
@@ -755,27 +926,42 @@ class FinaleFront extends Node2D:
 				for a in range(9):
 					back.append(dome + Vector2(-r.size.x * 0.5, 0.0).rotated(float(a) / 8.0 * PI) * Vector2(1.0, r.size.y / r.size.x))
 				back.append(r.position + Vector2(r.size.x, r.size.y + 60.0))
-				ci.draw_polygon(back, VFX.shaded_colors(back, SEAT, 1.5, 0.6))
-				ci.draw_polyline(back.slice(1, 10), Color(VFX.GOLD, 0.1 + 0.25 * lit), 1.2, true)
+				m.polygon(back, VFX.shaded_colors(back, SEAT, 1.5, 0.6))
+				m.stroke(back.slice(1, 10), Color(VFX.GOLD, 0.35), 1.2)
 			first += count
+		m.commit(ci)
 
-	## A past victor seen from behind: shoulders, head and a small lit crown,
-	## rimmed by the stage light in front of them.
-	func _draw_patron(ci: CanvasItem, seat: Rect2, lit: float, t: float, i: int) -> void:
+	## Where a past victor's head sits in its seat, risen by `rise`.
+	func _head(seat: Rect2) -> Vector2:
+		return Vector2(seat.get_center().x, seat.position.y - RISE_PX * rise - 24.0 * seat.size.x / 70.0)
+
+	## A past victor seen from behind: shoulders and head, rimmed by the stage light.
+	func _draw_patron(m: FinaleStage.PaperMesh, seat: Rect2) -> void:
 		var sc := seat.size.x / 70.0
-		var top := Vector2(seat.get_center().x, seat.position.y - RISE_PX * rise)
+		var head := _head(seat)
+		var top := head + Vector2(0.0, 24.0) * sc
 		var body := PackedVector2Array([top + Vector2(-27.0, 20.0) * sc, top + Vector2(-24.0, -4.0) * sc, top + Vector2(-12.0, -12.0) * sc,
 			top + Vector2(12.0, -12.0) * sc, top + Vector2(24.0, -4.0) * sc, top + Vector2(27.0, 20.0) * sc])
-		ci.draw_colored_polygon(body, PATRON)
-		var head := top + Vector2(0.0, -24.0) * sc
-		ci.draw_circle(head, 13.0 * sc, PATRON)
-		var rim := Color(VFX.GOLD, 0.5 * lit)
-		ci.draw_arc(head, 13.0 * sc, PI * 1.2, PI * 1.8, 10, rim, 1.5, true)
-		ci.draw_polyline(body.slice(1, 5), rim, 1.2, true)
+		m.fill(body, PATRON)
+		m.circle(head, 13.0 * sc, PATRON)
+		var rim := Color(VFX.GOLD, 0.5)
+		m.arc(head, 13.0 * sc, PI * 1.2, PI * 1.8, rim, 1.5)
+		m.stroke(body.slice(1, 5), rim, 1.2)
+
+	## Each past victor's small lit crown; from the tenth victory they flare as the house stands.
+	func _draw_crowns(ci: CanvasItem) -> void:
+		var m := FinaleStage.PaperMesh.new()
+		var t := _clock()
 		var flare := 1.0 + 0.7 * rise
-		for k in range(3):
-			VFX.draw_flame(ci, head + Vector2(float(k - 1) * 5.5, -11.0) * sc, (7.0 + 3.0 * float(k == 1)) * sc * flare, 5.0 * sc, t, float(i * 3 + k),
-				FinaleStage.fire(VFX.GOLD), FinaleStage.fire(VFX.HOT))
+		for i in range(_seats.size()):
+			if not _seated(i):
+				continue
+			var sc := _seats[i].size.x / 70.0
+			var head := _head(_seats[i])
+			for k in range(3):
+				m.flame(head + Vector2(float(k - 1) * 5.0, -11.0) * sc, (6.0 + 3.0 * float(k == 1)) * sc * flare, 4.5 * sc, t, float(i * 3 + k),
+					FinaleStage.fire(VFX.GOLD), FinaleStage.fire(VFX.HOT))
+		m.commit(ci)
 
 
 ## The paper bill lowered from the flies on two cords at the curtain call. It
@@ -911,20 +1097,19 @@ class Playbill extends Node2D:
 		if a <= 0.0:
 			return
 		var top := _sheet_top()
+		var m := FinaleStage.PaperMesh.new()
 		for side: float in [-1.0, 1.0]:
-			draw_line(Vector2(side * CORD_X, -400.0 - top), Vector2(side * CORD_X, top + 12.0), Color(CORD, a), 1.5, true)
+			m.line(Vector2(side * CORD_X, -400.0 - top), Vector2(side * CORD_X, top + 12.0), Color(CORD, a), 1.5)
 		var paper := _outline(0.0, top)
-		FinaleStage.cutout(self, paper, Color(PAPER, a), Vector2(10.0, 12.0))
-		paper.append(paper[0])
-		draw_polyline(paper, Color(PAPER_EDGE, a), 2.0, true)
+		m.cutout(paper, Color(PAPER, a), Vector2(10.0, 12.0))
+		m.stroke(paper, Color(PAPER_EDGE, a), 2.0, true)
 		for inset: float in [12.0, 17.0]:
-			var rule := _outline(inset, top)
-			rule.append(rule[0])
-			draw_polyline(rule, Color(INK_RED, a), 2.0 if inset < 15.0 else 1.0, true)
+			m.stroke(_outline(inset, top), Color(INK_RED, a), 2.0 if inset < 15.0 else 1.0, true)
 		for side: float in [-1.0, 1.0]:
 			var eye := Vector2(side * CORD_X, top + 12.0)
-			draw_circle(eye, 4.0, Color(PAPER_EDGE.darkened(0.3), a))
-			draw_arc(eye, 4.0, 0.0, TAU, 12, Color(GILT, a), 1.5, true)
+			m.circle(eye, 4.0, Color(PAPER_EDGE.darkened(0.3), a))
+			m.arc(eye, 4.0, 0.0, TAU, Color(GILT, a), 1.5)
+		m.commit(self)
 
 
 ## The bill's type, set in screen space on the text layer whenever the sheet
