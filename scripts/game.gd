@@ -1070,7 +1070,9 @@ func _draw_buttresses(ci: CanvasItem, horizon: float) -> void:
 			sconce + Vector2(-10.0, -4.0), sconce + Vector2(10.0, -4.0), sconce + Vector2(5.0, 6.0), sconce + Vector2(-5.0, 6.0),
 		]), VFX.MORTAR)
 		var t := _atmo_t if moving else 0.0
-		VFX.draw_flame(ci, sconce + Vector2(0.0, -4.0), 24.0 * sconce_heat, 12.0 * sconce_heat, t, float(k) * 2.1, torch, VFX.GOLD)
+		# A flame too small to draw is out (the finale puts them out).
+		if sconce_heat > 0.1:
+			VFX.draw_flame(ci, sconce + Vector2(0.0, -4.0), 24.0 * sconce_heat, 12.0 * sconce_heat, t, float(k) * 2.1, torch, VFX.GOLD)
 		# Soot streak above the sconce.
 		ci.draw_rect(Rect2(sconce.x - 5.0, sconce.y - 70.0, 10.0, 44.0), Color(0.0, 0.0, 0.0, 0.18))
 
@@ -1281,7 +1283,8 @@ func _draw_apse_column(ci: CanvasItem, x: float, horizon: float, t: float, phase
 	var at := Vector2(x, TORCH_Y)
 	ci.draw_rect(Rect2(at.x - 4.0, at.y, 8.0, 26.0), Color("1a1024"))
 	ci.draw_colored_polygon(PackedVector2Array([at + Vector2(-16.0, -6.0), at + Vector2(16.0, -6.0), at + Vector2(9.0, 6.0), at + Vector2(-9.0, 6.0)]), VFX.MORTAR)
-	VFX.draw_flame(ci, at + Vector2(0.0, -6.0), 30.0 * sconce_heat, 16.0 * sconce_heat, t, phase, mood.torch, VFX.GOLD)
+	if sconce_heat > 0.1:
+		VFX.draw_flame(ci, at + Vector2(0.0, -6.0), 30.0 * sconce_heat, 16.0 * sconce_heat, t, phase, mood.torch, VFX.GOLD)
 
 ## A kneeling stone knight, a past bearer of the flame, turned toward the throne
 ## (`side` +1 faces right). The torch cup it raises is charred and cold.

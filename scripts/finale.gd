@@ -120,6 +120,7 @@ var _streams: Cast.FlameStream
 var _ash: Cast.AshField
 var _rostrum: Cast.Rostrum
 var _throne: Cast.ThroneProxy
+var _ember: Cast.LastEmber
 # The choice: the ending in hand (-1 none yet), how long it has been held, and
 # the keys' last states, so only fresh presses move or confirm.
 var _pick := -1
@@ -698,9 +699,9 @@ func _fold_away(i: int) -> void:
 		_ramp(f, "hinge", 0.0, 0.45, Tween.TRANS_QUAD, Tween.EASE_IN)
 	_sound("fold", Content.FOLD_MAJOR[i % Content.FOLD_MAJOR.size()] * 2.0, -12.0, false)
 
-## The knight at the bottom of the frame with the open sky above it.
+## The knight small at the bottom of the frame, the well rising over it.
 func _look_up_frame() -> Array:
-	return [Vector2(_knight.position.x if is_instance_valid(_knight) else 640.0, Content.FLOOR_Y - 200.0), 1.4]
+	return [Vector2(_knight.position.x if is_instance_valid(_knight) else 640.0, Content.FLOOR_Y - 300.0), 0.9]
 
 # --- V. END IT --------------------------------------------------------------------
 
@@ -746,6 +747,10 @@ func _douse(dur: float) -> void:
 	_ramp(game, "sconce_heat", 0.0, dur)
 	_ramp(_relic, "burn", 0.0, dur * 0.3)
 	_ramp(_knight, "crown", 0.35, dur)
+	_ember = Cast.LastEmber.new()
+	_ember.knight = _knight
+	_actor_layer.add_child(_ember)
+	_ramp(_ember, "strength", 1.0, dur)
 	_ambient_live = true
 	_ramp(self, "ambient", DARK_AMBIENT, dur)
 	_vignette_live = true
@@ -788,6 +793,8 @@ func _dawn() -> void:
 	var dur := 6.0 * _pace()
 	_ramp(_sky, "dawn", 1.0, dur)
 	_ramp(_actors, "modulate", DAWN_LIGHT, dur)
+	_ramp(_ember, "strength", 0.0, dur)
+	_ramp(_knight, "crown", 0.7, dur)
 	_ramp(self, "vignette", Game.VIGNETTE_EDGE, dur)
 	_move_camera(DAWN_FRAME, dur)
 	_knight.gesture_to("look_up", 3.0)
@@ -868,7 +875,7 @@ func _last_word() -> void:
 
 func _final_card(fade: float) -> void:
 	var words := Content.finale_answer(str(ctx.get("last_epitaph", "")), int(ctx.get("falls_total", 0)), bool(ctx.get("unknown", false)), ending)
-	for line in [[words.quote, 18, UI.C_MUTED, 450.0], [words.answer, 30, UI.C_TEXT, 488.0]]:
+	for line in [[words.quote, 18, UI.C_MUTED, 200.0], [words.answer, 30, UI.C_TEXT, 238.0]]:
 		if str(line[0]).is_empty():
 			continue
 		var label := _label(line[0], line[1], line[2], line[3])
@@ -1008,6 +1015,7 @@ func _free_cast() -> void:
 	_ash = null
 	_rostrum = null
 	_throne = null
+	_ember = null
 	_fallen.clear()
 	_handed_off = false
 
@@ -1015,7 +1023,7 @@ func _free_cast() -> void:
 
 ## Every live cast member the director advances.
 func _cast() -> Array:
-	var out: Array = [_shell, _burnt, _relic, _hoard, _knight, _crowns, _streams, _ash, _rostrum, _throne]
+	var out: Array = [_shell, _burnt, _relic, _hoard, _knight, _crowns, _streams, _ash, _rostrum, _throne, _ember]
 	out.append_array(_fallen)
 	return out.filter(func(node): return is_instance_valid(node))
 

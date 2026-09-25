@@ -721,6 +721,34 @@ class ThroneProxy extends Node2D:
 		room.paint_throne(self, Vector2(THRONE_X, Content.FLOOR_Y), room.mood)
 
 
+## The knight's own flame once END IT has put out every other fire: drawn on
+## the actor layer above the darkness, so the dark never dims the last ember.
+class LastEmber extends Node2D:
+	const G := preload("res://scripts/finale_actors.gd")
+	var knight: Node2D
+	var strength := 0.0
+	var _t := 0.0
+	var _glow: Node2D
+
+	func _ready() -> void:
+		material = VFX.unshaded_material()
+		_glow = Node2D.new()
+		_glow.material = VFX.radial_material()
+		_glow.show_behind_parent = true
+		_glow.draw.connect(func() -> void:
+			VFX.draw_radial(_glow, knight.head_point() + Vector2(0.0, -6.0), 60.0, Color(VFX.ORANGE, (0.3 if Feedback.flash_reduced else 0.4) * strength)))
+		add_child(_glow)
+
+	func advance(dt: float) -> void:
+		_t += dt
+		queue_redraw()
+		_glow.queue_redraw()
+
+	func _draw() -> void:
+		var a := strength
+		G.draw_crown(self, knight.head_point(), 1.0, float(knight.pose.flame), 0.0, G.flicker_t(_t), Color(KnightArt.FLAME, a), Color(VFX.GOLD, a))
+
+
 ## Paper ash and cinders: 5-point scraps with a cooling ember edge that sway
 ## and flip as they rise. While `rate` > 0 they break off along the burn's
 ## front (a line at `front_y` across `bounds`); puff() sheds a handful where

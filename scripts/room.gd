@@ -841,7 +841,7 @@ func _candles(base: Vector2, n: int, t: float, m: Dictionary, flame: float = 1.0
 		var height := 8.0 + h * 12.0
 		draw_rect(Rect2(x - 2.5, base.y - height, 5.0, height), Color("d8cfc0").darkened(0.35))
 		draw_rect(Rect2(x - 3.5, base.y - height * 0.3, 7.0, 3.0), Color("d8cfc0").darkened(0.5))
-		if flame > 0.02:
+		if flame > 0.15:
 			VFX.draw_flame(self, Vector2(x, base.y - height), 9.0 * flame, 4.0 * flame, t, float(i) * 1.7, m.torch, VFX.GOLD)
 	draw_rect(Rect2(base.x - float(n) * 6.0, base.y - 2.0, float(n) * 12.0, 3.0), Color(0.0, 0.0, 0.0, 0.35))
 
