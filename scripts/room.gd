@@ -348,21 +348,6 @@ func _on_proj_requested(team: String, pos: Vector2, vel: Vector2, dmg: float, kb
 func get_entry_point() -> Vector2:
 	return Vector2(template.get("entry", Vector2(180, Content.FLOOR_Y - 80)))
 
-func is_at_exit(pos: Vector2) -> bool:
-	if not exit_open:
-		return false
-	for e in exits:
-		if (e.rect as Rect2).has_point(pos):
-			return true
-	return false
-
-## Every open rift's centre, for the lights.
-func exit_centers() -> PackedVector2Array:
-	var out := PackedVector2Array()
-	for e in exits:
-		out.append((e.rect as Rect2).get_center())
-	return out
-
 ## Rift colour and label by what lies beyond it.
 static func exit_style(kind: String) -> Dictionary:
 	match kind:
@@ -528,7 +513,7 @@ func _draw_platform_dressing(pr: Rect2, m: Dictionary, salt: int) -> void:
 	var seep := float(m.ember_seep)
 	var moss := float(m.moss)
 	var stone: Color = m.stone
-	# Jagged broken corners on ends that hang over a drop (the tiles carry their own).
+	# Jagged broken corners on ends that hang over a drop.
 	for side: float in [-1.0, 1.0]:
 		var ex := pr.position.x if side < 0.0 else pr.end.x
 		if ex <= Content.ROOM_LEFT + 1.0 or ex >= Content.ROOM_RIGHT - 1.0:
@@ -858,8 +843,6 @@ func _draw_decor_front(tag: String, m: Dictionary) -> void:
 			_bone_pile(Vector2(720.0, fy), m)
 			_bone_pile(Vector2(1120.0, fy), m)
 			_fallen_blade(Vector2(560.0, fy))
-		"platforms":
-			pass
 		"chamber":
 			_drip(500.0, 120.0, fy - 150.0, t)
 			_drip(760.0, 120.0, fy - 280.0, t + 1.3)
