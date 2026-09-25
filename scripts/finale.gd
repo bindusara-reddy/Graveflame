@@ -115,13 +115,13 @@ func setup(g: Game, context: Dictionary) -> void:
 	tier = str(ctx.get("tier", "full"))
 	process_mode = Node.PROCESS_MODE_ALWAYS
 	var unknown := bool(ctx.get("unknown", false))
-	_elder = int(ctx.get("falls_since", 0)) == 0 and not unknown
+	_elder = int(ctx.get("falls_total", 0)) == 0 and not unknown
 	if unknown:
 		_crowd = Content.UNCOUNTED_CROWD
 	elif _elder:
 		_crowd = Content.ELDERS
 	else:
-		_crowd = mini(int(ctx.falls_since), Content.FALLEN_CAP)
+		_crowd = mini(int(ctx.falls_total), Content.FALLEN_CAP)
 	_build_layers()
 	_hoard = Cast.HoardField.new()
 	_hoard.elder = _elder
@@ -721,7 +721,7 @@ func _answer() -> void:
 	_final_card(0.6)
 
 func _final_card(fade: float) -> void:
-	var words := Content.finale_answer(str(ctx.get("last_epitaph", "")), int(ctx.get("falls_since", 0)), bool(ctx.get("unknown", false)))
+	var words := Content.finale_answer(str(ctx.get("last_epitaph", "")), int(ctx.get("falls_total", 0)), bool(ctx.get("unknown", false)))
 	for line in [[words.quote, 18, UI.C_MUTED, 450.0], [words.answer, 30, UI.C_TEXT, 488.0]]:
 		if str(line[0]).is_empty():
 			continue
@@ -1039,12 +1039,12 @@ func _full_rect(control: Control, parent: Node) -> Control:
 	return control
 
 ## The cast list: the fallen, the Warden (not in the brief cut), the knight and
-## the run's boons, the vows sworn, the watching house and the credit.
+## the run's boons, the vows sworn and the watching house.
 func _playbill_rows() -> Array:
 	var text := Content.FINALE_TEXT
 	var vows: Array = ctx.get("vows", [])
 	var oath := vows.size() == Content.VOWS.size()
-	var rows: Array = ["%s — %s" % [text.fallen, Content.fallen_gloss(int(ctx.get("falls_since", 0)), bool(ctx.get("unknown", false)))]]
+	var rows: Array = ["%s — %s" % [text.fallen, Content.fallen_gloss(int(ctx.get("falls_total", 0)), bool(ctx.get("unknown", false)))]]
 	if tier != "brief":
 		rows.append("%s — %s" % [text.warden, text.warden_gloss_oath if oath else text.warden_gloss])
 	rows.append("%s — %s" % [text.knight, text.knight_gloss_oath if oath else text.knight_gloss])
@@ -1060,8 +1060,6 @@ func _playbill_rows() -> Array:
 	var house := Content.house_gloss(int(ctx.get("victories", 1)) - 1)
 	if not house.is_empty():
 		rows.append("%s — %s" % [text.house, house])
-	if not str(text.credit).is_empty():
-		rows.append(text.credit)
 	return rows
 
 

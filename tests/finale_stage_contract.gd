@@ -128,8 +128,8 @@ func _test_house_light(front: FinaleStage.FinaleFront) -> void:
 
 func _test_playbill(bill: FinaleStage.Playbill, text: FinaleStage.PlaybillText) -> void:
 	bill.rows = ["THE FALLEN — 12 knights. Each of them was you.", {"sigils": ["vitality", "swift"]},
-		"MADE BY BINDU · Every shape cut in code. Every sound struck from nothing. Every flame kept."]
-	check(bill.row_lines.size() == 3 and bill.row_lines[0] == 1.0 and bill.row_lines[2] >= 2.0, "a long credit wraps instead of shrinking under 14 px")
+		"THE KNIGHT — Who carried their flames."]
+	check(bill.row_lines == [1.0, FinaleStage.Playbill.SIGIL_LINES, 1.0], "a cast row takes one line, the boon sigils a little more")
 	var lines := bill.row_lines[0] + bill.row_lines[1] + bill.row_lines[2]
 	var expected := FinaleStage.Playbill.HEADER + FinaleStage.Playbill.FOOTER + FinaleStage.Playbill.LINE * lines
 	check(is_equal_approx(bill.sheet.y, expected), "the sheet grows to hold its rows")

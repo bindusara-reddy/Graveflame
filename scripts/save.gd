@@ -312,13 +312,13 @@ static func record_fall(epitaph: String) -> void:
 	save_save(d)
 
 ## The single save write for a won descent. Returns what the finale needs:
-## first, victories, falls_since, falls_total, unknown, last_epitaph,
+## first, victories, falls_total (every knight ever lost), unknown (a save
+## from before the count with no counted fall yet), last_epitaph,
 ## finale_seen (before this one), milestone and oath_first.
 static func record_victory(vows: Array) -> Dictionary:
 	var d := load_save()
 	var victories := int(d.get("victories", 0)) + 1
 	var falls := int(d.get("falls", 0))
-	var banked := int(d.get("falls_banked", -1))
 	var seen := int(d.get("finale_seen", 0))
 	var oath := vows.size() == Content.VOWS.size()
 	var oath_first := oath and not bool(d.get("oath_kept", false))
@@ -340,14 +340,13 @@ static func record_victory(vows: Array) -> Dictionary:
 			kept.append(v)
 	var out := {
 		"first": victories == 1, "victories": victories,
-		"falls_since": falls - maxi(banked, 0), "falls_total": falls,
-		"unknown": bool(d.get("falls_legacy", false)) and banked < 0,
+		"falls_total": falls,
+		"unknown": bool(d.get("falls_legacy", false)) and falls == 0,
 		"last_epitaph": str(d.get("last_epitaph", "")), "finale_seen": seen,
 		"milestone": milestone, "oath_first": oath_first,
 	}
 	d["victories"] = victories
 	d["best_vows"] = maxi(int(d.get("best_vows", 0)), vows.size())
-	d["falls_banked"] = falls
 	d["last_epitaph"] = ""
 	d["finale_seen"] = seen + 1
 	d["roll"] = roll.slice(maxi(0, roll.size() - ROLL_CAP))

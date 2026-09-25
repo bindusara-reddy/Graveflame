@@ -606,7 +606,7 @@ const VICTORY_LINES := [
 
 # --- The finale ("Strike the Set") ---
 ## Every string the ending shows. Headings stay within 34 characters so a card
-## never wraps; the credit row can be blanked without touching the director.
+## never wraps. Nothing here speaks outside the keep's own story.
 const FINALE_TEXT := {
 	"keep": "THE KEEP KEEPS WHAT IT TAKES.",
 	"back": "TONIGHT, IT GIVES THEM BACK.",
@@ -617,7 +617,7 @@ const FINALE_TEXT := {
 	"let_go": "LET GO",
 	"skip": "HOLD %s TO SKIP",
 	"bill_title": "THE DESCENT",
-	"bill_sub": "IN EIGHT CHAMBERS · EVERY ATTEMPT REMEMBERED",
+	"bill_sub": "IN EIGHT CHAMBERS · EVERY KNIGHT REMEMBERED",
 	"fallen": "THE FALLEN",
 	"warden": "THE EMBER WARDEN",
 	"warden_gloss": "Keeper of a cold throne. For now.",
@@ -627,7 +627,6 @@ const FINALE_TEXT := {
 	"knight_gloss_oath": "Who carried their flames, and every vow.",
 	"sworn": "SWORN",
 	"house": "THE HOUSE",
-	"credit": "MADE BY BINDU · Every shape cut in code. Every sound struck from nothing.",
 	"curtain": "THE CURTAIN FALLS.",
 	"curtain_answer": "The flame does not.",
 	"took_nothing": "The keep took nothing from you.",
@@ -713,8 +712,8 @@ static func house_gloss(past: int) -> String:
 
 ## The final card: the last epitaph quoted, then the ending's answer to it.
 ## A deathless run is told it lost nothing; with nothing to answer, the curtain line.
-static func finale_answer(last_epitaph: String, falls_since: int, unknown: bool) -> Dictionary:
-	if falls_since == 0 and not unknown:
+static func finale_answer(last_epitaph: String, falls: int, unknown: bool) -> Dictionary:
+	if falls == 0 and not unknown:
 		return { "quote": "", "answer": FINALE_TEXT.took_nothing }
 	if EPITAPH_ANSWERS.has(last_epitaph):
 		return { "quote": "“%s”" % last_epitaph, "answer": EPITAPH_ANSWERS[last_epitaph] }

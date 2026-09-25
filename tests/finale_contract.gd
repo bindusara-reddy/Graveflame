@@ -108,13 +108,13 @@ func _test_save_ledger() -> void:
 	Save.migrate_falls()
 	check(Save.get_falls() == 1 and Save.falls_legacy(), "migration is idempotent and a fall counts once")
 	var rec := Save.record_victory(["v_embers"])
-	check(bool(rec.unknown) and int(rec.falls_since) == 1, "a legacy save's first counted win has an unknown crowd")
+	check(not bool(rec.unknown) and int(rec.falls_total) == 1, "a legacy save counts the falls it has seen")
 	check(str(rec.last_epitaph) == "The descent is patient." and str(Save.load_save().last_epitaph).is_empty(), "the win answers the last epitaph, then clears it")
 	check(Save.get_roll() == [0, 0, 1] and Save.get_victories() == 3 and not Save.oath_kept(), "the win joins the roll")
 	Save.record_fall("x")
 	Save.record_fall("y")
 	rec = Save.record_victory(["v_embers", "v_thirst", "v_gilded", "v_haste", "v_pyre"])
-	check(not bool(rec.unknown) and int(rec.falls_since) == 2, "later wins count the falls since the last one")
+	check(not bool(rec.unknown) and int(rec.falls_total) == 3, "every win counts every knight ever lost, not just the latest")
 	check(Save.oath_kept() and str(rec.milestone) == "oath" and bool(rec.oath_first), "five vows keep the Fivefold Oath")
 	check(int(rec.finale_seen) == 1 and Save.get_finale_seen() == 2, "finale_seen reports the viewings before this one")
 
@@ -154,7 +154,7 @@ func _test_trade() -> void:
 
 ## T3: with no input at all, every cut reaches the results panel in time.
 func _test_zero_input(cut: String, seen: int, limit: float) -> void:
-	await _at_throne({ "victories": seen, "finale_seen": seen, "falls": 3, "falls_banked": 0 })
+	await _at_throne({ "victories": seen, "finale_seen": seen, "falls": 3 })
 	var fin := _kill_warden()
 	check(fin.tier == cut, "%s: the save picks the %s cut (%s)" % [cut, cut, fin.tier])
 	var endings := [0]

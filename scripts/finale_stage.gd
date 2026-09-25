@@ -967,9 +967,8 @@ class FinaleFront extends Node2D:
 ## The paper bill lowered from the flies on two cords at the curtain call. It
 ## hangs from the grid like a pendulum: lowering it kicks a small swing that
 ## decays on its own. The sheet grows to fit its rows; PlaybillText sets the type.
-## `rows` are Strings ("ROLE — gloss", or a plain credit line that may wrap) or
-## {"sigils": [boon ids]} for the run's boon sigils; the first `revealed` rows
-## are inked in.
+## `rows` are "ROLE — gloss" Strings or {"sigils": [boon ids]} for the run's
+## boon sigils; the first `revealed` rows are inked in.
 class Playbill extends Node2D:
 	const WIDTH := 640.0
 	## Sheet top to the first row (title, subtitle, rule), the row leading and the foot, in world units.
@@ -977,9 +976,8 @@ class Playbill extends Node2D:
 	const LINE := 22.0
 	const FOOTER := 24.0
 	const SIGIL_LINES := 1.6
-	## Type is measured at the theatre framing's scale, the size credit lines wrap at.
+	## The theatre framing's scale: type is sized so it reads at this zoom.
 	const REF_SCALE := 0.86
-	const CREDIT_PX := 14
 	const SIDE_INSET := 26.0
 	## The grid the cords hang from, and how far below it the sheet's top rests (world y 10).
 	const GRID := Vector2(640.0, -420.0)
@@ -1006,7 +1004,7 @@ class Playbill extends Node2D:
 		set(value):
 			title = value
 			version += 1
-	var subtitle := "IN EIGHT CHAMBERS · EVERY ATTEMPT REMEMBERED":
+	var subtitle := "IN EIGHT CHAMBERS · EVERY KNIGHT REMEMBERED":
 		set(value):
 			subtitle = value
 			version += 1
@@ -1034,16 +1032,10 @@ class Playbill extends Node2D:
 		position = GRID
 
 	func _measure_rows() -> void:
-		var font := UI._heading_font()
-		var room := (WIDTH - SIDE_INSET * 2.0) * REF_SCALE
 		row_lines.clear()
 		var lines := 0.0
 		for row in rows:
-			var n := 1.0
-			if row is Dictionary:
-				n = SIGIL_LINES
-			elif not " — " in str(row):
-				n = roundf(font.get_multiline_string_size(str(row), HORIZONTAL_ALIGNMENT_CENTER, room, CREDIT_PX).y / font.get_height(CREDIT_PX))
+			var n := SIGIL_LINES if row is Dictionary else 1.0
 			row_lines.append(n)
 			lines += n
 		sheet.y = HEADER + FOOTER + LINE * lines
@@ -1188,14 +1180,9 @@ class PlaybillText extends Control:
 					_row(font, str(row), (y + Playbill.LINE * 0.5 + 5.5) * s, w, k, _row_alpha[i])
 			y += h
 
-	## "ROLE — gloss": the role in red, the gloss in ink. Any other line is a
-	## muted credit, wrapped (as the bill measured it) rather than shrunk.
+	## "ROLE — gloss": the role in red, the gloss in ink.
 	func _row(font: Font, text: String, baseline: float, w: float, k: float, alpha: float) -> void:
 		var parts := text.split(" — ", true, 1)
-		if parts.size() < 2:
-			var inset := Playbill.SIDE_INSET * _xf.get_scale().x
-			draw_multiline_string(font, Vector2(inset, baseline), text, HORIZONTAL_ALIGNMENT_CENTER, w - inset * 2.0, _px(ROLE_PX * k), -1, Color(INK, 0.75 * alpha * _ink))
-			return
 		_line(font, [[parts[0], ROLE_PX * k, INK_RED], ["  —  ", ROLE_PX * k, Color(INK, 0.5)], [parts[1], GLOSS_PX * k, INK]], baseline, w, alpha)
 
 	## Centred run of spans [text, px, colour]. Too wide for the sheet, it
