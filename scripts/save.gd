@@ -153,9 +153,6 @@ static func get_purchased_meta() -> Array:
 static func get_meta_rank(id: String) -> int:
 	return get_purchased_meta().count(id)
 
-static func is_meta_purchased(id: String) -> bool:
-	return get_meta_rank(id) > 0
-
 static func purchase_meta(id: String) -> bool:
 	var def := Content.meta_def(id)
 	if def.is_empty():
