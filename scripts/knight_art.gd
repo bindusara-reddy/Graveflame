@@ -1,8 +1,7 @@
 extends RefCounted
-## The flame-headed knight as a paper puppet: the same cut-out shapes and colours
-## the knight has always had (bone coat, ember sash, dark ink limbs, round mask,
-## four-tongue flame crown, steel blade), now jointed at hip, knee, shoulder,
-## wrist and neck so every move reads as a pose instead of a slide.
+## The flame-headed knight as a paper puppet: bone coat, ember sash, dark ink
+## limbs, round mask, four-tongue flame crown and steel blade, jointed at hip,
+## knee, shoulder, wrist and neck so every move reads as a pose instead of a slide.
 ##
 ## Geometry is authored facing right in body space: origin at the body centre,
 ## feet on y = +27 (Content.P_BODY_H * 0.5). paint() mirrors for facing.
@@ -535,16 +534,6 @@ static func paint(ci: CanvasItem, origin: Vector2, pose: Dictionary, facing: flo
 	ci.draw_circle(hand - bdir * 5.5, 1.8, guard_col)
 	ci.draw_circle(hand, 2.4, fc if solid else INK_ARM)
 	ci.draw_set_transform_matrix(Transform2D.IDENTITY)
-
-## Where the blade tip is in body space, for effects that want to trail it.
-static func blade_tip(origin: Vector2, pose: Dictionary, facing: float) -> Vector2:
-	var torso_xf := torso_xform(pose)
-	var sh_f: Vector2 = torso_xf * SHOULDER_F
-	var arm_a := float(pose.arm_f)
-	var hand := sh_f + Vector2(cos(arm_a), sin(arm_a)) * ARM_F
-	var blade_a := arm_a + float(pose.sword)
-	var tip := hand + Vector2(cos(blade_a), sin(blade_a)) * BLADE
-	return Transform2D(0.0, origin) * body_xform(pose, facing) * tip
 
 ## A soft annular wedge between `r0` and `r1`, clear at the inner edge and
 ## `color` at the outer, swept from `a0` to `a1`.
