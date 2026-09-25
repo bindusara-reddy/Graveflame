@@ -7,10 +7,7 @@ var counters := 0
 
 func run() -> void:
 	use_scratch_save("input_combat_clear")
-	# BEGIN comes one idle frame after boot, as the duel bot was tuned: a settle
-	# tick with a physics step in it shifts the opening fight and costs ripostes.
-	await load_main_scene(0)
-	await process_frame
+	await load_main_scene(1)
 	await start_run(0)
 	game.player.parried.connect(func(_pos, success):
 		if success:
