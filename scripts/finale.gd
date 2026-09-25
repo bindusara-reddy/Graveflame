@@ -1088,7 +1088,7 @@ class FinalePrompt extends Control:
 		if not Input.get_connected_joypads().is_empty() and not str(binding.pad).is_empty():
 			_key += " / " + str(binding.pad)
 		for box: StyleBoxFlat in [_cap, _cap_gold]:
-			box.bg_color = Color(UI.C_SURFACE, 0.9)
+			box.bg_color = Color(UI.C_INK, 0.9)
 			box.set_border_width_all(1)
 			box.set_corner_radius_all(4)
 		_cap.border_color = UI.C_EDGE
@@ -1133,7 +1133,7 @@ class SkipRing extends Control:
 
 	func _draw() -> void:
 		var c := size - Vector2(44.0, 44.0)
-		draw_circle(c, 16.0, Color(UI.C_SURFACE, 0.85))
+		draw_circle(c, 16.0, Color(UI.C_INK, 0.85))
 		draw_arc(c, 16.0, 0.0, TAU, 32, Color(UI.C_EDGE, 0.9), 1.5, true)
 		if fill > 0.0:
 			draw_arc(c, 13.0, -PI * 0.5, -PI * 0.5 + TAU * clampf(fill, 0.0, 1.0), 32, UI.C_EMBER, 4.0, true)
