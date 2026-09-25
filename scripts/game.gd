@@ -108,8 +108,6 @@ var _beat_focus := Vector2.ZERO
 var _beat_embers_at := 0.0
 ## The ending, from the Warden's killing blow until NEW RUN or RETURN TO TITLE.
 var finale: Finale
-## Wall sconces sink with the throne's cold during the finale (1 = full flame).
-var sconce_heat := 1.0
 ## Held when the ending hands over to the results panel; its buttons wait until
 ## every one is released, so a held confirm cannot press NEW RUN.
 const RELEASE_ACTIONS := ["ui_accept", "jump", "attack", "interact", "ignite", "pause"]
