@@ -1,7 +1,8 @@
 class_name Player
 extends CharacterBody2D
-## Player controller: platforming, 3-hit combo, down-slam, ranged special, dash, parry,
-## wall slide + wall jump, healing flask, hurt, custom drawing.
+## Player controller: platforming, 3-hit combo (with dash-strike and rising-cut
+## openers), down-slam, ranged special, dash, parry, wall slide + wall jump,
+## healing flask, hurt, custom drawing.
 ## A Dead Cells-inspired action-roguelite character. All art is drawn procedurally.
 
 const VFX := preload("res://scripts/vfx.gd")
