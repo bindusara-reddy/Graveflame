@@ -239,7 +239,7 @@ func set_hp(hp: float, max_hp: float) -> void:
 
 func set_special(value: float, maximum: float) -> void:
 	_graveflame.set_value(value, maximum)
-	var ready := value >= maximum
+	var ready := maximum > 0.0 and value >= maximum
 	if ready != _ignite_ready:
 		_paint_ignite(ready)
 

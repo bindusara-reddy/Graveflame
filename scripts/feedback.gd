@@ -790,7 +790,7 @@ func _draw() -> void:
 			"number" when p.get("word", false):
 				_draw_word(p, a)
 			"number":
-				var font := ThemeDB.fallback_font
+				var font := UiTheme.font(UiTheme.NUMERAL)
 				var txt := str(p.get("text", ""))
 				# Pop in over the first 20% of life, hold, then fade over the last 40%.
 				var age := 1.0 - a
@@ -805,7 +805,7 @@ func _draw() -> void:
 			_:
 				draw_circle(pos, maxf(0.8, size * a), c)
 
-## A worded pop-up (BLOCKED, SECOND WIND, +30 HEALTH...) is a paper tag in
+## A worded pop-up (BLOCKED, SECOND WIND, +30 VITALITY...) is a paper tag in
 ## its colour, the HUD's paper carried into the world: it pops in as it
 ## rises and folds away over its last beat. Reduced motion keeps the paper
 ## still and simply cuts it at the end.

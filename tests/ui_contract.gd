@@ -44,6 +44,7 @@ func run() -> void:
 	await _test_burn_veil()
 	await _test_title_return()
 	_test_hud_affordances()
+	_test_hud_stillness()
 	_test_shake_slider()
 	await _test_threat_pips()
 	await finish("UI_CONTRACT")
@@ -100,6 +101,21 @@ func _test_hud_affordances() -> void:
 	ui.show_boss_bar(1000.0)
 	check(not hud._boss_ignited and not hud._warden_seals[0].broken, "a fresh Warden's strip starts sealed and unlit")
 	ui.hide_boss_bar()
+
+
+## Reduced motion keeps the HUD's paper in place: a lesson arrives where it
+## rests instead of sliding up, and a refilled flask does not pop.
+func _test_hud_stillness() -> void:
+	var hud: UiHud = game.ui.hud
+	Feedback.motion_reduced = true
+	var rest := hud._hint.position.y
+	game.ui.show_hint(Content.HINTS["parry"])
+	check(hud._hint.visible and is_equal_approx(hud._hint.position.y, rest), "under reduced motion a lesson arrives in place")
+	game.ui.set_flask(0, 3)
+	game.ui.set_flask(1, 3)
+	check(hud._flasks.scale == Vector2.ONE, "under reduced motion a refilled flask does not pop")
+	game.ui.hide_hint()
+	Feedback.motion_reduced = false
 
 
 ## The story contracts: an inscription speaks line by line over the chamber
