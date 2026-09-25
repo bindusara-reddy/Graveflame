@@ -89,8 +89,7 @@ const RIPOSTE := {
 # --- Healing flask (Dead Cells-style) ---
 const FLASK_MAX := 3
 const FLASK_HEAL := 45.0
-const FLASK_REFILL_ON_CLEAR := true  # flasks recover when a room is cleared...
-## ...but only this many charges per chamber, so health is carried through the
+## Flask charges a cleared chamber returns, so health is carried through the
 ## run and a Healing Font (which refills them all) is a real choice.
 const FLASK_PER_ROOM := 1
 

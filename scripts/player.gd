@@ -25,6 +25,7 @@ signal action_feedback(kind: String, pos: Vector2)
 
 enum State { LOCOMOTION, ATTACK, SLAM, DASH, PARRY, HEAL, HURT, DEAD }
 
+## Shared by reference with RunModel.build, so there is nothing to sync.
 var build: Dictionary = {}
 var state: State = State.LOCOMOTION
 var facing: float = 1.0
@@ -56,7 +57,6 @@ var _atk_rect := RectangleShape2D.new()
 var _draw_attack := false
 var _attack_range := 64.0
 var _hurt_flash := 0.0
-var _run_model: RunModel
 var _owner_id := 0
 # --- Down-slam ---
 var _slam_active := false
@@ -107,7 +107,6 @@ var _death_t := 0.0
 var _safe_pos := Vector2.ZERO
 
 func setup(rm: RunModel) -> void:
-	_run_model = rm
 	build = rm.build
 	_owner_id = get_instance_id()
 
@@ -156,13 +155,7 @@ func _ready() -> void:
 	add_child(_parry_area)
 	jumps_left = Content.P_MAX_JUMPS
 	if build.is_empty():
-		build = {
-			"max_hp": Content.P_MAX_HP, "hp": Content.P_MAX_HP, "speed_mul": 1.0, "dmg_mul": 1.0,
-			"finish_mul": 1.0, "special_mul": 1.0, "special_pierce": false, "lifesteal": 0.0,
-			"iframes_bonus": 0.0, "slam_mul": 1.0, "slam_radius_bonus": 0.0,
-			"parry_bonus_dmg": 0.0, "parry_window_mul": 1.0, "flask_charges": Content.FLASK_MAX,
-			"dash_cd_mul": 1.0, "dash_iframes_bonus": 0.0, "special_start": 0.0,
-		}
+		build = RunModel.base_build()
 	flask_max = int(build.get("flask_charges", Content.FLASK_MAX))
 	flask_charges = flask_max
 	special = float(build.get("special_start", 0.0))
@@ -764,27 +757,23 @@ func take_damage(amount: float, from_dir: Vector2, kb: float) -> void:
 	var new_hp := float(build.hp) - amount
 	riposte_time = 0.0
 	_riposte_attack = false
+	# A hit that lands ends the swing and any wall slide.
+	atk_phase = "none"
+	_deactivate_hitbox()
+	wall_sliding = false
 	if new_hp <= 0.0 and bool(build.get("second_wind", false)) and not bool(build.get("second_wind_used", false)):
 		# Second Wind: the flame refuses to go out, once.
 		build.second_wind_used = true
-		if _run_model: _run_model.build.second_wind_used = true
-		build.hp = float(build.max_hp) * Content.SECOND_WIND_HP_FRAC
-		if _run_model: _run_model.build.hp = build.hp
-		emit_signal("hp_changed", float(build.hp), float(build.max_hp))
+		_set_hp(float(build.max_hp) * Content.SECOND_WIND_HP_FRAC)
 		_hurt_flash = 0.2
 		_flask_heal_flash = 0.6
 		iframes = 2.0
 		state = State.LOCOMOTION
 		velocity = Vector2(0.0, -420.0)
-		atk_phase = "none"
-		_deactivate_hitbox()
-		wall_sliding = false
 		emit_signal("action_feedback", "second_wind", global_position)
 		emit_signal("hurt_taken", dealt, global_position)
 		return
-	build.hp = maxf(0.0, new_hp)
-	if _run_model: _run_model.build.hp = build.hp
-	emit_signal("hp_changed", float(build.hp), float(build.max_hp))
+	_set_hp(new_hp)
 	_hurt_flash = 0.12
 	emit_signal("hurt_taken", dealt, global_position)
 	if float(build.hp) <= 0.0:
@@ -795,9 +784,6 @@ func take_damage(amount: float, from_dir: Vector2, kb: float) -> void:
 	iframes = Content.P_HURT_IFRAMES + float(build.get("iframes_bonus", 0.0))
 	var hit_dir := from_dir.normalized()
 	velocity = Vector2(hit_dir.x * kb, minf(-kb * 0.35, hit_dir.y * kb))
-	atk_phase = "none"
-	_deactivate_hitbox()
-	wall_sliding = false
 	if float(build.get("thorns", 0.0)) > 0.0:
 		_thorns_burst()
 
@@ -840,9 +826,12 @@ func _step_hurt(delta: float) -> void:
 		state = State.LOCOMOTION
 
 func _heal(amount: float) -> void:
-	build.hp = minf(float(build.max_hp), float(build.hp) + amount)
-	if _run_model: _run_model.build.hp = build.hp
-	emit_signal("hp_changed", float(build.hp), float(build.max_hp))
+	_set_hp(float(build.hp) + amount)
+
+## Write the knight's health, clamped to the flame's size, and tell the HUD.
+func _set_hp(value: float) -> void:
+	build.hp = clampf(value, 0.0, float(build.max_hp))
+	hp_changed.emit(float(build.hp), float(build.max_hp))
 
 ## True when there is floor under both of the knight's flanks, a stride out.
 ## A pit rescue must never return the knight to the very lip it fell from.
@@ -882,9 +871,7 @@ func fall_out_of_world() -> void:
 	# Signals are synchronous: guard terminal re-entry before notifying listeners.
 	dead = true
 	var lost := maxf(0.0, float(build.hp))
-	build.hp = 0.0
-	if _run_model: _run_model.build.hp = 0.0
-	emit_signal("hp_changed", 0.0, float(build.max_hp))
+	_set_hp(0.0)
 	emit_signal("hurt_taken", lost, global_position)
 	_die()
 

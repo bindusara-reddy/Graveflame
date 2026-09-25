@@ -940,7 +940,6 @@ func _advance_room() -> void:
 		# The throne room is one continuous fight, so it carries no wave counter.
 		ui.hide_wave()
 	_stats.rooms = run.room_index + 1
-	player.build = run.build
 
 func _camera_target_for(pos: Vector2) -> Vector2:
 	var target := pos
@@ -1195,37 +1194,34 @@ func _take_rift_gift(kind: String) -> void:
 	else:
 		var cells := _award_cells(10 + 3 * maxi(0, run.room_index))
 		text = "+%d CELLS" % cells
-	player.build = run.build
 	ui.set_hp(float(run.build.hp), float(run.build.max_hp))
-	_advance_room()
-	if kind == "font":
-		player.refill_flask()
-	elif Content.FLASK_REFILL_ON_CLEAR:
-		player.refill_flask(_flask_per_room())
+	var flask_refill := -1 if kind == "font" else _flask_per_room()
+	_enter_next_chamber(flask_refill)
+	# After the move, so the number rises where the knight arrives.
 	feedback.play("heal" if kind == "font" else "pickup")
 	feedback.damage_number(player.global_position + Vector2(0.0, -70.0), 0.0, "heal" if kind == "font" else "elite", text)
-	state = GState.PLAYING
 
 func _on_upgrade_selected(idx: int) -> void:
 	if idx < 0 or idx >= _pending_upgrades.size():
 		return
-	run.apply_upgrade(_pending_upgrades[idx])
-	player.build = run.build
-	Enemy.pyre_damage = float(run.build.get("pyre_dmg", 0.0))
-	ui.set_hp(float(run.build.hp), float(run.build.max_hp))
-	# A Witch Flask arrives full; other boons leave the belt as it was.
 	var taken: Dictionary = _pending_upgrades[idx]
-	if run.build.has("flask_charges"):
-		player.flask_max = int(run.build.flask_charges)
-		if str(taken.get("kind", "")) == "flask_charge":
-			player.flask_charges = mini(player.flask_max, player.flask_charges + int(taken.get("value", 1)))
+	run.apply_upgrade(taken)
+	ui.set_hp(float(run.build.hp), float(run.build.max_hp))
+	# A Witch Flask adds `value` charges; other boons leave the belt as it was.
+	var flask_bonus := 0
+	if str(taken.get("kind", "")) == "flask_charge":
+		flask_bonus = int(taken.get("value", 1))
 	_pending_upgrades.clear()
 	ui.hide_panel("reward")
-	_advance_room()
 	# A charge returns with every chamber cleared.
-	if Content.FLASK_REFILL_ON_CLEAR:
-		player.refill_flask(_flask_per_room())
+	_enter_next_chamber(_flask_per_room() + flask_bonus)
 	get_tree().paused = false
+
+## Step through the rift into the next chamber and return `flask_refill` flask
+## charges there (-1 refills them all).
+func _enter_next_chamber(flask_refill: int) -> void:
+	_advance_room()
+	player.refill_flask(flask_refill)
 	state = GState.PLAYING
 
 ## Fold the run's headline result into the stats the summary screen renders.
