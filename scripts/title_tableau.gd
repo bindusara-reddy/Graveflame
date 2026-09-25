@@ -16,8 +16,7 @@ const KnightArt := preload("res://scripts/knight_art.gd")
 ## Seconds for the arrival reveal: the furnace rises and the galleries emerge.
 const REVEAL_TIME := 1.6
 const RINGS := 7
-## Gameplay figure size (Content.P_BODY_W/H) reproduced, never altered.
-const BODY_W := 26.0
+## Gameplay figure height (Content.P_BODY_H) reproduced, never altered.
 const BODY_H := 54.0
 const KNIGHT_SCALE := 2.0
 
