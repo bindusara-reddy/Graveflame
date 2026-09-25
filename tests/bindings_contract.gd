@@ -54,6 +54,15 @@ func run() -> void:
 	check(key_codes("dash").has(KEY_SHIFT), "dash is bound to the documented Shift key (got %s)" % str(key_codes("dash")))
 	check(not key_codes("dash").has(KEY_PAGEDOWN), "dash is not bound to the stray PageDown code")
 
+	# D-pad down used to drink a flask, so a D-pad player could never air-slam
+	# (DOWN + BLADE). It is DOWN now, and the flask sits on the left trigger.
+	var dpad_down := InputEventJoypadButton.new()
+	dpad_down.button_index = JOY_BUTTON_DPAD_DOWN
+	dpad_down.pressed = true
+	check(InputMap.event_is_action(dpad_down, "move_down"), "D-pad down is DOWN, so it can aim an air slam")
+	check(not InputMap.event_is_action(dpad_down, "heal"), "D-pad down no longer drinks a flask")
+	check(cell("heal", "pad") == "LT", "the flask is on the left trigger (got %s)" % cell("heal", "pad"))
+
 	# --- Rebinding ---
 	game.ui.keys_requested.emit()
 	await ticks(4)
