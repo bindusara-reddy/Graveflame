@@ -79,6 +79,8 @@ var _difficulty: Dictionary = { "hp_mul": 1.0, "dmg_mul": 1.0 }
 var mood: Dictionary = {}
 ## The swaying back decor's canvas (see _ready).
 var _back_decor: Node2D
+## Depth band (Content.zone_for): picks the floor's material and the dressing.
+var zone := "crypt"
 ## The throne room is the finale's stage, and the finale plays it: the Warden's
 ## sigil gutters out (heat 0) and relights gold, the braziers sink, and every
 ## past victory stands a candle on the dais. The braziers' and the sigil's
@@ -99,6 +101,7 @@ var victory_candles := 0
 
 func setup(tmpl: Dictionary, p_is_boss: bool, player: Node, seed_val: int) -> void:
 	template = tmpl
+	zone = Content.zone_for(str(tmpl.get("tag", "intro")))
 	is_boss = p_is_boss
 	_player_ref = player
 	_rng.seed = seed_val
@@ -518,6 +521,8 @@ func _draw() -> void:
 
 ## Stone courses with deterministic slab widths (48/64/80) so joints never line
 ## up between rows, a 6px trim, a 1.5px rim catch-light and a 12px occlusion band.
+## The works lay riveted iron deck plates with a furnace glow in every third
+## seam; the ashpit is rough-hewn rock in deep courses with bone set into it.
 ##
 ## `walkable` marks geometry the player can stand on. Its cap is drawn as a
 ## distinct lit deck instead of the shared stone edge, because the mood's edge
@@ -528,6 +533,9 @@ func _draw_masonry(ci: CanvasItem, pr: Rect2, accent: Color, salt: int, m: Dicti
 	var lip := 6.0
 	var stone: Color = m.stone
 	var base := stone.darkened(0.22)
+	var plated := zone == "works"
+	var hewn := zone == "ashpit"
+	var seam := Color(m.glow, 0.45 * float(m.ember_seep))
 	ci.draw_rect(pr, base)
 	var y := pr.position.y + lip
 	var row := 0
@@ -537,12 +545,16 @@ func _draw_masonry(ci: CanvasItem, pr: Rect2, accent: Color, salt: int, m: Dicti
 		# read as printed wallpaper rather than laid stone. Horizontal variation
 		# (slab widths, tones, cracks) already existed; this is the missing axis.
 		var row_h := (16.0 if row < 3 else 26.0) + (VFX.hash01(row * 29 + salt, 71) - 0.5) * 6.0
+		if hewn:
+			row_h = 20.0 + VFX.hash01(row * 29 + salt, 71) * 14.0
 		row_h = minf(row_h, pr.end.y - y)
 		var x := pr.position.x - VFX.hash01(row + salt * 7, 3) * 56.0
 		var col := 0
 		while x < pr.end.x:
 			var pick := VFX.hash01(col * 31 + row * 17, salt)
 			var slab_w := 48.0 if pick < 0.34 else (64.0 if pick < 0.67 else 80.0)
+			if plated:
+				slab_w = 96.0
 			var x0 := maxf(x, pr.position.x)
 			var x1 := minf(x + slab_w, pr.end.x)
 			if x1 > x0 + 1.0:
@@ -557,8 +569,18 @@ func _draw_masonry(ci: CanvasItem, pr: Rect2, accent: Color, salt: int, m: Dicti
 					ci.draw_polyline(PackedVector2Array([
 						Vector2(cx - 8.0, y + 2.0), Vector2(cx - 2.0, y + row_h * 0.45), Vector2(cx + 5.0, y + row_h * 0.6), Vector2(cx + 3.0, y + row_h - 2.0),
 					]), VFX.JOINT, 1.5)
+				if hewn and pick > 0.94 and x1 - x0 > 40.0:
+					# A long bone set into the rock.
+					var by := y + row_h * 0.5
+					ci.draw_line(Vector2(x0 + 12.0, by + 2.0), Vector2(x0 + 34.0, by - 2.0), Color("bdb3a3").darkened(0.5), 3.0)
 				if x + slab_w < pr.end.x - 1.0:
-					ci.draw_line(Vector2(x + slab_w, y), Vector2(x + slab_w, y + row_h), VFX.JOINT, 2.0)
+					var jx := x + slab_w
+					ci.draw_line(Vector2(jx, y), Vector2(jx, y + row_h), VFX.JOINT, 2.0)
+					if plated:
+						if col % 3 == 2:
+							ci.draw_line(Vector2(jx, y + 2.0), Vector2(jx, y + row_h - 2.0), seam, 1.5)
+						for corner in [Vector2(-5.0, 4.0), Vector2(5.0, 4.0), Vector2(-5.0, row_h - 4.0), Vector2(5.0, row_h - 4.0)]:
+							ci.draw_circle(Vector2(jx, y) + corner, 1.5, stone.lightened(0.12))
 			x += slab_w
 			col += 1
 		if y + row_h < pr.end.y - 1.0:
@@ -574,6 +596,12 @@ func _draw_masonry(ci: CanvasItem, pr: Rect2, accent: Color, salt: int, m: Dicti
 		ci.draw_rect(Rect2(pr.position, Vector2(pr.size.x, lip + 4.0)), deck)
 		ci.draw_rect(Rect2(pr.position + Vector2(0.0, lip + 4.0), Vector2(pr.size.x, 8.0)), Color(0.0, 0.0, 0.0, 0.28))
 		ci.draw_line(Vector2(pr.position.x, pr.position.y + 1.0), Vector2(pr.end.x, pr.position.y + 1.0), deck.lightened(0.45), 2.0)
+		if hewn:
+			# Rough rock breaks the deck's lower edge; the standing line stays true.
+			var lip_pts := PackedVector2Array()
+			for i in range(int(pr.size.x / 14.0) + 1):
+				lip_pts.append(Vector2(pr.position.x + float(i) * 14.0, pr.position.y + lip + 4.0 + (VFX.hash01(i, salt + 31) - 0.5) * 6.0))
+			ci.draw_polyline(lip_pts, VFX.JOINT, 2.0)
 	else:
 		ci.draw_rect(Rect2(pr.position, Vector2(pr.size.x, lip)), (m.edge as Color).lightened(0.12))
 	ci.draw_rect(Rect2(pr.position + Vector2(0.0, lip), Vector2(pr.size.x, 2.0)), Color(accent.r, accent.g, accent.b, 0.28))

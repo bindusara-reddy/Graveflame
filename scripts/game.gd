@@ -59,6 +59,8 @@ var _vignette_mat: ShaderMaterial
 var _low_hp_t := 0.0
 ## Current depth palette; see Content.MOODS. Snaps per chamber under the rift fade.
 var mood: Dictionary = Content.mood_for(0.0)
+## Current chamber's depth band (Content.zone_for): picks the backdrop's architecture.
+var zone := "crypt"
 const VIGNETTE_EDGE := Color(0.027, 0.02, 0.043, 0.78)
 const VIGNETTE_LOW_HP := Color(0.46, 0.04, 0.07, 0.92)
 ## Attack anticipation: a windup the player cannot hear reads as an unfair hit.
@@ -536,11 +538,21 @@ func _paint_backdrop(ci: CanvasItem) -> void:
 	var bloom := Vector2(_plane_x(0.1, 184.0), horizon - 60.0)
 	for i in range(4, 0, -1):
 		ci.draw_circle(bloom, 90.0 + float(i) * 72.0, Color(m.glow, (0.016 + float(5 - i) * 0.012) * (1.0 + seep)))
+	# The middle planes are the zone's own architecture; the sky, undercroft and
+	# fog are shared. The throne's apse stands in for all of them.
 	if _in_throne_room():
 		_paint_throne_apse(ci, horizon)
 	else:
-		_draw_spires(ci, horizon)
-		_draw_arches(ci, horizon)
+		match zone:
+			"works":
+				_draw_stacks(ci, horizon)
+				_draw_trusses(ci, horizon)
+			"ashpit":
+				_draw_crags(ci, horizon)
+				_draw_ruin_arches(ci, horizon)
+			_:
+				_draw_spires(ci, horizon)
+				_draw_arches(ci, horizon)
 		_draw_light_shafts(ci, top, horizon)
 		_draw_buttresses(ci, horizon)
 		_draw_rubble(ci, horizon)
@@ -719,13 +731,7 @@ func _draw_arches(ci: CanvasItem, horizon: float) -> void:
 		# Pillars and the spandrel over an open arch; the sky shows through the opening.
 		_draw_shaft(ci, cx - 80.0, 28.0, arch_top, base, wall)
 		_draw_shaft(ci, cx + 52.0, 28.0, arch_top, base, wall)
-		var spandrel := PackedVector2Array([Vector2(cx - 80.0, arch_top), Vector2(cx + 80.0, arch_top), Vector2(cx + 80.0, arch_top + 110.0)])
-		for i in range(13):
-			var a := -PI * float(i) / 12.0
-			spandrel.append(Vector2(cx, arch_top + 110.0) + Vector2(cos(a), sin(a)) * 52.0)
-		spandrel.append(Vector2(cx - 80.0, arch_top + 110.0))
-		ci.draw_colored_polygon(spandrel, wall)
-		ci.draw_arc(Vector2(cx, arch_top + 110.0), 52.0, PI, TAU, 16, edge, 1.5)
+		_draw_spandrel(ci, cx, arch_top, wall, edge)
 		# Heraldic banners hang from the entablature on some bays.
 		if VFX.hash01(k, 12) > 0.62:
 			var by := arch_top - 30.0
@@ -748,6 +754,178 @@ func _draw_arches(ci: CanvasItem, horizon: float) -> void:
 			var drop := 240.0 + VFX.hash01(k, 10) * 220.0
 			var sway2 := sin(_atmo_t * 0.5 + float(k) * 1.9) * 6.0 if moving else 0.0
 			ci.draw_dashed_line(Vector2(cx + 46.0, -560.0), Vector2(cx + 46.0 + sway2, -560.0 + drop), edge, 2.0, 6.0)
+
+## The wall over an open arch between a bay's two pillars, with its moulded
+## intrados. Shared by the crypt colonnade and the ashpit's ruin of it.
+func _draw_spandrel(ci: CanvasItem, cx: float, arch_top: float, wall: Color, edge: Color) -> void:
+	var spandrel := PackedVector2Array([Vector2(cx - 80.0, arch_top), Vector2(cx + 80.0, arch_top), Vector2(cx + 80.0, arch_top + 110.0)])
+	for i in range(13):
+		var a := -PI * float(i) / 12.0
+		spandrel.append(Vector2(cx, arch_top + 110.0) + Vector2(cos(a), sin(a)) * 52.0)
+	spandrel.append(Vector2(cx - 80.0, arch_top + 110.0))
+	ci.draw_colored_polygon(spandrel, wall)
+	ci.draw_arc(Vector2(cx, arch_top + 110.0), 52.0, PI, TAU, 16, edge, 1.5)
+
+## Works, far plane: foundry chimney stacks over a sawtooth shed roofline, each
+## breathing a slow smoke plume. It stands where the crypt's spires stand, so
+## the foundry reads as its own skyline rather than the crypt recoloured.
+func _draw_stacks(ci: CanvasItem, horizon: float) -> void:
+	var depth := 0.15
+	var period := 150.0
+	var col: Color = _haze(mood.spire, depth)
+	var mouth: Color = _haze(mood.torch, depth)
+	var smoke: Color = _haze((mood.fog as Color).lightened(0.1), depth)
+	var r := _plane_range(depth, period, 120.0)
+	var base := horizon + 80.0
+	var roof := horizon - 170.0
+	var lit := col.lightened(0.08)
+	var shade := col.darkened(0.22)
+	VFX.draw_vgradient(ci, Rect2(_plane_x(depth, float(r.x) * period) - period, roof, float(r.y - r.x + 2) * period, base - roof), shade, lit)
+	for k in range(r.x, r.y + 1):
+		var x := _plane_x(depth, float(k) * period)
+		# One shed tooth per bay: a steep glazed face catching the furnace light.
+		ci.draw_colored_polygon(PackedVector2Array([Vector2(x, roof), Vector2(x + 30.0, roof - 46.0), Vector2(x + period, roof)]), shade)
+		ci.draw_line(Vector2(x + 3.0, roof - 3.0), Vector2(x + 28.0, roof - 42.0), Color(mouth, 0.16), 2.0)
+		if VFX.hash01(k, 1) < 0.3:
+			continue
+		var w := 40.0 + VFX.hash01(k, 2) * 30.0
+		var top := base - 380.0 - VFX.hash01(k, 3) * 80.0
+		var sx := x + 50.0 + VFX.hash01(k, 4) * 60.0
+		ci.draw_polygon(PackedVector2Array([
+			Vector2(sx - w * 0.5, base), Vector2(sx - w * 0.42, top), Vector2(sx + w * 0.42, top), Vector2(sx + w * 0.5, base),
+		]), PackedColorArray([lit, shade, shade, lit]))
+		# Cap band, half again as wide as the stack, over a furnace-lit mouth.
+		ci.draw_rect(Rect2(sx - w * 0.75, top - 14.0, w * 1.5, 14.0), shade.lightened(0.05))
+		ci.draw_rect(Rect2(sx - w * 0.6, top - 16.0, w * 1.2, 2.0), Color(mouth, 0.3))
+		# Five puffs climb and lean downwind at 6px/s, thinning as they rise.
+		for i in range(5):
+			var rise := fmod(_atmo_t * 6.0 + float(i) * 36.0 + VFX.hash01(k, 5) * 36.0, 180.0)
+			var puff := Vector2(sx + rise * 0.5, top - 22.0 - rise)
+			VFX.draw_ellipse(ci, puff, 16.0 + rise * 0.22, 10.0 + rise * 0.1, Color(smoke, 0.2 * (1.0 - rise / 180.0)))
+
+## Works, middle plane: an iron foundry hall. Posts carry riveted A-frame trusses
+## over open bays, so the stacks show through above a brick dado; grated furnace
+## ports glow in some bays and a crucible hangs on a chain in every third.
+func _draw_trusses(ci: CanvasItem, horizon: float) -> void:
+	var depth := 0.35
+	var period := 240.0
+	var wall: Color = _haze(mood.wall, depth)
+	var iron: Color = _haze((mood.edge as Color).darkened(0.35), depth)
+	var rivet: Color = _haze(mood.edge, depth)
+	var glow: Color = _haze(mood.glass, depth)
+	var r := _plane_range(depth, period, 160.0)
+	var base := horizon + 60.0
+	var lintel := horizon - 360.0
+	var dado := horizon - 200.0
+	var x_start := _plane_x(depth, float(r.x) * period) - period
+	var width := float(r.y - r.x + 2) * period
+	var moving := not Feedback.motion_reduced
+	VFX.draw_vgradient(ci, Rect2(x_start, dado, width, base - dado), wall.darkened(0.12), wall.lightened(0.05))
+	ci.draw_rect(Rect2(x_start, dado - 8.0, width, 8.0), iron)
+	ci.draw_rect(Rect2(x_start, lintel, width, 20.0), iron)
+	for i in range(int(width / 24.0)):
+		ci.draw_circle(Vector2(x_start + 12.0 + float(i) * 24.0, lintel + 10.0), 2.0, rivet)
+	for k in range(r.x, r.y + 1):
+		var cx := _plane_x(depth, float(k) * period)
+		var bay := cx + period * 0.5
+		var apex := Vector2(bay, lintel - 110.0)
+		ci.draw_line(Vector2(cx, lintel), apex, iron, 14.0)
+		ci.draw_line(Vector2(cx + period, lintel), apex, iron, 14.0)
+		ci.draw_line(apex, Vector2(bay, lintel), iron, 6.0)
+		_draw_shaft(ci, cx - 12.0, 24.0, lintel, base, iron)
+		if VFX.hash01(k, 11) > 0.55:
+			# A grated furnace port breathing in the dado, where the crypt has glass.
+			var port := Vector2(bay, dado + 84.0)
+			var breathe := 0.24 + (0.06 * sin(_atmo_t * 1.3 + float(k)) if moving else 0.0)
+			ci.draw_circle(port, 46.0, Color(glow, 0.06))
+			ci.draw_circle(port, 34.0, Color(glow, breathe))
+			for i in range(8):
+				var dx := -30.0 + float(i) * 60.0 / 7.0
+				var dy := sqrt(34.0 * 34.0 - dx * dx)
+				ci.draw_line(Vector2(port.x + dx, port.y - dy), Vector2(port.x + dx, port.y + dy), iron, 2.5)
+			ci.draw_arc(port, 34.0, 0.0, TAU, 24, iron, 4.0)
+		if posmod(k, 3) == 0:
+			# A crucible slung from the truss, its molten rim catching the light.
+			var sway := sin(_atmo_t * 0.6 + float(k)) * 4.0 if moving else 0.0
+			var cup := Vector2(bay + sway, lintel + 140.0 + VFX.hash01(k, 12) * 60.0)
+			ci.draw_dashed_line(Vector2(bay, lintel + 20.0), cup, rivet, 2.0, 6.0)
+			ci.draw_colored_polygon(PackedVector2Array([cup + Vector2(-20.0, 0.0), cup + Vector2(20.0, 0.0), cup + Vector2(13.0, 28.0), cup + Vector2(-13.0, 28.0)]), iron)
+			ci.draw_line(cup + Vector2(-21.0, 1.0), cup + Vector2(21.0, 1.0), Color(glow, 0.55), 2.0)
+
+## Ashpit, far plane: a cave roof of hanging rock teeth over a ridge of broken
+## crags. The ashpit lies under the keep, so stone closes its sky.
+func _draw_crags(ci: CanvasItem, horizon: float) -> void:
+	var depth := 0.15
+	var period := 150.0
+	var col: Color = _haze(mood.spire, depth)
+	var lit := col.lightened(0.08)
+	var shade := col.darkened(0.22)
+	var r := _plane_range(depth, period, 120.0)
+	var x_start := _plane_x(depth, float(r.x) * period) - period
+	var width := float(r.y - r.x + 2) * period
+	var roof := horizon - 420.0
+	var base := horizon + 80.0
+	ci.draw_rect(Rect2(x_start, -560.0, width, roof + 560.0), shade)
+	VFX.draw_vgradient(ci, Rect2(x_start, horizon - 120.0, width, base - horizon + 120.0), shade, lit)
+	for k in range(r.x, r.y + 1):
+		var x := _plane_x(depth, float(k) * period)
+		# Five to nine stalactites per bay, their tips lifting toward the light.
+		var teeth := 5 + int(VFX.hash01(k, 1) * 5.0)
+		var step := period / float(teeth)
+		for i in range(teeth):
+			var h := VFX.hash01(k * 9 + i, 2)
+			var tx := x + float(i) * step
+			ci.draw_polygon(PackedVector2Array([
+				Vector2(tx, roof - 1.0), Vector2(tx + step, roof - 1.0), Vector2(tx + step * (0.3 + 0.4 * h), roof + 20.0 + h * 100.0),
+			]), PackedColorArray([shade, shade, lit]))
+		# One broken crag on the far ridge per bay.
+		var w := 70.0 + VFX.hash01(k, 3) * 60.0
+		var peak := base - 200.0 - VFX.hash01(k, 4) * 140.0
+		var cx := x + VFX.hash01(k, 5) * 60.0
+		ci.draw_polygon(PackedVector2Array([
+			Vector2(cx - w * 0.5, base), Vector2(cx - w * 0.36, peak + 60.0), Vector2(cx - w * 0.12, peak + 18.0), Vector2(cx, peak),
+			Vector2(cx + w * 0.18, peak + 34.0), Vector2(cx + w * 0.34, peak + 26.0), Vector2(cx + w * 0.5, base),
+		]), PackedColorArray([lit, shade, shade, shade, shade, shade, lit]))
+
+## Ashpit, middle plane: the crypt colonnade after the collapse. Every other bay
+## has lost its spandrel and had its pillars snapped at 40-80% height, and roots
+## spill from the broken end of each surviving stretch of entablature.
+func _draw_ruin_arches(ci: CanvasItem, horizon: float) -> void:
+	var depth := 0.35
+	var period := 200.0
+	var wall: Color = _haze(mood.wall, depth)
+	var edge: Color = _haze(mood.edge, depth)
+	var root: Color = _haze(Color("2b1d12").lerp(mood.stone, 0.2), depth)
+	var r := _plane_range(depth, period, 160.0)
+	var base := horizon + 60.0
+	var arch_top := horizon - 340.0
+	var moving := not Feedback.motion_reduced
+	for k in range(r.x, r.y + 1):
+		var cx := _plane_x(depth, float(k) * period)
+		var standing := posmod(k, 2) == 0
+		for side in range(2):
+			var px := cx - 80.0 + float(side) * 132.0
+			var top := arch_top
+			if not standing:
+				top = base - (base - arch_top) * (0.4 + VFX.hash01(k * 2 + side, 14) * 0.4)
+			_draw_shaft(ci, px, 28.0, top, base, wall)
+			if not standing:
+				ci.draw_colored_polygon(PackedVector2Array([
+					Vector2(px, top + 6.0), Vector2(px + 6.0, top - 8.0), Vector2(px + 13.0, top + 2.0), Vector2(px + 20.0, top - 12.0), Vector2(px + 28.0, top + 4.0),
+				]), wall)
+		if not standing:
+			continue
+		ci.draw_rect(Rect2(cx - 100.0, arch_top - 34.0, 200.0, 34.0), wall.darkened(0.16))
+		ci.draw_line(Vector2(cx - 100.0, arch_top - 34.0), Vector2(cx + 100.0, arch_top - 34.0), edge, 2.0)
+		_draw_spandrel(ci, cx, arch_top, wall, edge)
+		for i in range(5):
+			var rx := cx + 76.0 + float(i) * 6.0
+			var fall := 60.0 + VFX.hash01(k * 5 + i, 15) * 130.0
+			var sway := sin(_atmo_t * 0.8 + float(k + i)) * 3.0 if moving else 0.0
+			ci.draw_polyline(PackedVector2Array([
+				Vector2(rx, arch_top - 20.0), Vector2(rx + 5.0 + sway, arch_top + fall * 0.4),
+				Vector2(rx - 3.0 + sway, arch_top + fall * 0.75), Vector2(rx + 2.0 + sway * 1.5, arch_top + fall),
+			]), root, 3.0 - float(i) * 0.4)
 
 ## Slanted shafts of moon or furnace light falling between the bays.
 func _draw_light_shafts(ci: CanvasItem, top: float, horizon: float) -> void:
@@ -786,6 +964,10 @@ func _draw_buttresses(ci: CanvasItem, horizon: float) -> void:
 		ci.draw_rect(Rect2(x - 30.0, top, 60.0, 14.0), stone.lightened(0.08))
 		ci.draw_rect(Rect2(x - 28.0, horizon - 40.0, 56.0, 40.0), stone.lightened(0.05))
 		ci.draw_line(Vector2(x - 22.0, top), Vector2(x - 22.0, base), Color(VFX.RIM, 0.18), 1.5)
+		if zone == "works":
+			# The foundry strapped its old stone with iron.
+			for i in range(3):
+				ci.draw_rect(Rect2(x - 25.0, top + 70.0 + float(i) * 120.0, 50.0, 8.0), stone.darkened(0.4))
 		# Crouching gargoyle on every other capital.
 		if k % 2 == 0:
 			var g := Vector2(x, top)
@@ -812,9 +994,12 @@ func _draw_buttresses(ci: CanvasItem, horizon: float) -> void:
 		ci.draw_rect(Rect2(sconce.x - 5.0, sconce.y - 70.0, 10.0, 44.0), Color(0.0, 0.0, 0.0, 0.18))
 
 ## Stone mounds and bones along the back wall, just behind the play plane.
+## The ashpit is where the keep's ruin ends up, so it lies twice as thick there,
+## with bones scattered through it.
 func _draw_rubble(ci: CanvasItem, horizon: float) -> void:
 	var depth := 0.85
-	var period := 260.0
+	var ashpit := zone == "ashpit"
+	var period := 130.0 if ashpit else 260.0
 	var r := _plane_range(depth, period, 120.0)
 	var stone: Color = _haze(mood.stone, depth)
 	for k in range(r.x, r.y + 1):
@@ -830,11 +1015,17 @@ func _draw_rubble(ci: CanvasItem, horizon: float) -> void:
 		pts.append(Vector2(x + w * 0.5, horizon))
 		ci.draw_colored_polygon(pts, stone.darkened(0.35))
 		ci.draw_polyline(pts, Color(VFX.RIM, 0.2), 1.0)
-		if VFX.hash01(k, 86) > 0.6:
+		var bone := Color("8f877a")
+		if VFX.hash01(k, 86) > (0.3 if ashpit else 0.6):
 			var sk := Vector2(x + (VFX.hash01(k, 87) - 0.5) * w * 0.5, horizon - h * 0.5 - 4.0)
-			ci.draw_circle(sk, 5.0, Color("8f877a"))
+			ci.draw_circle(sk, 5.0, bone)
 			ci.draw_circle(sk + Vector2(-2.0, -1.0), 1.4, VFX.VOID)
 			ci.draw_circle(sk + Vector2(2.0, -1.0), 1.4, VFX.VOID)
+		if ashpit and VFX.hash01(k, 88) > 0.4:
+			# Two long bones crossed on the heap.
+			var b := Vector2(x - w * 0.2, horizon - h * 0.4)
+			ci.draw_line(b + Vector2(-12.0, 2.0), b + Vector2(12.0, -5.0), bone.darkened(0.15), 3.0)
+			ci.draw_line(b + Vector2(-8.0, -6.0), b + Vector2(10.0, 3.0), bone.darkened(0.25), 3.0)
 
 ## A drowned lower colonnade under the floor line, fading into the pit.
 func _draw_undercroft(ci: CanvasItem, horizon: float) -> void:
@@ -1116,6 +1307,7 @@ func _advance_room() -> void:
 	ui.hide_room_clear()
 	var tmpl := run.advance_to_next_room()
 	var is_boss := run.is_boss_room()
+	zone = Content.zone_for(str(tmpl.tag))
 	mood = Content.mood_for(float(run.room_index) / maxf(1.0, float(run.rooms_total() - 1)))
 	RenderingServer.set_default_clear_color(mood.bg_top)
 	_lights.set_ambient(mood.ambient)
@@ -1725,6 +1917,7 @@ func _on_quit_to_title() -> void:
 	ui.show_panel("title")
 	state = GState.TITLE
 	_set_world_shown(false)
+	zone = "crypt"
 	mood = Content.mood_for(0.0)
 	RenderingServer.set_default_clear_color(mood.bg_top)
 	_lights.set_ambient(mood.ambient)

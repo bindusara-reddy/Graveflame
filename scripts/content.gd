@@ -235,6 +235,16 @@ const MOODS := [
 	},
 ]
 
+## The depth band a room template belongs to: its architecture, palette and
+## dressing. Mirrors RunModel's pacing bands, so a run passes crypt, works and
+## ashpit in order before the throne.
+static func zone_for(tag: String) -> String:
+	match tag:
+		"gap", "platforms": return "works"
+		"chamber", "crossfire": return "ashpit"
+		"boss": return "throne"
+	return "crypt"
+
 ## Blend the mood keyframes for a route position: 0 is the first chamber, 1 the throne.
 static func mood_for(progress: float) -> Dictionary:
 	var p := clampf(progress, 0.0, 1.0) * float(MOODS.size() - 1)
