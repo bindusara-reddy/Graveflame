@@ -15,8 +15,7 @@ const VFX := preload("res://scripts/vfx.gd")
 var game: Game
 var _modulate: CanvasModulate
 var _player_light: PointLight2D
-var _exit_light: PointLight2D
-var _exit_light2: PointLight2D
+var _rift_lights: Array[PointLight2D] = []
 var _boss_light: PointLight2D
 var _torches: Array[PointLight2D] = []
 var _room_lights: Array[PointLight2D] = []
@@ -27,6 +26,7 @@ static var _tex: GradientTexture2D
 const TORCH_POOL := 5
 const ROOM_POOL := 3
 const ACTOR_POOL := 3
+const RIFT_POOL := 2
 
 static func light_texture() -> GradientTexture2D:
 	if _tex == null:
@@ -48,8 +48,8 @@ func _ready() -> void:
 	_modulate.color = Color(0.4, 0.36, 0.5)
 	add_child(_modulate)
 	_player_light = _make_light("KnightFlame", Color(1.0, 0.72, 0.42), 1.3, 4.8)
-	_exit_light = _make_light("RiftLight", Content.PAL.exit, 1.0, 3.4)
-	_exit_light2 = _make_light("RiftLight2", Content.PAL.exit, 1.0, 3.4)
+	for i in range(RIFT_POOL):
+		_rift_lights.append(_make_light("RiftLight%d" % i, Content.PAL.exit, 1.0, 3.4))
 	_boss_light = _make_light("BossLight", VFX.EMBER, 0.9, 4.2)
 	for i in range(TORCH_POOL):
 		_torches.append(_make_light("Torch%d" % i, VFX.GOLD, 1.2, 3.6))
@@ -121,9 +121,8 @@ func _process(delta: float) -> void:
 		else:
 			l.enabled = false
 	var rifts: Array = room.exits if playing and is_instance_valid(room) and room.exit_open and not room.is_boss else []
-	var rift_lights := [_exit_light, _exit_light2]
-	for i in range(rift_lights.size()):
-		var l: PointLight2D = rift_lights[i]
+	for i in range(_rift_lights.size()):
+		var l := _rift_lights[i]
 		if i < rifts.size():
 			l.enabled = true
 			l.global_position = (rifts[i].rect as Rect2).get_center()
