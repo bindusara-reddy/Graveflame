@@ -502,6 +502,23 @@ static func paint(ci: CanvasItem, origin: Vector2, pose: Dictionary, facing: flo
 	ci.draw_circle(hand, 2.4, fc if solid else INK_ARM)
 	ci.draw_set_transform_matrix(Transform2D.IDENTITY)
 
+## Where the blade tip is, for effects that start from it (the finale's thrust).
+static func blade_tip(origin: Vector2, pose: Dictionary, facing: float) -> Vector2:
+	var torso_xf := torso_xform(pose)
+	var sh_f: Vector2 = torso_xf * SHOULDER_F
+	var arm_a := float(pose.arm_f)
+	var hand := sh_f + Vector2(cos(arm_a), sin(arm_a)) * ARM_F
+	var blade_a := arm_a + float(pose.sword)
+	var tip := hand + Vector2(cos(blade_a), sin(blade_a)) * BLADE
+	return Transform2D(0.0, origin) * body_xform(pose, facing) * tip
+
+## Where the flame crown sits (the base of its tongues), for effects that set a
+## flame on a head or draw it away: the finale's crowns and flame streams.
+static func head_point(origin: Vector2, pose: Dictionary, facing: float, scale: float = 1.0) -> Vector2:
+	var head_a := float(pose.torso) + float(pose.head)
+	var crown := torso_xform(pose) * NECK + Vector2(0.0, -15.0).rotated(head_a)
+	return Transform2D(0.0, Vector2(scale, scale), 0.0, origin) * body_xform(pose, facing) * crown
+
 ## A soft annular wedge between `r0` and `r1`, clear at the inner edge and
 ## `color` at the outer, swept from `a0` to `a1`.
 static func arc_fill(ci: CanvasItem, origin: Vector2, r0: float, r1: float, a0: float, a1: float, color: Color) -> void:

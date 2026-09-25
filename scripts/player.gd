@@ -105,6 +105,9 @@ var _last_facing := 1.0
 var _death_t := 0.0
 ## Last spot the knight stood on solid ground; spike pits return them here.
 var _safe_pos := Vector2.ZERO
+## Set once the Warden falls: nothing can hurt the knight and it never flickers,
+## so the finale's stand-in takes over from a steady figure.
+var cinematic := false
 
 ## An off-by-default sensor on the knight's attack layer, watching `mask`
 ## through `rect`; the move that uses it places, sizes and enables it.
@@ -737,7 +740,7 @@ func refill_flask(amount: int = -1) -> void:
 
 # --- Hurt ---
 func take_damage(amount: float, from_dir: Vector2, kb: float) -> void:
-	if dead or iframes > 0.0: return
+	if dead or iframes > 0.0 or cinematic: return
 	# Only a confirmed forward deflection grants immunity. Hazards, explosions and
 	# attacks from behind still connect during the parry animation.
 	if state == State.PARRY and parry_time > 0.0:
@@ -840,7 +843,7 @@ func _ground_both_sides() -> bool:
 ## immunity, since a pit is not an attack to dodge) and the knight is pulled
 ## back to the last solid ground they stood on.
 func hit_hazard(amount: float) -> void:
-	if dead:
+	if dead or cinematic:
 		return
 	var held_iframes := iframes
 	iframes = 0.0
@@ -859,7 +862,7 @@ func hit_hazard(amount: float) -> void:
 ## Crossing the world boundary is terminal, not a parryable or survivable hit.
 ## Dash immunity and Second Wind still apply to ordinary combat and hazards.
 func fall_out_of_world() -> void:
-	if dead: return
+	if dead or cinematic: return
 	# Signals are synchronous: guard terminal re-entry before notifying listeners.
 	dead = true
 	var lost := maxf(0.0, float(build.hp))
@@ -931,7 +934,7 @@ func suppress_gameplay_input(frames: int = 2) -> void:
 func _draw() -> void:
 	var w := Content.P_BODY_W
 	var h := Content.P_BODY_H
-	var flicker := iframes > 0.0 and fmod(iframes, 0.12) < 0.06 and not dead
+	var flicker := iframes > 0.0 and fmod(iframes, 0.12) < 0.06 and not dead and not cinematic
 	var body_col: Color = Content.PAL.player if not flicker else Content.PAL.player_accent
 	if _hurt_flash > 0.0: body_col = Color.WHITE
 	if _flask_heal_flash > 0.0:
