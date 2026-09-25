@@ -32,7 +32,51 @@ func run() -> void:
 	await _test_back_routing()
 	await _test_forge_focus()
 	await _test_rebind_capture()
+	await _test_reward_cards()
+	await _test_gameover_arming()
 	await finish("UI_CONTRACT")
+
+
+func _wait_real(seconds: float) -> void:
+	await create_timer(seconds, true, false, true).timeout
+
+
+## Seer's Eye deals four cards that still fit the frame, and a held jump
+## cannot take one before the deal lands and the key is let go.
+func _test_reward_cards() -> void:
+	var picks := [0]
+	game.ui.upgrade_selected.connect(func(_i: int): picks[0] += 1)
+	Input.action_press("jump")
+	game.ui.hide_all_panels()
+	game.ui.setup_upgrades(Content.UPGRADES.slice(0, 4))
+	game.ui.show_panel("reward")
+	await ticks(3)
+	var frame: Rect2 = game.ui._root.get_global_rect()
+	var cards: Array = _panel("reward").get_meta("buttons")
+	check(cards.all(func(c: Control): return frame.encloses(c.get_global_rect())), "four boon cards fit inside the frame")
+	var footer: Label = _panel("reward").get_meta("footer_label")
+	check(footer.text.begins_with("1 · 2 · 3 · 4 "), "the footer lists every card's key (got %s)" % footer.text)
+	await tap_key(KEY_1)
+	check(picks[0] == 0 and not focus_name().begins_with("Boon"), "a card cannot be taken while the deal lands")
+	await _wait_real(1.0)
+	check(not focus_name().begins_with("Boon"), "the cards stay inert while jump is still held")
+	Input.action_release("jump")
+	await ticks(2)
+	check(focus_name() == "Boon0", "letting go of jump arms the cards (got %s)" % focus_name())
+	game.ui.hide_all_panels()
+
+
+## The death screen ignores a confirm mashed through its fade.
+func _test_gameover_arming() -> void:
+	var restarts := [0]
+	game.ui.restart_requested.connect(func(): restarts[0] += 1)
+	game.ui.show_panel("gameover", 0.6)
+	await ticks(2)
+	await tap_key(KEY_ENTER)
+	check(restarts[0] == 0, "a confirm during the fade does not restart the descent")
+	await _wait_real(1.0)
+	check(focus_name() == "restart", "DESCEND AGAIN takes focus once armed (got %s)" % focus_name())
+	game.ui.hide_all_panels()
 
 
 ## Esc never unpauses a run from inside a sub-screen, and pad B leaves the Forge.

@@ -169,6 +169,11 @@ var _title_nav_buttons: Array = []
 ## that frame was moved by the player and ticks; focus grabbed by code (a
 ## screen opening, a list rebuilding) stays silent.
 var _nav_frame := -1
+## Actions that must be let go before a result screen arms: jump and attack
+## get mashed through the transition, and pad A is also ui_accept.
+const ARM_RELEASE_ACTIONS := ["ui_accept", "jump", "attack", "interact"]
+## Buttons waiting to arm: { buttons, at_ms, focus }, empty when none are.
+var _arming: Dictionary = {}
 
 
 func _ready() -> void:
@@ -735,6 +740,45 @@ func _on_focus_changed(_control: Control) -> void:
 		cue.emit("ui_move")
 
 
+## Hold `buttons` inert (unfocusable, unclickable) until `delay` real seconds
+## have passed and no confirm-capable action is held, then focus `focus`. A
+## jump or attack mashed through a transition can then never pick a boon or
+## restart the descent before the screen has been read.
+func _arm_buttons(buttons: Array, delay: float, focus: Control) -> void:
+	_restore_armed()
+	for button: Control in buttons:
+		button.focus_mode = Control.FOCUS_NONE
+		button.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_arming = { "buttons": buttons, "at_ms": Time.get_ticks_msec() + roundi(delay * 1000.0), "focus": focus }
+
+
+func _awaiting_arm(button: Control) -> bool:
+	return (_arming.get("buttons", []) as Array).has(button)
+
+
+## Polled every frame: arms the waiting buttons once their delay has passed
+## and every confirm-capable action has been let go.
+func _poll_arming() -> void:
+	if _arming.is_empty() or Time.get_ticks_msec() < int(_arming.at_ms):
+		return
+	for action in ARM_RELEASE_ACTIONS:
+		if Input.is_action_pressed(action):
+			return
+	var focus: Control = _arming.focus
+	_restore_armed()
+	if is_instance_valid(focus) and focus.is_visible_in_tree():
+		focus.grab_focus()
+
+
+## Give the waiting buttons back their focus and clicks, without focusing any.
+func _restore_armed() -> void:
+	for button in _arming.get("buttons", []):
+		if is_instance_valid(button):
+			(button as Control).focus_mode = Control.FOCUS_ALL
+			(button as Control).mouse_filter = Control.MOUSE_FILTER_STOP
+	_arming = {}
+
+
 func is_panel_visible(name: String) -> bool:
 	return _panels.has(name) and (_panels[name] as Control).visible
 
@@ -764,7 +808,7 @@ func _unhandled_input(event: InputEvent) -> void:
 		if reward != null and reward.visible:
 			var index := _boon_index_for_key((event as InputEventKey).keycode)
 			var buttons = reward.get_meta("buttons", [])
-			if index >= 0 and index < buttons.size():
+			if index >= 0 and index < buttons.size() and not _awaiting_arm(buttons[index]):
 				(buttons[index] as Button).pressed.emit()
 				get_viewport().set_input_as_handled()
 				return
@@ -838,7 +882,9 @@ func _build_reward() -> void:
 	gap.custom_minimum_size = Vector2(0, 6)
 	gap.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	content.add_child(gap)
-	content.add_child(_make_label("1 · 2 · 3  or  click to take a boon", 12, C_MUTED))
+	var footer := _make_label("", 12, C_MUTED)
+	content.add_child(footer)
+	panel.set_meta("footer_label", footer)
 
 
 ## A short rule with a lozenge at its centre, the keep's printer's mark.
@@ -926,6 +972,10 @@ func _build_run_end_body(panel: Control, content: VBoxContainer, tile_edge: Colo
 	var title := _button("RETURN TO TITLE", "title", false, Vector2(230, 56))
 	title.pressed.connect(quit_to_title_requested.emit)
 	actions.add_child(title)
+	panel.set_meta("buttons", [again, title])
+	# Centred in the fixed-height card, so the spare room frames the result
+	# instead of pooling under the buttons.
+	content.alignment = BoxContainer.ALIGNMENT_CENTER
 
 
 ## Six run statistics in a compact grid; filled by show_run_summary.
@@ -1225,6 +1275,7 @@ func _build_title_stack(text: String, size: int) -> Control:
 
 func _process(delta: float) -> void:
 	_poll_input_lock()
+	_poll_arming()
 	# Firelight wobble on the title face and the menu fade-up during the tableau
 	# reveal; both frozen under reduced motion (the tableau hides its own embers).
 	if _title_top_label == null:
@@ -1680,6 +1731,9 @@ func show_panel(name: String, fade: float = 0.0) -> void:
 	_last_panel = name
 	if name != "pause":
 		hide_room_clear()
+	if name == "gameover":
+		var buttons: Array = panel.get_meta("buttons")
+		_arm_buttons(buttons, 0.9, buttons[0])
 	_focus_first_control(panel)
 
 
@@ -1876,12 +1930,12 @@ class BoonMedallion extends Control:
 ## One boon card. The Button IS the card frame, so focus, hover and click stay a
 ## single control; the children are plain labels. Rarity is carried by the
 ## coloured top edge, border weight and medallion ring, not by text alone.
-func _upgrade_card(index: int, upgrade: Dictionary, rarity: String, rc: Color) -> Button:
+func _upgrade_card(index: int, upgrade: Dictionary, rarity: String, rc: Color, width: float) -> Button:
 	var epic := rarity == "epic"
 	var edge_w := 3 if epic else 2
 	var paper := Color("1c1725")
 	var button := Button.new()
-	button.custom_minimum_size = Vector2(292, 318)
+	button.custom_minimum_size = Vector2(width, 318)
 	button.size_flags_horizontal = Control.SIZE_SHRINK_CENTER
 	button.size_flags_vertical = Control.SIZE_SHRINK_CENTER
 	button.focus_mode = Control.FOCUS_ALL
@@ -1914,7 +1968,7 @@ func _upgrade_card(index: int, upgrade: Dictionary, rarity: String, rc: Color) -
 	var desc := _make_label(str(upgrade.get("desc", "")), 14, C_MUTED)
 	desc.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	desc.vertical_alignment = VERTICAL_ALIGNMENT_TOP
-	desc.custom_minimum_size = Vector2(240, 0)
+	desc.custom_minimum_size = Vector2(width - 52.0, 0)
 	desc.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	stack.add_child(desc)
 	# Rarity sits at the foot of the card, where a printed card keeps its set mark.
@@ -1960,19 +2014,28 @@ func setup_upgrades(upgrades: Array) -> void:
 	_clear_children(_upgrade_row)
 	var buttons: Array = []
 	var count := upgrades.size()
+	# Three cards keep the full width; the Seer's Eye fourth narrows them all
+	# so the row still fits the frame.
+	var width := minf(292.0, (1180.0 - 26.0 * float(count - 1)) / float(maxi(1, count)))
 	for i in range(count):
 		var upgrade: Dictionary = upgrades[i]
 		var rarity := Content.upgrade_rarity(upgrade)
 		var rc: Color = Content.rarity_color(rarity)
-		var button := _upgrade_card(i, upgrade, rarity, rc)
+		var button := _upgrade_card(i, upgrade, rarity, rc, width)
 		button.name = "Boon%d" % i
 		button.pressed.connect(upgrade_selected.emit.bind(i))
 		_upgrade_row.add_child(button)
 		buttons.append(button)
-	(_panels["reward"] as Control).set_meta("buttons", buttons)
+	var panel: Control = _panels["reward"]
+	panel.set_meta("buttons", buttons)
+	var keys: Array = range(1, count + 1).map(func(n: int): return str(n))
+	(panel.get_meta("footer_label") as Label).text = "%s  or  click to take a boon" % " · ".join(keys)
 	_deal_cards(buttons)
+	# The cards arm once the deal has landed, so a jump pressed on the way
+	# through the rift cannot take a boon unread.
+	var deal := 0.35 if Feedback.motion_reduced else 0.36 + 0.08 * float(count - 1)
 	if not buttons.is_empty():
-		(buttons[0] as Button).grab_focus.call_deferred()
+		_arm_buttons(buttons, deal, buttons[0])
 
 
 func set_flask(charges: int, max_charges: int) -> void:
