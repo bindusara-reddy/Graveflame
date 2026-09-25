@@ -1459,8 +1459,7 @@ func _on_forge_requested() -> void:
 ## Remember where OPTIONS was opened from so BACK returns there, and restore
 ## the pause state on the way out instead of dropping the player into a run.
 func _on_options_requested() -> void:
-	var pause_open: bool = is_instance_valid(ui) and (ui._panels["pause"] as Control).visible
-	_options_return = "pause" if pause_open else "title"
+	_options_return = "pause" if _panel_shown("pause") else "title"
 	ui.hide_all_panels()
 	ui.sync_options(Save.get_options())
 	ui.show_panel("options")
@@ -1556,12 +1555,24 @@ func _notification(what: int) -> void:
 	if what == NOTIFICATION_WM_CLOSE_REQUEST:
 		_bank_cells()
 
+## Pause opens the pause menu and closes it again. On a screen opened from the
+## pause menu it steps back one screen instead, so no sub-screen can ever
+## resume the run behind itself.
 func _unhandled_input(event: InputEvent) -> void:
-	if event.is_action_pressed("pause") and state == GState.PLAYING:
-		if not paused:
-			get_tree().paused = true
-			paused = true
-			ui.show_panel("pause")
-		else:
-			_on_resume()
-		get_viewport().set_input_as_handled()
+	if not event.is_action_pressed("pause") or state != GState.PLAYING:
+		return
+	if not paused:
+		get_tree().paused = true
+		paused = true
+		ui.show_panel("pause")
+	elif _panel_shown("keys"):
+		_on_back_from_keys()
+	elif _panel_shown("options"):
+		_on_back_from_options()
+	else:
+		_on_resume()
+	get_viewport().set_input_as_handled()
+
+## Which screen is up decides what pause means (see _unhandled_input).
+func _panel_shown(panel: String) -> bool:
+	return (ui._panels[panel] as Control).visible

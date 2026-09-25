@@ -1,7 +1,8 @@
 extends "res://tests/harness.gd"
 ## Run-state contracts: the save survives a torn write and is never written from
 ## a kill, the ledger records each descent once, a dead knight cannot take a
-## rift, and a Trial before the throne is paid there.
+## rift, a Trial before the throne is paid there, and Esc on a screen opened
+## from pause steps back instead of resuming.
 ## Headless; uses a scratch save.
 ##   godot4 --headless --path . --script res://tests/run_state_contract.gd
 
@@ -15,6 +16,7 @@ func run() -> void:
 	await _test_chamber_stats()
 	await _test_dead_knight()
 	await _test_throne()
+	await _test_pause_routing()
 	await finish("RUN_STATE")
 
 func write_text(file: String, text: String) -> void:
@@ -131,3 +133,20 @@ func _test_throne() -> void:
 	var boss: Boss = game.room.boss
 	if "trial" in boss:
 		check(boss.trial, "the Warden knows it is a Trial")
+
+func _test_pause_routing() -> void:
+	await boot()
+	await tap_key(KEY_ESCAPE)
+	check(paused and (game.ui._panels["pause"] as Control).visible, "Esc pauses the run")
+	game.ui.options_requested.emit()
+	await ticks(2)
+	await tap_key(KEY_ESCAPE)
+	check(paused and (game.ui._panels["pause"] as Control).visible and not (game.ui._panels["options"] as Control).visible, "Esc on options opened from pause returns to pause")
+	game.ui.options_requested.emit()
+	game.ui.keys_requested.emit()
+	await ticks(2)
+	await tap_key(KEY_ESCAPE)
+	check(paused and (game.ui._panels["options"] as Control).visible, "Esc on keys steps back to options, still paused")
+	await tap_key(KEY_ESCAPE)
+	await tap_key(KEY_ESCAPE)
+	check(not paused and not game.paused, "Esc on the pause menu resumes")
