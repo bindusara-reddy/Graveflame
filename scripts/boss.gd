@@ -6,8 +6,6 @@ extends Enemy
 const WardenArt := preload("res://scripts/warden_art.gd")
 
 signal phase_changed(phase: int)
-signal died_boss
-signal hp_changed_boss(hp: float, max_hp: float)
 signal summon_requested(kind: int, pos: Vector2)
 ## The felled Warden breaking apart, a beat after the killing blow.
 signal shattered(pos: Vector2)
@@ -96,7 +94,6 @@ func _physics_process(delta: float) -> void:
 		action_t = 0.65
 		_disarm()
 	_hurt_flash = maxf(0.0, _hurt_flash - delta)
-	_wisp_t += delta  # reuse for aura pulsing
 	_air_time = 0.0 if is_on_floor() else minf(_air_time + delta, 1.0)
 	_anim_t += delta
 	queue_redraw()
@@ -336,7 +333,6 @@ func take_damage(amount: float, from_dir: Vector2, kb: float) -> void:
 	var dealt := minf(amount, maxf(hp, 0.0))
 	hp -= amount
 	_hurt_flash = 0.08
-	emit_signal("hp_changed_boss", hp, max_hp)
 	emit_signal("damaged", dealt, global_position + Vector2(0.0, -Content.BOSS_H * 0.5), false)
 	# Boss resists knockback heavily
 	if hp <= 0.0:
@@ -362,7 +358,6 @@ func _die(_award_reward: bool = true) -> void:
 	_disarm()
 	_hurtbox.set_deferred("monitorable", false)
 	emit_signal("died", 300)
-	emit_signal("died_boss")
 
 ## Shudder, crack with fire, then come apart. Visual only; the fight is over.
 func _step_death(delta: float) -> void:
