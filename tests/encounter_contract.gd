@@ -262,7 +262,7 @@ func _test_pits() -> void:
 	check(not hopper.dead and hopper.global_position.x < 620.0, "a hopper waits at the lip instead of leaping into the pit")
 	var deaths: Array = []
 	var called: Array = []
-	room.enemy_died.connect(func(score: int, _pos: Vector2, _tier: int, _color: Color): deaths.append(score))
+	room.enemy_died.connect(func(score: int, _pos: Vector2, _tier: int, _color: Color, _kind: String): deaths.append(score))
 	room.enemy_announced.connect(func(text: String, _cue: String, _pos: Vector2): called.append(text))
 	hopper.take_damage(1.0, Vector2.RIGHT, 700.0)
 	await ticks(60)
