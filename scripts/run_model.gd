@@ -30,6 +30,7 @@ static func base_build() -> Dictionary:
 		"finish_mul": 1.0,
 		"special_mul": 1.0,
 		"special_pierce": false,
+		"lance_mul": 1.0,
 		"lifesteal": 0.0,
 		"iframes_bonus": 0.0,
 		"slam_mul": 1.0,
@@ -156,7 +157,7 @@ func apply_upgrade(u: Dictionary) -> void:
 			build.special_mul += u.value
 		"special_pierce":
 			build.special_pierce = true
-			build.dmg_mul = build.dmg_mul * (1.0 + u.value) # optional extra
+			build.lance_mul += u.value
 		"lifesteal":
 			build.lifesteal += u.value
 		"iframes":

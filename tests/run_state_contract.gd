@@ -12,6 +12,7 @@ func run() -> void:
 	use_scratch_save(SCRATCH)
 	_test_save_file()
 	_test_ledger()
+	_test_surge()
 	await _test_banking()
 	await _test_chamber_stats()
 	await _test_look_ahead()
@@ -91,6 +92,12 @@ func _test_ledger() -> void:
 	check(d.history.size() == Save.HISTORY_CAP and not bool(d.history[0].won), "history keeps the newest descents, capped")
 	check(int(d.stats.deaths) == Save.HISTORY_CAP and float(d.records.fastest_win) == 250.0, "a loss never sets a win record")
 	use_scratch_save(SCRATCH)
+
+func _test_surge() -> void:
+	var rm := RunModel.new(1)
+	var dmg := float(rm.build.dmg_mul)
+	rm.apply_upgrade(upgrade("surge"))
+	check(is_equal_approx(rm.build.dmg_mul, dmg) and is_equal_approx(rm.build.lance_mul, 1.35), "Surge strengthens the lance alone")
 
 func _test_banking() -> void:
 	await boot()

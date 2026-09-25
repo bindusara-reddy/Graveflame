@@ -251,7 +251,7 @@ static var UPGRADES: Array = [
 	{ "id": "edge",      "title": "Razor Edge", "desc": "+35% combo finisher damage.",      "kind": "finish_mul", "value": 0.35, "rarity": "rare" },
 	{ "id": "magnet",    "title": "Magnetism",  "desc": "+40% special meter gain.",         "kind": "special_mul","value": 0.40, "rarity": "common" },
 	{ "id": "warden",    "title": "Warden",     "desc": "+0.4s hurt invulnerability.",      "kind": "iframes",    "value": 0.4, "rarity": "common" },
-	{ "id": "surge",     "title": "Surge",      "desc": "Lance pierces and +20% damage.",   "kind": "special_pierce", "value": 0.20, "rarity": "rare", "unique": true },
+	{ "id": "surge",     "title": "Surge",      "desc": "The lance pierces three foes and strikes 35% harder.", "kind": "special_pierce", "value": 0.35, "rarity": "rare", "unique": true },
 	{ "id": "leech",     "title": "Leech",      "desc": "Heal 3 HP per enemy hit.",         "kind": "lifesteal",  "value": 3.0, "rarity": "rare" },
 	{ "id": "ember",     "title": "Ember Heart","desc": "Heal 20 HP now.",                  "kind": "heal",       "value": 20.0, "rarity": "common" },
 	{ "id": "slam",      "title": "Crater",     "desc": "Down-slam deals +60% damage & wider blast.", "kind": "slam_mul", "value": 0.60, "rarity": "rare" },

@@ -576,8 +576,7 @@ func _do_special() -> void:
 	special -= Content.P_SPECIAL_COST
 	emit_signal("special_changed", special, max_special)
 	var spd := 700.0
-	var dmg := 26.0 * _damage_mul()
-	if build.get("special_pierce", false): dmg *= 1.2
+	var dmg := 26.0 * _damage_mul() * float(build.get("lance_mul", 1.0))
 	var pierce := 3 if bool(build.get("special_pierce", false)) else 0
 	var pos := global_position + Vector2(facing * 30.0, -10.0)
 	if bool(build.get("twin_lance", false)):
