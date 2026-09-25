@@ -313,13 +313,20 @@ func _test_moods() -> void:
 	var last: Dictionary = Content.mood_for(1.0)
 	var mid: Dictionary = Content.mood_for(0.5)
 	check(first.name == "crypt" and last.name == "throne", "mood endpoints are the crypt and the throne")
-	check(first.bg_top == Content.MOODS[0].bg_top and last.bg_top == Content.MOODS[2].bg_top, "mood endpoints reproduce their keyframes exactly")
+	check(first.bg_top == Content.MOODS[0].bg_top and last.bg_top == Content.MOODS[Content.MOODS.size() - 1].bg_top, "mood endpoints reproduce their keyframes exactly")
 	check(is_equal_approx(float(first.stars), 1.0) and is_equal_approx(float(last.stars), 0.0), "stars fade out with depth")
 	check(float(mid.ember_seep) > float(first.ember_seep) and float(mid.ember_seep) <= float(last.ember_seep), "ember seep rises with depth")
 	check(mid.torch is Color and mid.bg_top is Color, "blended mood colours stay Colors")
 	var below: Dictionary = Content.mood_for(-3.0)
 	var above: Dictionary = Content.mood_for(7.0)
 	check(below.name == "crypt" and above.name == "throne", "mood progress is clamped")
+	# Zones arrive in route order, and each has its own hue family.
+	var zones: Array = ["intro", "arena", "gap", "chamber", "boss"].map(func(tag: String) -> String: return Content.zone_for(tag))
+	check(zones == ["crypt", "crypt", "works", "ashpit", "throne"], "templates map to crypt, works, ashpit and throne (got %s)" % [zones])
+	check(Content.mood_for_zone("crypt", 0.0).bg_top == Content.MOODS[0].bg_top, "the first chamber keeps the crypt keyframe exactly")
+	var fog := func(z: String) -> Color: return Content.mood_for_zone(z, 0.0).fog
+	var hue_gap := absf(fog.call("crypt").h - fog.call("works").h)
+	check(minf(hue_gap, 1.0 - hue_gap) > 0.2 and fog.call("ashpit").s < fog.call("works").s * 0.5, "the crypt's fog is blue against the works' amber, and the ashpit's is washed out")
 
 
 func _test_synergy_boons() -> void:

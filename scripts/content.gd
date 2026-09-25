@@ -213,7 +213,9 @@ const PAL := {
 }
 
 # --- Depth moods: the keep warms from a cold crypt to the ember throne ---
-## Each keyframe is a full palette; mood_for() blends between them by route progress.
+## Each keyframe is a full palette, one per zone and named after it: a blue
+## crypt, amber-soot works, a low-saturation ash-mauve pit, and the throne alone
+## in full crimson and gold. mood_for_zone() picks a chamber's palette.
 const MOODS := [
 	{
 		"name": "crypt", "ambient": Color(0.5, 0.56, 0.78), "bg_top": Color("060812"), "bg_mid": Color("0e1526"), "bg_bot": Color("172238"), "pit": Color("04060c"),
@@ -222,10 +224,16 @@ const MOODS := [
 		"banner": Color("1d3a45"), "glass": Color("3a7f9a"), "stars": 1.0, "ember_seep": 0.0, "moss": 0.8,
 	},
 	{
-		"name": "forge", "ambient": Color(0.7, 0.52, 0.46), "bg_top": Color("0a0509"), "bg_mid": Color("1d0d16"), "bg_bot": Color("2b1412"), "pit": Color("0a0405"),
-		"fog": Color("3a1410"), "stone": Color("2a1522"), "wall": Color("1e0f18"), "edge": Color("35192a"), "spire": Color("120710"),
-		"torch": Color("ff7a18"), "glow": Color(1.0, 0.4, 0.08), "moon": Color("ff9a4a"), "moon_alpha": 0.7,
-		"banner": Color("4a2a12"), "glass": Color("c9662a"), "stars": 0.35, "ember_seep": 0.6, "moss": 0.2,
+		"name": "works", "ambient": Color(0.78, 0.6, 0.44), "bg_top": Color("0a0705"), "bg_mid": Color("1c120b"), "bg_bot": Color("2c1a0e"), "pit": Color("0a0604"),
+		"fog": Color("3a2410"), "stone": Color("2e2019"), "wall": Color("20160f"), "edge": Color("4a3222"), "spire": Color("140c07"),
+		"torch": Color("ffae3a"), "glow": Color(1.0, 0.55, 0.12), "moon": Color("ffb050"), "moon_alpha": 0.55,
+		"banner": Color("5a3a12"), "glass": Color("e08a2a"), "stars": 0.15, "ember_seep": 0.5, "moss": 0.1,
+	},
+	{
+		"name": "ashpit", "ambient": Color(0.58, 0.5, 0.56), "bg_top": Color("08060a"), "bg_mid": Color("18121a"), "bg_bot": Color("2a1c20"), "pit": Color("080405"),
+		"fog": Color("2e2226"), "stone": Color("2c2428"), "wall": Color("1d171b"), "edge": Color("443438"), "spire": Color("0e0a0d"),
+		"torch": Color("ff6a2a"), "glow": Color(0.95, 0.3, 0.1), "moon": Color("e8d8c8"), "moon_alpha": 0.22,
+		"banner": Color("3a1e22"), "glass": Color("8a4a3a"), "stars": 0.0, "ember_seep": 0.75, "moss": 0.0,
 	},
 	{
 		"name": "throne", "ambient": Color(0.72, 0.42, 0.46), "bg_top": Color("0b0407"), "bg_mid": Color("200a11"), "bg_bot": Color("35101a"), "pit": Color("0c0406"),
@@ -249,9 +257,17 @@ static func zone_for(tag: String) -> String:
 static func mood_for(progress: float) -> Dictionary:
 	var p := clampf(progress, 0.0, 1.0) * float(MOODS.size() - 1)
 	var i := mini(floori(p), MOODS.size() - 2)
-	var t := p - float(i)
-	var a: Dictionary = MOODS[i]
-	var b: Dictionary = MOODS[i + 1]
+	return blend_moods(MOODS[i], MOODS[i + 1], p - float(i))
+
+## A chamber's palette: its zone's keyframe, leaning up to a fifth of the way
+## toward the next zone's as `local_t` runs 0..1 through the zone, so each
+## band still warms a little on the way down.
+static func mood_for_zone(zone: String, local_t: float) -> Dictionary:
+	var i := maxi(0, MOODS.find_custom(func(m: Dictionary) -> bool: return m.name == zone))
+	return blend_moods(MOODS[i], MOODS[mini(i + 1, MOODS.size() - 1)], 0.2 * clampf(local_t, 0.0, 1.0))
+
+## Mix two mood keyframes: colours and numbers blend, the name flips halfway.
+static func blend_moods(a: Dictionary, b: Dictionary, t: float) -> Dictionary:
 	var out := {}
 	for key in a:
 		if a[key] is Color:

@@ -531,13 +531,16 @@ func _paint_backdrop(ci: CanvasItem) -> void:
 	VFX.draw_vgradient(ci, Rect2(left, horizon, span, 320.0), m.bg_bot, m.pit)
 	ci.draw_rect(Rect2(left, horizon + 320.0, span, 520.0), m.pit)
 	var seep := float(m.ember_seep)
+	# The ashpit's smoke veils its fires, so their glow reaches the air ash-grey
+	# and the embers themselves stay the only hot colour in the pit.
+	var ember: Color = (m.glow as Color).lerp(m.fog, 0.6) if zone == "ashpit" else m.glow
 	if seep > 0.0:
 		# Magma light seeping up from the depths as the keep warms.
-		VFX.draw_vgradient(ci, Rect2(left, horizon + 120.0, span, 420.0), Color(m.glow, 0.0), Color(m.glow, 0.2 * seep))
+		VFX.draw_vgradient(ci, Rect2(left, horizon + 120.0, span, 420.0), Color(ember, 0.0), Color(ember, 0.2 * seep))
 	# Distant furnace bloom low on the horizon, behind the spires.
 	var bloom := Vector2(_plane_x(0.1, 184.0), horizon - 60.0)
 	for i in range(4, 0, -1):
-		ci.draw_circle(bloom, 90.0 + float(i) * 72.0, Color(m.glow, (0.016 + float(5 - i) * 0.012) * (1.0 + seep)))
+		ci.draw_circle(bloom, 90.0 + float(i) * 72.0, Color(ember, (0.016 + float(5 - i) * 0.012) * (1.0 + seep)))
 	# The middle planes are the zone's own architecture; the sky, undercroft and
 	# fog are shared. The throne's apse stands in for all of them.
 	if _in_throne_room():
@@ -1308,7 +1311,7 @@ func _advance_room() -> void:
 	var tmpl := run.advance_to_next_room()
 	var is_boss := run.is_boss_room()
 	zone = Content.zone_for(str(tmpl.tag))
-	mood = Content.mood_for(float(run.room_index) / maxf(1.0, float(run.rooms_total() - 1)))
+	mood = Content.mood_for_zone(zone, _zone_progress())
 	RenderingServer.set_default_clear_color(mood.bg_top)
 	_lights.set_ambient(mood.ambient)
 	room = Room.new()
@@ -1362,6 +1365,17 @@ func _advance_room() -> void:
 	else:
 		# The throne room is one continuous fight, so it carries no wave counter.
 		ui.hide_wave()
+
+## How far through its zone's stretch of the route this chamber sits: 0 at the
+## zone's first chamber, 1 at its last. Lets the palette lean toward the next zone.
+func _zone_progress() -> float:
+	var first := run.room_index
+	var last := run.room_index
+	while first > 0 and Content.zone_for(str(run.route[first - 1].tag)) == zone:
+		first -= 1
+	while last < run.route.size() - 1 and Content.zone_for(str(run.route[last + 1].tag)) == zone:
+		last += 1
+	return float(run.room_index - first) / float(maxi(1, last - first))
 
 func _camera_target_for(pos: Vector2) -> Vector2:
 	var target := pos
