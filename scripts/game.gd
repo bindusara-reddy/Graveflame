@@ -1521,6 +1521,52 @@ func _begin_run() -> void:
 	music.play_track("explore")
 	if not kindled.is_empty():
 		feedback.damage_number(player.global_position + Vector2(0.0, -70.0), 0.0, "elite", "KINDLED: " + kindled.to_upper())
+	_inscribe(_opening_inscription())
+
+# --- The story told on the way down (text in Content) ---
+## Seconds a story line holds on the lesson strip, when the UI has no card of
+## its own for it (show_inscription, show_litany).
+const STORY_HOLD := 5.0
+
+## The keep's inscription, carved over the first chamber of the first descent
+## ever: before the knight has fallen or won (a save older than the fall count
+## has done both). Empty on every later descent.
+func _opening_inscription() -> Array:
+	var first := Save.get_falls() == 0 and Save.get_victories() == 0 and not Save.falls_legacy()
+	return Content.INSCRIPTION if first else []
+
+## Without its own card the inscription borrows the lesson strip, and holds
+## the first lesson back until it has been read.
+func _inscribe(lines: Array) -> void:
+	if lines.is_empty():
+		return
+	if ui.has_method("show_inscription"):
+		ui.call("show_inscription", lines)
+	else:
+		ui.show_hint("  ".join(lines), STORY_HOLD)
+		_hint_cooldown = STORY_HOLD
+
+## The ending the knight last chose at the throne ("", "crown", "given" or
+## "ended"), once the save keeps one.
+func _last_ending() -> String:
+	var save: Script = Save
+	return str(save.call("get_last_ending")) if save.has_method("get_last_ending") else ""
+
+## The litany's line for the chamber just cleared: by depth, so every descent
+## hears it in order; "" in the throne room.
+func _litany_line() -> String:
+	return Content.litany_line(run.room_index + 1, _last_ending())
+
+## Under the chamber-clear banner. Without its own card the line borrows the
+## lesson strip, never over a lesson still being read.
+func _say_litany() -> void:
+	var line := _litany_line()
+	if line.is_empty():
+		return
+	if ui.has_method("show_litany"):
+		ui.call("show_litany", line)
+	elif _hint_cooldown <= 0.0:
+		ui.show_hint(line, STORY_HOLD)
 
 func _advance_room() -> void:
 	_clear_room()
@@ -1880,6 +1926,7 @@ func _on_room_cleared(room_name: String) -> void:
 	music.set_intensity(0.0, 3.0)
 	feedback.chamber_cleared()
 	ui.show_room_clear(room_name)
+	_say_litany()
 
 func _on_room_completed() -> void:
 	# A dead knight must not take a rift (or win) during the death beat.
@@ -1980,6 +2027,9 @@ func _finalize_summary() -> void:
 		_stats["line"] = Content.EPITAPH_THRONE
 	else:
 		_stats["line"] = Content.EPITAPHS[pick % Content.EPITAPHS.size()]
+	# Every knight the Warden holds, this one included (the fall is recorded once
+	# its epitaph is chosen). A won descent cracked the hoard open.
+	_stats["hoard_line"] = "" if won else Content.hoard_line(Save.get_falls() + 1)
 
 ## Settle the run for its end screen: the result, the cells banked (and the
 ## vows kept, on a victory) and the summary, with the run's HUD cards cleared.
@@ -1991,10 +2041,21 @@ func _close_run(victory: bool) -> void:
 	_bank_cells()
 	_finalize_summary()
 	ui.show_run_cells(_run_cells, panel, vows_kept)
-	ui.show_run_summary(_stats, panel)
+	ui.show_run_summary(_summary_shown(), panel)
 	ui.hide_boss_bar()
 	ui.hide_streak()
 	ui.hide_banners()
+
+## The summary as today's end panel prints it. A UI with the story's own cards
+## (show_inscription) prints hoard_line itself; this one has only the epitaph's
+## label, so the hoard rides under the epitaph. _stats.line stays the bare
+## epitaph: it is what the save keeps for the ending to answer.
+func _summary_shown() -> Dictionary:
+	if ui.has_method("show_inscription") or str(_stats.get("hoard_line", "")).is_empty():
+		return _stats
+	var shown := _stats.duplicate()
+	shown.line = "%s\n%s" % [_stats.line, _stats.hoard_line]
+	return shown
 
 func _on_player_died() -> void:
 	# A knight that falls with the Warden has traded: the run is lost.
@@ -2032,7 +2093,7 @@ func _on_boss_phase(phase: int) -> void:
 		feedback.play("roar")
 		# Phase-2 callout renders as a compact floating tag above the boss bar,
 		# never as a center-screen card over the fighters.
-		ui.flash_boss_phase("THE WARDEN IGNITES")
+		ui.flash_boss_phase(Content.warden_phase_tag(Save.get_falls() > 0 or Save.falls_legacy()))
 		# The battle theme's second layer comes up with the fire.
 		music.set_intensity(1.0)
 		feedback.hit_stop(0.1)
