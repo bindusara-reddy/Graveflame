@@ -485,10 +485,9 @@ func _build_room_clear_banner() -> void:
 
 func _build_title() -> void:
 	var panel := _screen("title", true, C_EMBER)
-	# The title is a full-scene vista: drop the generic screen header band so
-	# the sky runs unbroken from the moon down to the furnace horizon.
-	panel.get_node("TopBand").hide()
-	panel.get_node("Horizon").hide()
+	# The title is a full-scene vista: no veil, so the sky runs unbroken from
+	# the moon down to the furnace horizon.
+	panel.get_node("Veil").hide()
 	# Original menu art: the Threshold of the Descent tableau (scripts/title_tableau.gd).
 	_title_tableau = TitleTableau.new()
 	panel.add_child(_title_tableau)
@@ -584,8 +583,8 @@ func _build_title_controls_overlay(panel: Control) -> void:
 	var card := _passive_panel(center, _panel_box(Color("100d18f2"), C_EDGE, 12, 1, 14), Vector2(520, 0))
 	card.name = "ControlsCard"
 	var stack := _padded_stack(card, 26, 14, 3)
-	stack.add_child(_make_label("CONTROLS", 20, C_TEXT))
-	stack.add_child(_separator(C_EDGE))
+	stack.add_child(_make_label("CONTROLS", 30, C_TEXT))
+	stack.add_child(_ornament(C_EMBER))
 	# Rendered from the LIVE input map, so this screen can never disagree with
 	# what the game actually does -- including after a rebind.
 	var header := HBoxContainer.new()
@@ -1573,30 +1572,62 @@ func _process(delta: float) -> void:
 
 # --- Responsive building blocks ---------------------------------------------
 
+## A full-frame screen that stops clicks reaching the game, backed by a torn
+## paper veil. `opaque` screens (the title's own sub-screens) dim what lies
+## beneath harder than the in-descent screens, which keep the chamber in view.
 func _screen(name: String, opaque: bool, accent: Color) -> Control:
 	var screen := Control.new()
 	screen.name = name.capitalize() + "Screen"
 	screen.mouse_filter = Control.MOUSE_FILTER_STOP
 	_root.add_child(screen)
 	screen.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
-
-	var backdrop := C_VOID if opaque else Color(0.025, 0.02, 0.04, 0.88)
-	_sheet(screen, backdrop, Control.PRESET_FULL_RECT, true)
-
-	var band_alpha := 0.075 if opaque else 0.045
-	var top_band := _sheet(screen, Color(accent, band_alpha), Control.PRESET_TOP_WIDE)
-	top_band.name = "TopBand"
-	top_band.offset_bottom = 150.0
-
-	var horizon := _sheet(screen, Color(accent, 0.42), Control.PRESET_TOP_WIDE)
-	horizon.name = "Horizon"
-	horizon.offset_bottom = 2.0
-
-	var lower_band := _sheet(screen, Color(0.0, 0.0, 0.0, 0.2), Control.PRESET_BOTTOM_WIDE)
-	lower_band.offset_top = -92.0
-
+	var veil := PaperVeil.new()
+	veil.name = "Veil"
+	# Over a paused chamber the margins stay nearly as dark as the sheet, so
+	# the HUD under the tear reads as one dimmed layer, not two.
+	veil.dim = Color(C_VOID, 0.62 if opaque else 0.72)
+	veil.sheet = Color(C_INK, 0.94 if opaque else 0.88)
+	veil.rim = Color(accent, 0.35)
+	veil.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	screen.add_child(veil)
+	veil.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	_panels[name] = screen
 	return screen
+
+
+## A torn sheet of ink laid across the frame behind a screen's card: the scene
+## shows dimmed above and below it, and its ragged top and bottom edges carry
+## a thin accent rim, the same sheet-on-sheet cut as the dialogs and cards.
+class PaperVeil extends Control:
+	const INSET := 40.0
+	const TEAR := 9.0
+	const POINTS := 64
+	var dim := Color.BLACK
+	var sheet := Color.BLACK
+	var rim := Color.WHITE
+
+	func _draw() -> void:
+		draw_rect(Rect2(Vector2.ZERO, size), dim)
+		var top := _torn_edge(INSET, 1)
+		var bottom := _torn_edge(size.y - INSET, 2)
+		var outline := top.duplicate()
+		for i in range(bottom.size() - 1, -1, -1):
+			outline.append(bottom[i])
+		var shadow := outline.duplicate()
+		for i in range(shadow.size()):
+			shadow[i] += Vector2(4.0, 6.0)
+		draw_colored_polygon(shadow, Color(0.0, 0.0, 0.0, 0.45))
+		draw_colored_polygon(outline, sheet)
+		draw_polyline(top, rim, 1.0)
+		draw_polyline(bottom, rim, 1.0)
+
+	## A ragged line across the frame at height `y`, the same tear every draw.
+	func _torn_edge(y: float, salt: int) -> PackedVector2Array:
+		var edge := PackedVector2Array()
+		for i in range(POINTS + 1):
+			var jag := (VFX.hash01(i, salt) - 0.5) * 2.0 * TEAR
+			edge.append(Vector2(size.x * float(i) / float(POINTS), y + jag))
+		return edge
 
 
 func _dialog(parent: Control, minimum: Vector2, accent: Color, margin_x: int, margin_y: int) -> VBoxContainer:
@@ -1990,6 +2021,9 @@ func show_panel(name: String, fade: float = 0.0) -> void:
 	var panel: Control = _panels[name]
 	panel.visible = true
 	panel.modulate = Color.WHITE
+	# Settings screens settle onto the veil rather than cutting in.
+	if name in TITLE_SUBSCREENS:
+		fade = maxf(fade, 0.2)
 	if fade > 0.0 and not Feedback.motion_reduced:
 		panel.modulate = Color(1.0, 1.0, 1.0, 0.0)
 		var tween := _ui_tween()
@@ -1998,8 +2032,9 @@ func show_panel(name: String, fade: float = 0.0) -> void:
 		_set_title_controls_open(false)
 		# Only a real arrival replays the reveal; stepping back from a
 		# title sub-screen must not grey the menu out again.
-		_title_tableau.arrive(not (_last_panel in ["forge", "options", "keys"]))
+		_title_tableau.arrive(not (_last_panel in TITLE_SUBSCREENS))
 		_celebrate_new_victories()
+	_underlay_title(name in TITLE_SUBSCREENS and (_last_panel == "title" or _title_under))
 	_last_panel = name
 	if name != "pause":
 		hide_room_clear()
@@ -2009,6 +2044,22 @@ func show_panel(name: String, fade: float = 0.0) -> void:
 		var buttons: Array = panel.get_meta("buttons")
 		_arm_buttons(buttons, 0.9, buttons[0])
 	_focus_first_control(panel)
+
+
+## Screens the title opens. Opened from the title they lie on its tableau,
+## veiled, instead of replacing it.
+const TITLE_SUBSCREENS := ["forge", "options", "keys"]
+## Whether the title is showing beneath a sub-screen.
+var _title_under := false
+
+
+## Keep the title's tableau up beneath a sub-screen with its menu hidden, so
+## nothing under the veil can take focus; or give the title its menu back.
+func _underlay_title(under: bool) -> void:
+	_title_under = under
+	_title_holder.visible = not under
+	if under:
+		(_panels["title"] as Control).visible = true
 
 
 func hide_panel(name: String) -> void:
