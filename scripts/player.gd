@@ -37,6 +37,11 @@ const PERFECT_PARRY_STAGGER := 0.9
 const PERFECT_PARRY_METER := 35.0
 const PERFECT_RIPOSTE_MUL := 1.5
 const PARRY_WHIFF_LAG := 0.10
+## Presses held for a moment (seconds), so a parry, lance, flask or ignition
+## tapped during another move still happens as soon as that move allows it.
+const PRESS_BUFFER := { "parry": 0.10, "special": 0.12, "heal": 0.10, "ignite": 0.12 }
+## The last stretch of a dash (seconds) that can flow straight into a parry or swing.
+const DASH_CANCEL_TAIL := 0.05
 
 signal hp_changed(hp: float, max_hp: float)
 signal special_changed(value: float, maximum: float)
@@ -67,6 +72,8 @@ var atk_phase := "none"  # startup | active | recover | none
 var atk_time := 0.0
 var atk_hit: Dictionary = {}
 var attack_buffer := 0.0
+## Seconds each PRESS_BUFFER action stays pending.
+var _pressed := { "parry": 0.0, "special": 0.0, "heal": 0.0, "ignite": 0.0 }
 var _queued_attack := false
 var dash_cd := 0.0
 var _dash_buffer := 0.0
@@ -203,6 +210,7 @@ func _physics_process(delta: float) -> void:
 		attack_buffer = 0.0
 		jump_buffer = 0.0
 		_dash_buffer = 0.0
+		_clear_presses()
 	_anim_time += delta
 	_prev_vy = velocity.y
 	if _land_squash > 0.0: _land_squash -= delta
@@ -230,6 +238,11 @@ func _physics_process(delta: float) -> void:
 		jump_buffer = Content.P_JUMP_BUFFER
 	if not controls_locked and Input.is_action_just_pressed("dash"):
 		_dash_buffer = Content.P_DASH_BUFFER
+	for action in PRESS_BUFFER:
+		if not controls_locked and Input.is_action_just_pressed(action):
+			_pressed[action] = PRESS_BUFFER[action]
+		else:
+			_pressed[action] = maxf(0.0, _pressed[action] - delta)
 	combo_timer = maxf(0.0, combo_timer - delta)
 
 	match state:
@@ -305,31 +318,44 @@ func _step_locomotion(delta: float, controls_locked: bool = false) -> void:
 	if not controls_locked and _dash_buffer > 0.0 and dash_cd <= 0.0:
 		_begin_dash()
 		return
-	# Parry
-	if not controls_locked and Input.is_action_just_pressed("parry") and parry_cd <= 0.0:
+	if parry_cd <= 0.0 and _take_press("parry"):
 		_begin_parry()
 		return
-	# Falling never changes the player's intent: only Down + blade commits a slam.
 	if attack_buffer > 0.0:
-		attack_buffer = 0.0
-		if not is_on_floor() and Input.is_action_pressed("move_down"):
-			_begin_slam()
-			return
-		_begin_attack()
+		_use_attack_press()
 		return
-	# Special
-	if not controls_locked and Input.is_action_just_pressed("special") and special >= Content.P_SPECIAL_COST:
+	if special >= Content.P_SPECIAL_COST and _take_press("special"):
 		_do_special()
 		return
-	if not controls_locked and Input.is_action_just_pressed("ignite") and special >= max_special:
+	if special >= max_special and _take_press("ignite"):
 		_do_graveflame()
 		return
-	# Flask heal
-	if not controls_locked and Input.is_action_just_pressed("heal"):
+	# A flask press that cannot drink stays pending instead of eating this step.
+	if _can_heal() and _take_press("heal"):
 		_begin_heal()
 		return
 	move_and_slide()
 	_floor_and_wall_tracking()
+
+## True (and spent) when `action` was pressed within its PRESS_BUFFER time.
+func _take_press(action: String) -> bool:
+	if _pressed[action] <= 0.0:
+		return false
+	_pressed[action] = 0.0
+	return true
+
+func _clear_presses() -> void:
+	for action in _pressed:
+		_pressed[action] = 0.0
+
+## Spend the buffered blade press. Falling never changes the player's intent:
+## only Down + blade in the air commits a slam.
+func _use_attack_press() -> void:
+	attack_buffer = 0.0
+	if not is_on_floor() and Input.is_action_pressed("move_down"):
+		_begin_slam()
+	else:
+		_begin_attack()
 
 ## Shared by locomotion and attack recovery; consumes an existing jump, never
 ## invents another air jump or removes startup/active-frame commitment.
@@ -451,6 +477,10 @@ func _begin_attack(force_chain: bool = false) -> void:
 	var def: Dictionary = Content.RIPOSTE if _riposte_attack else Content.COMBO[attack_index]
 	attack_buffer = 0.0
 	_queued_attack = false
+	# A chained swing turns to the held direction; the riposte keeps its mark.
+	var held := Input.get_axis("move_left", "move_right")
+	if held != 0.0 and not _riposte_attack:
+		facing = signf(held)
 	state = State.ATTACK
 	atk_phase = "startup"
 	atk_time = def.startup
@@ -469,12 +499,11 @@ func _step_attack(delta: float) -> void:
 		_begin_dash()
 		return
 	if atk_phase == "recover" and _try_buffered_jump():
-		_deactivate_hitbox()
-		atk_phase = "none"
-		_queued_attack = false
-		attack_index = -1
-		combo_timer = 0.0
-		state = State.LOCOMOTION
+		_drop_combo()
+		return
+	if atk_phase == "recover" and parry_cd <= 0.0 and _take_press("parry"):
+		_drop_combo()
+		_begin_parry()
 		return
 	velocity.y += Content.GRAVITY * delta
 	var air_dir := Input.get_axis("move_left", "move_right")
@@ -483,17 +512,19 @@ func _step_attack(delta: float) -> void:
 	velocity.x = move_toward(velocity.x, target_x, drag * delta)
 	var def: Dictionary = get_meta("atk_def")
 	atk_time -= delta
+	# A queued swing links in halfway through recovery (never after the finisher).
+	var linked := _queued_attack and atk_time <= float(def.recover) * 0.5
 	if atk_phase == "startup" and atk_time <= 0.0:
 		atk_phase = "active"
 		atk_time = def.active
 		_activate_hitbox(def)
 	elif atk_phase == "active":
-		_scan_attack_hits(def)
+		_scan_attack_hits(def, _attack_area.get_overlapping_areas())
 		if atk_time <= 0.0:
 			atk_phase = "recover"
 			atk_time = def.recover
 			_deactivate_hitbox()
-	elif atk_phase == "recover" and atk_time <= 0.0:
+	elif atk_phase == "recover" and (atk_time <= 0.0 or linked):
 		atk_phase = "none"
 		if _queued_attack and not is_finisher():
 			_begin_attack(true)
@@ -503,6 +534,15 @@ func _step_attack(delta: float) -> void:
 		attack_index = -1 if def.window <= 0.0 else attack_index
 	move_and_slide()
 	_floor_and_wall_tracking()
+
+## Leave the combo for a recovery cancel: the next swing starts from the cut.
+func _drop_combo() -> void:
+	_deactivate_hitbox()
+	atk_phase = "none"
+	_queued_attack = false
+	attack_index = -1
+	combo_timer = 0.0
+	state = State.LOCOMOTION
 
 func _activate_hitbox(def: Dictionary) -> void:
 	var origin := Vector2(facing * 8.0, -8.0)
@@ -518,14 +558,27 @@ func _activate_hitbox(def: Dictionary) -> void:
 		var wave_pos := global_position + Vector2(facing * 34.0, -8.0)
 		var wave_life := 0.32 if _flame_time > 0.0 else 0.26
 		emit_signal("projectile_requested", "player", wave_pos, Vector2(facing * 560.0, 0.0), 18.0 * _damage_mul(), 320.0, 2, wave_life, Content.PAL.player_accent)
+	_scan_attack_hits(def, _blade_touching())
+
+## Hurtboxes under the blade right now. The sensor's own overlap list fills
+## only on the next physics step, which would cost the swing its first frame.
+func _blade_touching() -> Array:
+	var query := PhysicsShapeQueryParameters2D.new()
+	query.shape = _atk_rect
+	query.transform = _atk_shape.global_transform
+	query.collision_mask = _attack_area.collision_mask
+	query.collide_with_areas = true
+	query.collide_with_bodies = false
+	return get_world_2d().direct_space_state.intersect_shape(query).map(func(hit): return hit.collider)
 
 func _deactivate_hitbox() -> void:
 	_atk_shape.disabled = true
 	_attack_area.monitoring = false
 	_draw_attack = false
 
-func _scan_attack_hits(def: Dictionary) -> void:
-	for area in _attack_area.get_overlapping_areas():
+## Land the swing on every hurtbox in `areas` it has not struck yet.
+func _scan_attack_hits(def: Dictionary, areas: Array) -> void:
+	for area in areas:
 		if not is_instance_valid(area): continue
 		var ateam = area.get_meta("team")
 		if ateam == null or ateam == "player": continue
@@ -698,6 +751,8 @@ func _begin_dash() -> void:
 func _step_dash(delta: float) -> void:
 	dash_time -= delta
 	velocity.y = 0.0
+	if dash_time <= DASH_CANCEL_TAIL and _cancel_dash_tail():
+		return
 	if dash_time <= 0.0:
 		state = State.LOCOMOTION
 		velocity.x *= 0.5
@@ -707,6 +762,18 @@ func _step_dash(delta: float) -> void:
 		emit_signal("action_feedback", "dash_trail", global_position)
 		if bool(build.get("cinder_trail", false)) and is_on_floor():
 			emit_signal("action_feedback", "cinder", global_position + Vector2(0.0, Content.P_BODY_H * 0.5))
+
+## The dash's tail flows straight into a buffered parry or blade press.
+func _cancel_dash_tail() -> bool:
+	if parry_cd <= 0.0 and _take_press("parry"):
+		velocity.x *= 0.5
+		_begin_parry()
+	elif attack_buffer > 0.0:
+		velocity.x *= 0.5
+		_use_attack_press()
+	else:
+		return false
+	return true
 
 # --- Parry ---
 ## The deflect window's full length, with any boon that widens it.
@@ -811,9 +878,11 @@ func _close_parry() -> void:
 	_parry_area.monitoring = false
 
 # --- Healing flask ---
+## A flask can be drunk: a charge is left and there is health to restore.
+func _can_heal() -> bool:
+	return flask_charges > 0 and float(build.hp) < float(build.max_hp)
+
 func _begin_heal() -> void:
-	if flask_charges <= 0 or float(build.hp) >= float(build.max_hp):
-		return
 	state = State.HEAL
 	_heal_time = Content.P_HEAL_TIME
 	velocity.x *= 0.2
@@ -1022,6 +1091,7 @@ func respawn_at(pos: Vector2, reset_resources: bool = false) -> void:
 	attack_index = -1
 	jump_buffer = 0.0
 	_dash_buffer = 0.0
+	_clear_presses()
 	combo_timer = 0.0
 	atk_phase = "none"
 	atk_time = 0.0
@@ -1050,6 +1120,7 @@ func suppress_gameplay_input(frames: int = 2) -> void:
 	_input_lock_frames = maxi(_input_lock_frames, frames)
 	jump_buffer = 0.0
 	_dash_buffer = 0.0
+	_clear_presses()
 
 # --- Drawing ---
 

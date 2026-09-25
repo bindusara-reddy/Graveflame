@@ -95,7 +95,7 @@ const FLASK_PER_ROOM := 1
 
 # --- Combo: three swings. Times in seconds. ---
 const COMBO := [
-	{ "name": "cut",   "startup": 0.06, "active": 0.08, "recover": 0.16, "damage": 12.0, "knock": 220.0, "range": 64.0,  "window": 0.32, "lunge": 150.0 },
+	{ "name": "cut",   "startup": 0.045, "active": 0.08, "recover": 0.16, "damage": 12.0, "knock": 220.0, "range": 64.0,  "window": 0.32, "lunge": 150.0 },
 	{ "name": "cleave","startup": 0.08, "active": 0.10, "recover": 0.20, "damage": 16.0, "knock": 300.0, "range": 74.0,  "window": 0.34, "lunge": 185.0 },
 	{ "name": "finish","startup": 0.10, "active": 0.12, "recover": 0.26, "damage": 24.0, "knock": 460.0, "range": 84.0,  "window": 0.0, "lunge": 235.0 },
 ]

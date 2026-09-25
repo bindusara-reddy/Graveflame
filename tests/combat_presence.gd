@@ -18,7 +18,8 @@ func run() -> void:
 	await test_breakable_crypt()
 	await test_impact_grammar()
 	await test_parry_tiers()
-	release(["attack", "parry"])
+	await test_buffers_and_cancels()
+	release(["attack", "parry", "move_left"])
 	Feedback.motion_reduced = false
 	await finish("COMBAT_PRESENCE")
 
@@ -185,6 +186,49 @@ func test_parry_tiers() -> void:
 	check(p.state == Player.State.PARRY and not p._parry_area.monitoring, "a whiffed parry holds its stance past the window")
 	await ticks(8)
 	check(p.state == Player.State.LOCOMOTION, "a whiffed parry lets go after its short lag")
+
+## Ticks until `done` holds or `limit` frames pass; true when it held.
+func ticks_until(done: Callable, limit := 60) -> bool:
+	for i in range(limit):
+		if done.call():
+			return true
+		await ticks(1)
+	return done.call()
+
+## Presses made mid-move are honoured once the move allows; a queued swing
+## links in halfway through recovery and turns to the held direction.
+func test_buffers_and_cancels() -> void:
+	var p := game.player
+	p.respawn_at(Vector2(480.0, Content.FLOOR_Y - Content.P_BODY_H * 0.5))
+	p.facing = 1.0
+	await ticks(80)
+	await hold_action("attack")
+	await ticks_until(func(): return p.atk_phase == "recover")
+	await hold_action("parry")
+	check(p.state == Player.State.PARRY, "a parry pressed in blade recovery cancels into the parry")
+	await ticks(40)
+	await hold_action("attack")
+	Input.action_press("move_left")
+	await hold_action("attack")
+	var cut: Dictionary = Content.COMBO[0]
+	var linked: bool = await ticks_until(func(): return p.attack_index == 1, int((cut.startup + cut.active + cut.recover * 0.5) * 60.0) + 2)
+	Input.action_release("move_left")
+	check(linked, "a queued swing links in halfway through the cut's recovery")
+	check(p.facing == -1.0, "a chained swing turns to the held direction")
+	await ticks(60)
+	await hold_action("dash")
+	await ticks(7)
+	await hold_action("parry")
+	await ticks(2)
+	check(p.state == Player.State.PARRY, "a parry pressed late in a dash flows out of it")
+	await ticks(40)
+	p.build.hp = float(p.build.max_hp) - 20.0
+	await hold_action("attack")
+	await ticks_until(func(): return p.atk_phase == "recover" and p.atk_time < 0.06)
+	await hold_action("heal")
+	await ticks_until(func(): return p.state != Player.State.ATTACK and p.state != Player.State.LOCOMOTION, 20)
+	check(p.state == Player.State.HEAL, "a flask pressed during a swing is drunk when it ends")
+	await ticks(40)
 
 func test_breakable_crypt() -> void:
 	var props := game.room.props
