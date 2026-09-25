@@ -33,15 +33,12 @@ func deflect() -> void:
 func test_riposte() -> void:
 	var p := game.player
 	await deflect()
-	var window = p.get("riposte_time")
-	check(window != null and float(window) > 0.0, "confirmed deflection opens a timed riposte opportunity")
-	if window == null:
-		return
+	check(p.riposte_time > 0.0, "confirmed deflection opens a timed riposte opportunity")
 	await hold_action("attack")
 	await ticks(1)
 	check(p.state == Player.State.ATTACK, "attack input cancels a successful parry into a counterattack")
-	check(bool(p.get("_riposte_attack")), "the counterattack is the distinct riposte, not the normal combo")
-	check(is_zero_approx(float(p.get("riposte_time"))), "starting the riposte consumes its opportunity once")
+	check(p._riposte_attack, "the counterattack is the distinct riposte, not the normal combo")
+	check(is_zero_approx(p.riposte_time), "starting the riposte consumes its opportunity once")
 	var attack: Dictionary = p.get_meta("atk_def", {})
 	check(float(attack.get("damage", 0.0)) > float(Content.COMBO[2].damage), "riposte hits harder than the base combo finisher")
 	check(float(attack.get("range", 0.0)) > float(Content.COMBO[2].range), "riposte reaches a deflected opponent")
@@ -56,24 +53,24 @@ func test_riposte() -> void:
 	target.queue_free()
 	await ticks(35)
 	await hold_action("attack")
-	check(not bool(p.get("_riposte_attack")) and p.attack_index == 0, "following attack returns to the normal combo")
+	check(not p._riposte_attack and p.attack_index == 0, "following attack returns to the normal combo")
 	await ticks(35)
 	await deflect()
 	await ticks(95)
-	check(is_zero_approx(float(p.get("riposte_time"))), "unused riposte expires instead of becoming a permanent buff")
+	check(is_zero_approx(p.riposte_time), "unused riposte expires instead of becoming a permanent buff")
 	await hold_action("parry")
 	await ticks(12)
-	check(is_zero_approx(float(p.get("riposte_time"))), "whiffing a parry does not award a counterattack")
+	check(is_zero_approx(p.riposte_time), "whiffing a parry does not award a counterattack")
 	await ticks(32)
 	await deflect()
 	p.respawn_at(game.room.get_entry_point())
-	check(is_zero_approx(float(p.get("riposte_time"))), "room travel discards a banked riposte")
+	check(is_zero_approx(p.riposte_time), "room travel discards a banked riposte")
 	await ticks(32)
 	await deflect()
 	await ticks(14)
 	p.iframes = 0.0
 	p.take_damage(1.0, Vector2.LEFT, 0.0)
-	check(is_zero_approx(float(p.get("riposte_time"))), "taking an unblocked hit loses the riposte opportunity")
+	check(is_zero_approx(p.riposte_time), "taking an unblocked hit loses the riposte opportunity")
 
 func test_dash_trail() -> void:
 	var p := game.player
@@ -124,9 +121,9 @@ func test_riposte_feedback() -> void:
 	check(game.feedback._particles.filter(func(v): return v.kind == "riposte").is_empty(), "counterattack effect cleans itself up")
 
 func test_breakable_crypt() -> void:
-	var props = game.room.get("props")
-	check(props != null and props.size() >= 3, "the real opening chamber contains breakable crypt objects")
-	if props == null or props.size() < 3:
+	var props := game.room.props
+	check(props.size() >= 3, "the real opening chamber contains breakable crypt objects")
+	if props.size() < 3:
 		return
 	var p := game.player
 	var cells_before := Save.get_cells()
@@ -172,9 +169,9 @@ func test_breakable_crypt() -> void:
 		var room := Room.new()
 		room.setup(tmpl, false, null, 991)
 		root.add_child(room)
-		var count: int = room.get("props").size()
+		var count: int = room.props.size()
 		check(count > 0 and count <= 18, "crypt dressing is bounded in " + str(tmpl.tag))
-		for prop in room.get("props"):
+		for prop in room.props:
 			var supported := false
 			for platform: Rect2 in tmpl.platforms:
 				if is_equal_approx(prop.position.y, platform.position.y) and prop.position.x >= platform.position.x + 24.0 and prop.position.x <= platform.end.x - 24.0:
