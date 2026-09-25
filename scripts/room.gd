@@ -212,10 +212,8 @@ func _build_props() -> void:
 			var point := Vector2(platform.position.x + platform.size.x * (float(i) + 0.5) / float(count) + nudge, platform.position.y)
 			if absf(point.x - entry.x) < 85.0 or absf(point.x - exit.x) < 65.0:
 				continue
-			# Keep every rift's arch clear, not just the primary one.
-			var at_rift := exits.any(func(e): return absf(point.x - (e.rect as Rect2).get_center().x) < 65.0)
 			var against_wall := walls.any(func(wall: Rect2): return wall.grow(24.0).has_point(point + Vector2(0.0, -24.0)))
-			if at_rift or against_wall:
+			if against_wall or not _clear_of_rifts(point):
 				continue
 			var prop := CryptProp.new()
 			prop.position = point
@@ -464,7 +462,7 @@ func light_points() -> Array:
 	match tag:
 		"intro":
 			out.append({ "pos": Vector2(260.0, Content.FLOOR_Y - 12.0), "radius": 70.0, "color": torch, "alpha": 0.22, "rate": 9.0, "phase": 0.0 })
-			out.append({ "pos": Vector2(1010.0, Content.FLOOR_Y - 12.0), "radius": 60.0, "color": torch, "alpha": 0.2, "rate": 7.0, "phase": 1.3 })
+			out.append({ "pos": Vector2(860.0, Content.FLOOR_Y - 12.0), "radius": 60.0, "color": torch, "alpha": 0.2, "rate": 7.0, "phase": 1.3 })
 		"gap":
 			out.append({ "pos": Vector2(150.0, Content.FLOOR_Y - 12.0), "radius": 60.0, "color": torch, "alpha": 0.2, "rate": 8.0, "phase": 0.4 })
 		"tiers":
@@ -485,9 +483,9 @@ func light_points() -> Array:
 	for prop in props:
 		if is_instance_valid(prop) and prop.flame_height() > 0.0 and not prop.broken:
 			out.append({ "pos": prop.global_position + Vector2(0.0, -prop.flame_height()), "radius": 72.0, "color": Color("ffac67"), "alpha": 0.16, "rate": 8.0, "phase": prop.position.x })
-	_light_points_cache = out
+	_light_points_cache = out.filter(func(lp: Dictionary) -> bool: return _clear_of_rifts(lp.pos))
 	_light_points_dirty = false
-	return out
+	return _light_points_cache
 
 func exit_center() -> Vector2:
 	return _exit_rect.get_center()
@@ -510,6 +508,13 @@ func _draw_masonry_layer(ci: CanvasItem) -> void:
 		var wr := Rect2(walls[wi].position, walls[wi].size)
 		_draw_masonry(ci, wr, accent, 40 + wi, m)
 		ci.draw_line(Vector2(wr.position.x, wr.position.y), Vector2(wr.position.x, wr.end.y), Color(accent.r, accent.g, accent.b, 0.65), 3.0)
+		# A lit capital on corbels, so the wall's top reads as built, not cut off.
+		var cap := Rect2(wr.get_center().x - 22.0, wr.position.y - 10.0, 44.0, 10.0)
+		for side: float in [-1.0, 1.0]:
+			var corner := Vector2(wr.get_center().x + side * wr.size.x * 0.5, wr.position.y)
+			ci.draw_colored_polygon(PackedVector2Array([corner, corner + Vector2(side * 7.0, 0.0), corner + Vector2(0.0, 12.0)]), (m.edge as Color).darkened(0.1))
+		ci.draw_rect(cap, (m.edge as Color).lightened(0.2))
+		ci.draw_line(cap.position, Vector2(cap.end.x, cap.position.y), VFX.RIM, 1.5)
 
 ## Everything that moves or reacts, over the BackDecor and Masonry layers.
 func _draw() -> void:
@@ -814,7 +819,14 @@ func _draw_rift(c: Vector2, kind: String, m: Dictionary, near: bool, salt: int) 
 
 # --- Props --------------------------------------------------------------------
 
+## Hand-placed floor dressing never stands in a rift's doorway, whichever rifts
+## the chamber rolled.
+func _clear_of_rifts(pos: Vector2) -> bool:
+	return not exits.any(func(e: Dictionary) -> bool: return (e.rect as Rect2).grow(45.0).has_point(pos))
+
 func _candles(base: Vector2, n: int, t: float, m: Dictionary) -> void:
+	if not _clear_of_rifts(base):
+		return
 	for i in range(n):
 		var h := VFX.hash01(i, 101)
 		var x := base.x + (float(i) - float(n - 1) * 0.5) * 11.0 + (h - 0.5) * 4.0
@@ -825,6 +837,8 @@ func _candles(base: Vector2, n: int, t: float, m: Dictionary) -> void:
 	draw_rect(Rect2(base.x - float(n) * 6.0, base.y - 2.0, float(n) * 12.0, 3.0), Color(0.0, 0.0, 0.0, 0.35))
 
 func _bone_pile(base: Vector2, m: Dictionary) -> void:
+	if not _clear_of_rifts(base):
+		return
 	var bone := Color("bdb3a3").lerp(m.stone, 0.35)
 	draw_colored_polygon(PackedVector2Array([base + Vector2(-26.0, 0.0), base + Vector2(-14.0, -10.0), base + Vector2(2.0, -14.0), base + Vector2(18.0, -8.0), base + Vector2(28.0, 0.0)]), bone.darkened(0.45))
 	draw_line(base + Vector2(-18.0, -4.0), base + Vector2(4.0, -9.0), bone, 3.0, true)
@@ -974,6 +988,8 @@ func _stain(base: Vector2, w: float, color: Color) -> void:
 	VFX.draw_ellipse(self, base + Vector2(w * 0.2, -1.0), w * 0.22, 2.5, color)
 
 func _fallen_blade(base: Vector2) -> void:
+	if not _clear_of_rifts(base):
+		return
 	draw_line(base + Vector2(-16.0, -3.0), base + Vector2(14.0, -12.0), Color("7f8896"), 3.0, true)
 	draw_line(base + Vector2(-13.0, -8.0), base + Vector2(-9.0, 0.0), Color("8a6a3a"), 3.0, true)
 
@@ -1151,7 +1167,7 @@ func _draw_decor_front(tag: String, m: Dictionary) -> void:
 	match tag:
 		"intro":
 			_candles(Vector2(260.0, fy), 5, t, m)
-			_candles(Vector2(1010.0, fy), 3, t, m)
+			_candles(Vector2(860.0, fy), 3, t, m)
 			_fallen_blade(Vector2(700.0, fy))
 			_bone_pile(Vector2(1320.0, fy), m)
 		"gap":

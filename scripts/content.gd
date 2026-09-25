@@ -400,7 +400,8 @@ static var ROOM_TEMPLATES: Array = [
 			Rect2(480, FLOOR_Y - 150, 120, 30),
 			Rect2(680, FLOOR_Y - 280, 120, 30),
 		],
-		"walls": [ Rect2(360, 100, 30, 460), Rect2(890, 100, 30, 460) ],  # climbable wall surfaces
+		# Climbable wall surfaces, standing on the wall blocks below them.
+		"walls": [ Rect2(360, 100, 30, 500), Rect2(890, 100, 30, 500) ],
 		"hazards": [ Rect2(400, FLOOR_Y + 20, 560, 100) ],
 		# Keep the first wave clear of the entry ledge.
 		"slots": [ Vector2(1100, FLOOR_Y - 40), Vector2(540, FLOOR_Y - 190), Vector2(740, FLOOR_Y - 320) ],
