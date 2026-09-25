@@ -1585,7 +1585,6 @@ func _on_boss_shattered(pos: Vector2) -> void:
 	feedback.play("pyre")
 	feedback.play("elite", 0.667)  # the gong on G, in key
 	feedback.rumble(0.8, 1.0, 0.6)
-	ui.show_victory_card()
 
 func _on_slam_landed(pos: Vector2, _radius: float) -> void:
 	feedback.shake(8.0, 0.22)

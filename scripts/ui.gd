@@ -141,6 +141,8 @@ var _boss_phase_tween: Tween
 var _fade: ColorRect
 
 var _panels: Dictionary = {}
+## { panel, actions } while a results panel waits for held keys to lift.
+var _input_lock: Dictionary = {}
 var _upgrade_row: HBoxContainer
 var _forge_rows: VBoxContainer
 ## The options screen's reduced-motion box; the menu contracts toggle it.
@@ -821,7 +823,9 @@ func _build_victory() -> void:
 	var content := _dialog(panel, Vector2(760, 640), C_MINT, 48, 30)
 	content.add_theme_constant_override("separation", 10)
 
-	content.add_child(_make_label("WARDEN DEFEATED", 13, C_MINT))
+	var kicker := _make_label("WARDEN DEFEATED", 13, C_MINT)
+	content.add_child(kicker)
+	panel.set_meta("kicker_label", kicker)
 	content.add_child(_make_label("GRAVEFLAME ENDURES", 50, C_TEXT))
 	var closing := _make_label(Content.VICTORY_LINES[0], 17, C_MUTED)
 	content.add_child(closing)
@@ -829,6 +833,12 @@ func _build_victory() -> void:
 	content.add_child(_separator(C_MINT))
 	var again := _button("NEW RUN", "again", true, Vector2(230, 56))
 	_build_run_end_body(panel, content, Color("1f5b52"), "A brighter ember waits at the beginning.", again)
+	# A first win points to the vows, just above the parting line.
+	var vows := _make_label("VOWS AWAKEN AT THE FORGE.", 14, C_GOLD)
+	vows.visible = false
+	content.add_child(vows)
+	content.move_child(vows, content.get_child_count() - 3)
+	panel.set_meta("vows_label", vows)
 
 
 ## Everything below the verdict on the game-over and victory screens. The
@@ -1147,6 +1157,7 @@ func _build_title_stack(text: String, size: int) -> Control:
 
 
 func _process(delta: float) -> void:
+	_poll_input_lock()
 	# Firelight wobble on the title face and the menu fade-up during the tableau
 	# reveal; both frozen under reduced motion (the tableau hides its own embers).
 	if _title_top_label == null:
@@ -1568,6 +1579,47 @@ func hide_all_panels() -> void:
 	hide_room_clear()
 
 
+## The victory card names which flame this was ("THE FOURTH FLAME") and, on the
+## first win, tells the player the vows have woken in the Forge.
+func set_victory_extras(ordinal: String, first: bool) -> void:
+	var panel: Control = _panels["victory"]
+	(panel.get_meta("kicker_label") as Label).text = "WARDEN DEFEATED  ·  " + ordinal if ordinal != "" else "WARDEN DEFEATED"
+	(panel.get_meta("vows_label") as Label).visible = first
+
+
+## Keys still held from the ending (a gather, a skip) must not press a results
+## button: the panel's buttons stay disabled until none of `actions` is held,
+## then its first button takes focus. An empty panel name lifts any lock.
+func lock_until_released(panel_name: String, actions: Array) -> void:
+	_lift_input_lock()
+	if not _panels.has(panel_name):
+		return
+	_input_lock = { "panel": panel_name, "actions": actions }
+	for button: Button in _panels[panel_name].find_children("*", "Button", true, false):
+		button.disabled = true
+		button.focus_mode = Control.FOCUS_NONE
+
+
+func _poll_input_lock() -> void:
+	if _input_lock.is_empty():
+		return
+	for action in _input_lock.actions:
+		if Input.is_action_pressed(action):
+			return
+	var panel: Control = _panels[_input_lock.panel]
+	_lift_input_lock()
+	_focus_first_control(panel)
+
+
+func _lift_input_lock() -> void:
+	if _input_lock.is_empty():
+		return
+	for button: Button in _panels[_input_lock.panel].find_children("*", "Button", true, false):
+		button.disabled = false
+		button.focus_mode = Control.FOCUS_ALL
+	_input_lock = {}
+
+
 ## Show a one-time lesson. Re-showing replaces the current one rather than
 ## stacking, so two triggers in the same second cannot queue up noise.
 func show_hint(text: String, hold: float = 4.5) -> void:
@@ -1901,6 +1953,9 @@ func _build_vow_rows() -> void:
 	if not Save.vows_unlocked():
 		_forge_rows.add_child(_make_label("Defeat the Ember Warden to swear vows.", 12, C_MUTED, HORIZONTAL_ALIGNMENT_LEFT))
 		return
+	var record := Save.load_save()
+	var kept: Array = record.get("vows_kept_ever", [])
+	_forge_rows.add_child(_make_label(_roll_line(record), 12, C_GOLD, HORIZONTAL_ALIGNMENT_LEFT))
 	var sworn := Save.get_vows()
 	_forge_rows.add_child(_make_label("Sworn vows make the next descent harsher.  Score ×%s" % String.num(Content.vow_score_multiplier(sworn), 2), 12, C_MUTED, HORIZONTAL_ALIGNMENT_LEFT))
 	for i in range(Content.VOWS.size()):
@@ -1914,9 +1969,50 @@ func _build_vow_rows() -> void:
 		line.add_child(copy)
 		copy.add_child(_make_label(str(v.title).to_upper(), 14, C_RED if on else C_TEXT, HORIZONTAL_ALIGNMENT_LEFT))
 		copy.add_child(_make_label("%s   +%d%% score" % [str(v.desc), roundi(float(v.score) * 100.0)], 12, C_MUTED, HORIZONTAL_ALIGNMENT_LEFT))
+		if kept.has(str(v.id)):
+			line.add_child(_kept_seal())
 		var toggle := _button("SWORN" if on else "SWEAR", "Vow%d" % i, on, Vector2(132, 40), "")
 		toggle.pressed.connect(vow_toggled.emit.bind(str(v.id)))
 		line.add_child(toggle)
+
+
+## The Forge's tally of every descent: flames won, knights fallen (a "+" when
+## deaths from before the count began are unknown) and the hardest oath kept.
+static func _roll_line(record: Dictionary) -> String:
+	var flames := int(record.get("victories", 0))
+	var fallen := "%d%s" % [int(record.get("falls", 0)), "+" if bool(record.get("falls_legacy", false)) else ""]
+	var oath := "HIGHEST OATH %d OF %d" % [int(record.get("best_vows", 0)), Content.VOWS.size()]
+	if bool(record.get("oath_kept", false)):
+		oath = "THE FIVEFOLD OATH IS KEPT"
+	return "THE ROLL  ·  %d %s  ·  %s FALLEN  ·  %s" % [flames, "FLAME" if flames == 1 else "FLAMES", fallen, oath]
+
+
+## The seal and its word, so a kept vow never reads by colour alone.
+func _kept_seal() -> Control:
+	var mark := HBoxContainer.new()
+	mark.add_theme_constant_override("separation", 6)
+	mark.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	var seal := KeptSeal.new()
+	seal.custom_minimum_size = Vector2(22.0, 22.0)
+	seal.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+	seal.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	mark.add_child(seal)
+	mark.add_child(_make_label("KEPT", 11, Color("c46f7b"), HORIZONTAL_ALIGNMENT_LEFT))
+	return mark
+
+
+## Wax pressed beside a vow that has been kept through a won descent: a
+## scalloped disc with an embossed flame.
+class KeptSeal extends Control:
+	func _draw() -> void:
+		var c := size * 0.5
+		var rim := PackedVector2Array()
+		for i in range(20):
+			var a := TAU * float(i) / 20.0
+			rim.append(c + Vector2(cos(a), sin(a)) * (11.0 if i % 2 == 0 else 9.6))
+		draw_colored_polygon(rim, Color("8e3c49"))
+		draw_circle(c, 7.0, Color("a14b58"))
+		VFX.draw_flame(self, c + Vector2(0.0, 5.0), 10.0, 7.0, 0.0, 0.0, Color("5c1d27"), Color("c46f7b"))
 
 
 ## Rank as a row of small lozenges: filled for owned, hollow for the rest.
@@ -2006,11 +2102,6 @@ func set_hud_faded(faded: bool) -> void:
 		return
 	_hud_tween = _ui_tween()
 	_hud_tween.tween_property(_hud, "modulate:a", 0.0, 0.5)
-
-
-## The Warden's fall, carried by the same card that announced it.
-func show_victory_card() -> void:
-	show_boss_intro("THE WARDEN FALLS", "THE EMBER THRONE IS SILENT", 2.2)
 
 
 func show_boss_intro(boss_name: String, subtitle: String, hold: float = 2.4) -> void:
