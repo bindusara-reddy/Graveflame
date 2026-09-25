@@ -410,7 +410,9 @@ func _story_text() -> Array:
 	var out: Array = Content.EPITAPHS + [Content.EPITAPH_THRONE]
 	for answers in Content.EPITAPH_ANSWERS.values():
 		out += (answers as Dictionary).values()
-	out += Content.INSCRIPTION + Content.LITANY + Content.VICTORY_LINES + Content.FINALE_TEXT.values()
+	out += Content.INSCRIPTION + Content.LITANY + Content.FINALE_TEXT.values()
+	for lines in Content.ENDING_LINES.values():
+		out += lines
 	for lines in Content.LITANY_AFTER.values():
 		out += lines
 	out += [Content.WARDEN_BURNS, Content.WARDEN_IGNITES, Content.hoard_line(3)]

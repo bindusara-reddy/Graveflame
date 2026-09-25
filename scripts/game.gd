@@ -420,6 +420,9 @@ func in_finale() -> bool:
 func _on_finale_finished(skipped: bool) -> void:
 	feedback.stop_world_voices()
 	get_tree().paused = true
+	# The closing line waits for the choice, so it tells what the knight did.
+	_stats["line"] = Content.ending_line(Save.get_last_ending(), _seed + int(_stats.kills))
+	ui.show_run_summary(_summary_shown(), "victory")
 	ui.set_victory_extras(Content.flame_ordinal(int(finale.ctx.victories)), bool(finale.ctx.first))
 	ui.show_panel("victory", 0.0 if skipped else 0.6)
 	ui.lock_until_released("victory", RELEASE_ACTIONS)
@@ -2040,7 +2043,8 @@ func _finalize_summary() -> void:
 	}).broken
 	var pick := absi(_seed) + int(_stats.kills)
 	if won:
-		_stats["line"] = Content.VICTORY_LINES[pick % Content.VICTORY_LINES.size()]
+		# Written again once the knight chooses at the throne (_on_finale_finished).
+		_stats["line"] = ""
 	elif run != null and run.is_boss_room():
 		_stats["line"] = Content.EPITAPH_THRONE
 	else:

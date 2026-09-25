@@ -296,6 +296,7 @@ func _test_ending(ending: String, cut: String, seen: int, limit: float) -> void:
 			check(fin._sky.dawn == 1.0 and is_zero_approx(game._world_container.modulate.a), "%s: the dark keep gave way to a grey dawn" % tag)
 	_step_for(fin, 1.0)
 	check((game.ui._panels["victory"] as Control).visible and paused, "%s: the results open over a paused world" % tag)
+	check((Content.ENDING_LINES[ending] as Array).has(game._stats.line), "%s: the closing line tells this ending (%s)" % [tag, game._stats.line])
 	check(game.music._current == "title", "%s: the title theme returns" % tag)
 	await _settle_time()
 	check(Engine.time_scale == 1.0, "%s: real time runs at the panel" % tag)

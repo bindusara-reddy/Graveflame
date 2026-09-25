@@ -1181,7 +1181,7 @@ func _build_victory() -> void:
 	content.add_child(kicker)
 	panel.set_meta("kicker_label", kicker)
 	content.add_child(_make_label("GRAVEFLAME ENDURES", 50, C_TEXT))
-	var closing := _make_label(Content.VICTORY_LINES[0], 17, C_MUTED)
+	var closing := _make_label("", 17, C_MUTED)
 	content.add_child(closing)
 	panel.set_meta("line_label", closing)
 	content.add_child(_separator(C_MINT))

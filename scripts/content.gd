@@ -632,14 +632,18 @@ const EPITAPHS := [
 	"The dead down here still burn.",
 ]
 const EPITAPH_THRONE := "The Warden stokes its throne with your flame."
-## Picked at the killing blow, before the knight chooses what to do with the
-## throne, so each must hold true after any ending.
-const VICTORY_LINES := [
-	"No throne stays empty long.",
-	"What the keep takes, it takes again.",
-	"Your flame burns where the Warden's did.",
-	"The keep is quiet. It is listening.",
-]
+## The line under a won descent's results, picked once the knight has chosen,
+## so it always says what happened at the throne (see ending_line).
+const ENDING_LINES := {
+	"crown": ["The throne is warm again.", "A new Warden keeps the flame.", "Your crown. Your keep."],
+	"given": ["Every flame went home.", "The well is open to the sky.", "Only your flame is left below."],
+	"ended": ["The keep is dark.", "No throne. No Warden. No fire.", "The dark holds nothing now."],
+}
+
+## One closing line for `ending`, the same for the same descent (`pick` is seeded).
+static func ending_line(ending: String, pick: int) -> String:
+	var lines: Array = ENDING_LINES.get(ending, ENDING_LINES.given)
+	return str(lines[absi(pick) % lines.size()])
 
 # --- The story told on the way down ---
 ## The keep's own voice, never a word from outside it: test_runner scans every
