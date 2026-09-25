@@ -58,7 +58,6 @@ const P_SLAM_DAMAGE := 30.0
 const P_SLAM_KNOCK := 520.0
 const P_SLAM_RADIUS := 110.0
 const P_SLAM_VEL := 1500.0
-const P_SLAM_RECOVER := 0.28
 
 # --- Wall slide / wall jump ---
 const P_WALL_SLIDE_SPEED := 120.0
@@ -75,7 +74,7 @@ const PARRY_PROJECTILE_BOOST := 1.6  # deflected projectile damage multiplier
 const RIPOSTE_WINDOW := 1.2
 const RIPOSTE := {
 	"name": "riposte", "startup": 0.06, "active": 0.12, "recover": 0.24,
-	"damage": 34.0, "knock": 540.0, "range": 112.0, "arc": 1.4,
+	"damage": 34.0, "knock": 540.0, "range": 112.0,
 	"window": 0.0, "lunge": 360.0,
 }
 
@@ -89,9 +88,9 @@ const FLASK_PER_ROOM := 1
 
 # --- Combo: three swings. Times in seconds. ---
 const COMBO := [
-	{ "name": "cut",   "startup": 0.06, "active": 0.08, "recover": 0.16, "damage": 12.0, "knock": 220.0, "range": 64.0,  "arc": 1.6,  "window": 0.32, "lunge": 150.0 },
-	{ "name": "cleave","startup": 0.08, "active": 0.10, "recover": 0.20, "damage": 16.0, "knock": 300.0, "range": 74.0,  "arc": 1.8,  "window": 0.34, "lunge": 185.0 },
-	{ "name": "finish","startup": 0.10, "active": 0.12, "recover": 0.26, "damage": 24.0, "knock": 460.0, "range": 84.0,  "arc": 2.05, "window": 0.0, "lunge": 235.0 },
+	{ "name": "cut",   "startup": 0.06, "active": 0.08, "recover": 0.16, "damage": 12.0, "knock": 220.0, "range": 64.0,  "window": 0.32, "lunge": 150.0 },
+	{ "name": "cleave","startup": 0.08, "active": 0.10, "recover": 0.20, "damage": 16.0, "knock": 300.0, "range": 74.0,  "window": 0.34, "lunge": 185.0 },
+	{ "name": "finish","startup": 0.10, "active": 0.12, "recover": 0.26, "damage": 24.0, "knock": 460.0, "range": 84.0,  "window": 0.0, "lunge": 235.0 },
 ]
 
 # --- Enemy archetypes ---

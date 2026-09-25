@@ -9,7 +9,6 @@ const LIFE := 0.75
 
 var _halves: Array = []
 var _t := 0.0
-var _tangent := Vector2.RIGHT
 
 ## Half-plane mask: draws a large polygon on the +normal side of the cut and
 ## clips its children to it.
@@ -52,7 +51,6 @@ static func spawn(parent: Node, enemy, hit_dir: Vector2, rng_seed: int) -> Node2
 	var normal := Vector2(-tangent.y, tangent.x)
 	if normal.y > 0.0:
 		normal = -normal  # +normal is the upper piece
-	node._tangent = tangent
 	var edge_col: Color = Content.ELITE_COLOR if bool(enemy.elite) else Color("ff7a18")
 	for side: float in [1.0, -1.0]:
 		var mask := HalfMask.new()

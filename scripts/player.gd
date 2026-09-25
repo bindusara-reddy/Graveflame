@@ -54,15 +54,12 @@ var _attack_area: Area2D
 var _atk_shape: CollisionShape2D
 var _atk_rect := RectangleShape2D.new()
 var _draw_attack := false
-var _attack_origin := Vector2.ZERO
-var _attack_arc := 1.6
 var _attack_range := 64.0
 var _hurt_flash := 0.0
 var _run_model: RunModel
 var _owner_id := 0
 # --- Down-slam ---
 var _slam_active := false
-var _slam_recover := 0.0
 var _draw_slam_impact := 0.0
 # --- Wall slide ---
 var wall_sliding := false
@@ -208,7 +205,6 @@ func _physics_process(delta: float) -> void:
 	if parry_cd > 0.0: parry_cd -= delta
 	if _draw_parry > 0.0: _draw_parry -= delta
 	if _draw_slam_impact > 0.0: _draw_slam_impact -= delta
-	if _slam_recover > 0.0: _slam_recover -= delta
 	coyote = maxf(0.0, coyote - delta)
 	jump_buffer = maxf(0.0, jump_buffer - delta)
 	_dash_buffer = maxf(0.0, _dash_buffer - delta)
@@ -493,13 +489,12 @@ func _step_attack(delta: float) -> void:
 	_floor_and_wall_tracking()
 
 func _activate_hitbox(def: Dictionary) -> void:
-	_attack_origin = Vector2(facing * 8.0, -8.0)
+	var origin := Vector2(facing * 8.0, -8.0)
 	_atk_rect.size = Vector2(def.range, Content.P_BODY_H + 10.0)
-	_atk_shape.position = _attack_origin + Vector2(facing * def.range * 0.5, 0.0)
+	_atk_shape.position = origin + Vector2(facing * def.range * 0.5, 0.0)
 	_atk_shape.disabled = false
 	_attack_area.monitoring = true
 	_draw_attack = true
-	_attack_arc = def.arc
 	_attack_range = def.range
 	atk_hit.clear()
 	emit_signal("action_feedback", "swing_active", global_position)
@@ -559,7 +554,6 @@ func _step_slam(delta: float) -> void:
 	if is_on_floor():
 		_do_slam_impact()
 		_slam_active = false
-		_slam_recover = Content.P_SLAM_RECOVER
 		state = State.LOCOMOTION
 	# Cull if somehow below world
 	if global_position.y > Content.FLOOR_Y + 300:
@@ -574,7 +568,6 @@ func _do_slam_impact() -> void:
 	for prop in get_tree().get_nodes_in_group("breakable_prop"):
 		if is_instance_valid(prop) and prop.global_position.distance_to(center) <= radius:
 			prop.take_damage(base_dmg, Vector2(signf(prop.global_position.x - center.x), -0.7), Content.P_SLAM_KNOCK)
-	# Use a temporary Area2D circle query
 	var hit_any := false
 	for area in get_tree().get_nodes_in_group("enemy_hurtbox"):
 		if not is_instance_valid(area): continue
@@ -947,7 +940,6 @@ func respawn_at(pos: Vector2, reset_resources: bool = false) -> void:
 	_parry_hit.clear()
 	_draw_parry = 0.0
 	_slam_active = false
-	_slam_recover = 0.0
 	_draw_slam_impact = 0.0
 	_heal_time = 0.0
 	jumps_left = Content.P_MAX_JUMPS
