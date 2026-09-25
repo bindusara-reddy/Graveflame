@@ -1785,14 +1785,9 @@ func set_best(value: int) -> void:
 
 
 func setup_forge(cells: int) -> void:
-	var panel: Control = _panels.get("forge")
-	if panel == null:
-		return
-	var balance = panel.get_meta("balance_label", null)
-	if balance is Label:
-		(balance as Label).text = "AVAILABLE CELLS   %s" % _format_number(cells)
-	if _forge_rows == null:
-		return
+	var panel: Control = _panels["forge"]
+	var balance := panel.get_meta("balance_label") as Label
+	balance.text = "AVAILABLE CELLS   %s" % _format_number(cells)
 	_clear_children(_forge_rows)
 
 	var focus_target: Button = null
@@ -1837,11 +1832,8 @@ func setup_forge(cells: int) -> void:
 	_build_vow_rows()
 
 	if focus_target == null:
-		var back = panel.get_meta("back_button", null)
-		if back is Button:
-			focus_target = back as Button
-	if focus_target != null:
-		focus_target.grab_focus.call_deferred()
+		focus_target = panel.get_meta("back_button") as Button
+	focus_target.grab_focus.call_deferred()
 
 
 ## One ledger row in the forge; its edge colour marks what is owned or sworn.
@@ -1912,15 +1904,12 @@ class RankPips extends Control:
 
 
 func show_run_cells(cells_earned: int, panel_name: String, vows_kept: int = 0) -> void:
-	if not _panels.has(panel_name):
-		return
-	var panel: Control = _panels[panel_name]
-	var label = panel.get_meta("cells_label", null)
-	if label is Label:
-		(label as Label).text = "CELLS SECURED  +%s" % _format_number(cells_earned)
-		if vows_kept > 0:
-			(label as Label).text += "   ·   %d %s KEPT" % [vows_kept, "VOW" if vows_kept == 1 else "VOWS"]
-		(label as Label).visible = true
+	var label := (_panels[panel_name] as Control).get_meta("cells_label") as Label
+	label.text = "CELLS SECURED  +%s" % _format_number(cells_earned)
+	if vows_kept > 0:
+		var noun := "VOW" if vows_kept == 1 else "VOWS"
+		label.text += "   ·   %d %s KEPT" % [vows_kept, noun]
+	label.visible = true
 
 
 func set_streak(kills: int, frac: float, mult: float) -> void:
@@ -2011,26 +2000,20 @@ func fade_from_black(duration: float = 0.45, origin: Vector2 = Vector2(0.5, 0.55
 
 
 func show_run_summary(stats: Dictionary, panel_name: String) -> void:
-	if not _panels.has(panel_name):
-		return
 	var panel: Control = _panels[panel_name]
-	var line = panel.get_meta("line_label", null)
-	if line is Label and stats.has("line"):
-		(line as Label).text = str(stats.line)
+	if stats.has("line"):
+		(panel.get_meta("line_label") as Label).text = str(stats.line)
 	# The headline result is set before the grid so it never depends on it.
-	var score_label = panel.get_meta("score_label", null)
-	if score_label is Label:
-		(score_label as Label).text = _format_number(int(stats.get("score", 0)))
-	var best_label = panel.get_meta("best_label", null)
-	if best_label is Label:
-		# Set both text and colour every time: the panel is reused between runs,
-		# so a previous record's gold must not persist onto a lesser run.
-		var record := bool(stats.get("new_best", false))
-		(best_label as Label).text = "NEW BEST" if record else "BEST  %s" % _format_number(int(stats.get("best", 0)))
-		(best_label as Label).add_theme_color_override("font_color", C_GOLD if record else C_MUTED)
-	var labels = panel.get_meta("summary_labels", null)
-	if not (labels is Dictionary):
-		return
+	var score_label := panel.get_meta("score_label") as Label
+	score_label.text = _format_number(int(stats.get("score", 0)))
+	# Set both text and colour every time: the panel is reused between runs,
+	# so a previous record's gold must not persist onto a lesser run.
+	var best_label := panel.get_meta("best_label") as Label
+	var record := bool(stats.get("new_best", false))
+	best_label.text = "NEW BEST" if record else "BEST  %s" % _format_number(int(stats.get("best", 0)))
+	var best_color := C_GOLD if record else C_MUTED
+	best_label.add_theme_color_override("font_color", best_color)
+	var labels: Dictionary = panel.get_meta("summary_labels")
 	var seconds := int(float(stats.get("time", 0.0)))
 	var values := {
 		"time": "%d:%02d" % [seconds / 60, seconds % 60],
@@ -2041,8 +2024,7 @@ func show_run_summary(stats: Dictionary, panel_name: String) -> void:
 		"rooms": "%d / %d" % [int(stats.get("rooms", 0)), int(stats.get("rooms_total", 0))],
 	}
 	for key in values:
-		if labels.has(key):
-			(labels[key] as Label).text = str(values[key])
+		(labels[key] as Label).text = str(values[key])
 
 
 func show_room_clear(room_name: String) -> void:
