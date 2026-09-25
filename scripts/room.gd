@@ -125,6 +125,8 @@ func _add_solid(r: Rect2) -> void:
 
 ## Geometry-derived, deterministic dressing uses no encounter RNG draws.
 func _build_props() -> void:
+	# The candles placed here join the light list.
+	_light_points_dirty = true
 	var entry: Vector2 = template.get("entry", Vector2.ZERO)
 	var exit: Vector2 = template.get("exit", Vector2.ZERO)
 	var walls: Array = template.get("walls", [])
@@ -147,6 +149,8 @@ func _build_props() -> void:
 			prop.kind = props.size() % 2
 			prop.z_index = 0
 			prop.shattered.connect(prop_shattered.emit)
+			# A broken candle stops casting light.
+			prop.shattered.connect(func(_pos, _force, _color): _light_points_dirty = true)
 			add_child(prop)
 			props.append(prop)
 
@@ -313,15 +317,14 @@ func _mood() -> Dictionary:
 
 ## Static light sources for the light layer: braziers, candle clusters, vents.
 ## Both lighting passes (LightLayer's additive glow and LightRig's PointLight2Ds)
-## ask for this every frame, and building it allocates a fresh array of
-## dictionaries each time. It is cached within a frame instead. Callers must not
-## mutate the result; they only read positions, colours and flicker rates.
+## ask for this every frame, so it is built once per chamber and rebuilt when a
+## candle breaks. Callers must not mutate the result; they only read positions,
+## colours and flicker rates.
 var _light_points_cache: Array = []
-var _light_points_frame := -1
+var _light_points_dirty := true
 
 func light_points() -> Array:
-	var frame := Engine.get_process_frames()
-	if frame == _light_points_frame:
+	if not _light_points_dirty:
 		return _light_points_cache
 	var out: Array = []
 	var tag := str(template.get("tag", "intro"))
@@ -352,7 +355,7 @@ func light_points() -> Array:
 		if is_instance_valid(prop) and prop.kind == 1 and not prop.broken:
 			out.append({ "pos": prop.global_position + Vector2(0.0, -49.0), "radius": 72.0, "color": Color("ffac67"), "alpha": 0.16, "rate": 8.0, "phase": prop.position.x })
 	_light_points_cache = out
-	_light_points_frame = frame
+	_light_points_dirty = false
 	return out
 
 func exit_center() -> Vector2:

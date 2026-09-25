@@ -7,7 +7,8 @@ extends Node2D
 ## Pairs with LightLayer rather than duplicating it: this node attenuates what is
 ## already drawn, while LightLayer adds the additive glow (and the effects real
 ## lights cannot express, such as projectile glints and bomber fuses). Both read
-## the same per-frame cached source data.
+## the same source data: Game.torch_positions (cached per frame) and
+## Room.light_points (built once per chamber).
 
 const VFX := preload("res://scripts/vfx.gd")
 

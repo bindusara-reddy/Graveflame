@@ -8,8 +8,9 @@ extends Node2D
 ## colour wash that also covers what real lights cannot (projectiles, bomber
 ## fuses, the ground pool under the knight). LightRig owns real attenuation via
 ## PointLight2D plus the ambient CanvasModulate. Both effects are wanted, and
-## both read the same per-frame cached source data (Game.torch_positions and
-## Room.light_points), so neither recomputes the other's bookkeeping.
+## both read the same source data (Game.torch_positions, cached per frame, and
+## Room.light_points, built once per chamber and rebuilt when a candle breaks),
+## so neither recomputes the other's bookkeeping.
 
 const VFX := preload("res://scripts/vfx.gd")
 
