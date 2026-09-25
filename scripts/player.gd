@@ -106,6 +106,20 @@ var _death_t := 0.0
 ## Last spot the knight stood on solid ground; spike pits return them here.
 var _safe_pos := Vector2.ZERO
 
+## An off-by-default sensor on the knight's attack layer, watching `mask`
+## through `rect`; the move that uses it places, sizes and enables it.
+func _make_front_sensor(mask: int, rect: RectangleShape2D) -> Area2D:
+	var area := Area2D.new()
+	area.collision_layer = Content.L_PLAYER_ATK
+	area.collision_mask = mask
+	area.monitoring = false
+	var shape := CollisionShape2D.new()
+	shape.shape = rect
+	shape.disabled = true
+	area.add_child(shape)
+	add_child(area)
+	return area
+
 func setup(rm: RunModel) -> void:
 	build = rm.build
 	_owner_id = get_instance_id()
@@ -114,45 +128,22 @@ func _ready() -> void:
 	# Body collision
 	collision_layer = Content.L_PLAYER_BODY
 	collision_mask = Content.L_WORLD
-	# Build body collision shape
-	var bs := CollisionShape2D.new()
-	var rect := RectangleShape2D.new()
-	rect.size = Vector2(Content.P_BODY_W, Content.P_BODY_H)
-	bs.shape = rect
-	add_child(bs)
+	var body_size := Vector2(Content.P_BODY_W, Content.P_BODY_H)
+	add_child(Content.rect_shape(body_size))
 	# Hurtbox
 	_hurtbox = Area2D.new()
 	_hurtbox.collision_layer = Content.L_PLAYER_HURT
 	_hurtbox.collision_mask = 0
-	var hs := CollisionShape2D.new()
-	var hrect := RectangleShape2D.new()
-	hrect.size = Vector2(Content.P_BODY_W, Content.P_BODY_H)
-	hs.shape = hrect
-	_hurtbox.add_child(hs)
+	_hurtbox.add_child(Content.rect_shape(body_size))
 	_hurtbox.set_meta("team", "player")
 	_hurtbox.set_meta("owner", self)
 	_hurtbox.set_meta("owner_id", _owner_id)
 	add_child(_hurtbox)
-	# Attack hitbox
-	_attack_area = Area2D.new()
-	_attack_area.collision_layer = Content.L_PLAYER_ATK
-	_attack_area.collision_mask = Content.L_ENEMY_HURT
-	_attack_area.monitoring = false
-	_atk_shape = CollisionShape2D.new()
-	_atk_shape.shape = _atk_rect
-	_atk_shape.disabled = true
-	_attack_area.add_child(_atk_shape)
-	add_child(_attack_area)
-	# Parry deflection area (front-facing rectangle)
-	_parry_area = Area2D.new()
-	_parry_area.collision_layer = Content.L_PLAYER_ATK
-	_parry_area.collision_mask = Content.L_ENEMY_ATK
-	_parry_area.monitoring = false
-	_parry_shape = CollisionShape2D.new()
-	_parry_shape.shape = _parry_rect
-	_parry_shape.disabled = true
-	_parry_area.add_child(_parry_shape)
-	add_child(_parry_area)
+	# The blade's hitbox, then the parry's deflection area.
+	_attack_area = _make_front_sensor(Content.L_ENEMY_HURT, _atk_rect)
+	_atk_shape = _attack_area.get_child(0) as CollisionShape2D
+	_parry_area = _make_front_sensor(Content.L_ENEMY_ATK, _parry_rect)
+	_parry_shape = _parry_area.get_child(0) as CollisionShape2D
 	jumps_left = Content.P_MAX_JUMPS
 	if build.is_empty():
 		build = RunModel.base_build()
@@ -660,14 +651,12 @@ func _step_parry(delta: float) -> void:
 	parry_time -= delta
 	_scan_parry()
 	if _parry_succeeded and attack_buffer > 0.0:
-		_parry_shape.disabled = true
-		_parry_area.monitoring = false
+		_close_parry()
 		_draw_parry = 0.0
 		_begin_attack()
 		return
 	if parry_time <= 0.0:
-		_parry_shape.disabled = true
-		_parry_area.monitoring = false
+		_close_parry()
 		if not _parry_succeeded:
 			emit_signal("parried", global_position + Vector2(facing * 40.0, 0.0), false)
 		state = State.LOCOMOTION
@@ -684,26 +673,26 @@ func _scan_parry() -> void:
 		if _parry_hit.has(oid):
 			continue
 		var attack_kind := str(area.get_meta("attack_kind", ""))
-		if attack_kind == "projectile" and area.has_method("reflect"):
-			area.reflect(Vector2(facing, -0.05), Content.PARRY_PROJECTILE_BOOST)
-			_parry_hit[oid] = true
-			_parry_succeeded = true
-			riposte_time = Content.RIPOSTE_WINDOW
-			emit_signal("parried", global_position + Vector2(facing * 40.0, 0.0), true)
-			_gain_special(Content.P_SPECIAL_GAIN * 2.5 + float(build.get("parry_special", 0.0)))
-			continue
-		if attack_kind != "melee" or not bool(area.get_meta("attack_active", false)):
-			continue
 		var attacker = area.get_meta("owner", null)
-		if attacker != null and is_instance_valid(attacker) and attacker.has_method("take_damage"):
+		var live_melee := attack_kind == "melee" and bool(area.get_meta("attack_active", false))
+		if attack_kind == "projectile":
+			area.reflect(Vector2(facing, -0.05), Content.PARRY_PROJECTILE_BOOST)
+		elif live_melee and is_instance_valid(attacker):
 			attacker.take_damage(Content.PARRY_DAMAGE + float(build.get("parry_bonus_dmg", 0.0)), Vector2(-facing, 0.0), 420.0)
-			if attacker.has_method("on_parried"):
-				attacker.on_parried(Vector2(facing, -0.2))
-			_parry_hit[oid] = true
-			_parry_succeeded = true
-			riposte_time = Content.RIPOSTE_WINDOW
-			emit_signal("parried", global_position + Vector2(facing * 40.0, 0.0), true)
-			_gain_special(Content.P_SPECIAL_GAIN * 2.5 + float(build.get("parry_special", 0.0)))
+			attacker.on_parried(Vector2(facing, -0.2))
+		else:
+			continue
+		# A deflect landed: it opens the riposte window and pays meter.
+		_parry_hit[oid] = true
+		_parry_succeeded = true
+		riposte_time = Content.RIPOSTE_WINDOW
+		emit_signal("parried", global_position + Vector2(facing * 40.0, 0.0), true)
+		_gain_special(Content.P_SPECIAL_GAIN * 2.5 + float(build.get("parry_special", 0.0)))
+
+## Shut the parry's sensor. The shield visual (_draw_parry) is left to fade.
+func _close_parry() -> void:
+	_parry_shape.disabled = true
+	_parry_area.monitoring = false
 
 # --- Healing flask ---
 func _begin_heal() -> void:
@@ -891,10 +880,7 @@ func respawn_at(pos: Vector2, reset_resources: bool = false) -> void:
 	_deactivate_hitbox()
 	riposte_time = 0.0
 	_riposte_attack = false
-	if _parry_shape != null:
-		_parry_shape.disabled = true
-	if _parry_area != null:
-		_parry_area.monitoring = false
+	_close_parry()
 	global_position = pos
 	_safe_pos = pos
 	velocity = Vector2.ZERO
@@ -1010,7 +996,7 @@ func _draw() -> void:
 		# crescent in front
 		_draw_arc(Vector2(facing * 8.0, 0.0), pw * 0.9, 2.4, facing, col, 5.0)
 		# glow
-		draw_circle(Vector2(facing * pw * 0.4, 0.0), pw * 0.3, Color(col.r, col.g, col.b, 0.15 * t))
+		draw_circle(Vector2(facing * pw * 0.4, 0.0), pw * 0.3, Color(col, 0.15 * t))
 	# wall slide dust indicator
 	if wall_sliding:
 		var wx: float = _wall_dir * w * 0.5
@@ -1020,16 +1006,13 @@ func _draw() -> void:
 			draw_circle(Vector2(wx, dy + 12.0), 2.0, Color(0.8, 0.8, 0.9, 0.4))
 
 func _draw_arc(origin: Vector2, radius: float, arc: float, dir: float, col: Color, thickness: float) -> void:
-	var pts := PackedVector2Array()
-	var n := 16
+	var segments := 16
 	var base := 0.0 if dir > 0.0 else PI
-	for i in range(n + 1):
-		var t := base - arc * 0.5 + arc * float(i) / float(n)
-		if dir < 0.0: t = base + arc * 0.5 - arc * float(i) / float(n)
+	var pts := PackedVector2Array()
+	for i in range(segments + 1):
+		var t := base - arc * 0.5 + arc * float(i) / float(segments)
 		pts.append(origin + Vector2(cos(t), sin(t)) * radius)
-	if pts.size() >= 2:
-		draw_polyline(pts, col, thickness, true)
-		# fill fan lightly
-		var fill := Color(col.r, col.g, col.b, 0.18)
-		pts.append(origin)
-		draw_colored_polygon(pts, fill)
+	draw_polyline(pts, col, thickness, true)
+	# fill fan lightly
+	pts.append(origin)
+	draw_colored_polygon(pts, Color(col, 0.18))
