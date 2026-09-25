@@ -1390,6 +1390,7 @@ func _advance_room() -> void:
 	mood = Content.mood_for_zone(zone, _zone_progress())
 	RenderingServer.set_default_clear_color(mood.bg_top)
 	_lights.set_ambient(mood.ambient)
+	_atmosphere.set_zone(zone, mood)
 	room = Room.new()
 	room.mood = mood
 	room.setup(tmpl, is_boss, player, run.rng.randi())
