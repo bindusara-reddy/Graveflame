@@ -58,11 +58,11 @@ func _test_threat_pips() -> void:
 	foe.global_position = view.affine_inverse() * Vector2(1500.0, 360.0)
 	foe.state = Enemy.EState.WINDUP
 	game.ui.track_threats([foe], view)
-	var pips: Array = game.ui._threat_pips._pips
+	var pips: Array = game.ui.hud._threat_pips._pips
 	check(pips.size() == 1 and pips[0].at.x > 1200.0 and absf(pips[0].angle) < 0.1, "a windup beyond the right edge gets a pip there, pointing out")
 	foe.global_position = view.affine_inverse() * Vector2(640.0, 360.0)
 	game.ui.track_threats([foe], view)
-	check(game.ui._threat_pips._pips.is_empty(), "a foe in view needs no pip")
+	check(game.ui.hud._threat_pips._pips.is_empty(), "a foe in view needs no pip")
 	game.ui.quit_to_title_requested.emit()
 	await ticks(3)
 
@@ -76,38 +76,44 @@ func _test_shake_slider() -> void:
 	slider.value = 1.0
 
 
-## The HUD marks what a resource buys: Lance notches, a gold IGNITE prompt,
-## a sigil per flask charge, and the Warden's phase notch and ignition.
+## The HUD marks what a resource buys: Lance notches, a lit Ignite key, a
+## flame per flask charge, and the Warden's seals and ignition. An idle HUD
+## holds its meters and the knight's flame still.
 func _test_hud_affordances() -> void:
 	var ui: UI = game.ui
-	var notches := ui._special_bar.find_children("*", "Control", false, false).filter(func(c): return c is UI.BarNotches)
-	check(notches.size() == 1 and notches[0].marks == [0.4, 0.8], "the Graveflame bar is notched at each Lance's cost")
+	var hud: UiHud = ui.hud
+	check(hud._graveflame.notches == [0.4, 0.8], "the Graveflame is notched at each Lance's cost")
 	ui.set_special(100.0, 100.0)
-	check(ui._special_value_label.text == "IGNITE  " + UI.prompt("ignite"), "a full bar names the Ignite key (got %s)" % ui._special_value_label.text)
+	check(hud._graveflame.hot and hud._ignite.lit and hud._ignite.action == "ignite" and hud._flame.roaring, "a full Graveflame lights the Ignite key and the knight's flame roars")
 	ui.set_special(40.0, 100.0)
-	check(ui._special_value_label.text == "40 / 100", "spending it restores the count")
+	check(not hud._graveflame.hot and not hud._ignite.lit and hud._ignite.modulate.a < 1.0, "spending it dims the key again")
 	ui.set_flask(1, 3)
-	var sigils: Array = ui._flask_sigils
-	check(sigils.size() == 3 and sigils[0].modulate == Color.WHITE and sigils[2].modulate.a < 1.0, "one flask sigil per charge, spent ones dimmed")
+	check(hud._flasks.count == 3 and hud._flasks.filled == 1, "one flame per flask on the belt, spent ones snuffed")
+	ui.set_hp(20.0, 100.0)
+	check(hud._flame.guttering and hud._vitality_value.text == "20", "low vitality gutters the knight's flame")
+	ui.set_hp(100.0, 100.0)
+	var idle := [hud._vitality, hud._graveflame, hud._flame].all(func(n: Node): return not n.is_processing())
+	check(idle, "an idle HUD holds its meters and the knight's flame still")
 	ui.show_boss_bar(1000.0)
 	ui.update_boss_bar(400.0)
-	check(ui._boss_ignited and ui._boss_name_label.text.ends_with("IGNITED"), "past the phase notch the Warden's bar ignites")
+	check(hud._boss_ignited and hud._warden_seals[0].broken and not hud._warden_seals[1].broken, "past its first seal the Warden's strip ignites")
 	ui.show_boss_bar(1000.0)
-	check(not ui._boss_ignited, "a fresh boss bar starts unlit")
+	check(not hud._boss_ignited and not hud._warden_seals[0].broken, "a fresh Warden's strip starts sealed and unlit")
 	ui.hide_boss_bar()
 
 
 ## The story contracts: an inscription speaks line by line over the chamber
-## (the last line in gold) and fades on its own; the litany sits under the
+## (the last line in gold) and fades on its own; the litany sits on the
 ## clear card, and leaves with it.
 func _test_story_lines() -> void:
+	var hud: UiHud = game.ui.hud
 	game.ui.show_inscription(["They light a flame on every knight's grave.", "Yours got up."])
-	var lines: Array = game.ui.hud._inscription.get_children().filter(func(c): return c is Label)
+	var lines: Array = hud._inscription.find_children("*", "Label", true, false)
 	check(lines.size() == 2 and lines[0].text.begins_with("They light") and lines[1].text == "Yours got up.", "the inscription sets one line per entry")
 	check(lines[1].get_theme_color("font_color") == UiTheme.GOLD, "the inscription's last line is gold")
 	await _wait_real(2.6)
-	var holder: Control = game.ui.hud._inscription.get_parent()
-	check(holder.is_visible_in_tree() and lines[1].modulate.a > 0.9, "both lines are up within the first seconds")
+	var holder: Control = hud._inscription.get_parent()
+	check(holder.is_visible_in_tree() and lines[1].get_parent().modulate.a > 0.9, "both lines are up within the first seconds")
 	var box := holder.get_global_rect()
 	check(box.position.y >= 100.0 and box.end.y <= 320.0, "the inscription sits above the combat plane (got %s)" % box)
 	await _wait_real(5.2)
@@ -115,16 +121,16 @@ func _test_story_lines() -> void:
 	game.ui.show_room_clear("Ashen Cells")
 	game.ui.show_litany("A flame is lit on every knight's grave.")
 	await _wait_real(2.2)
-	var litany: Label = game.ui.hud._litany
-	var clear: Control = game.ui._room_clear_banner
+	var card: UiKit.Banner = hud._clear
+	var litany: Label = card.line
 	check(litany.is_visible_in_tree() and litany.modulate.a > 0.9 and litany.text == "A flame is lit on every knight's grave.", "the litany shows on the clear card")
-	check(clear.scale == Vector2.ONE and clear.is_ancestor_of(litany), "the card stands full size while its litany is read")
-	await _wait_real(2.4)
-	check(clear.visible and clear.scale.x < 0.8 and not litany.visible, "the card then steps aside into its chip without the litany")
+	check(card.strip.scale == Vector2.ONE and card.is_ancestor_of(litany), "the card stands full size while its litany is read")
+	await _wait_real(2.8)
+	check(hud._chip.visible and not litany.is_visible_in_tree(), "the card then steps aside into its chip without the litany")
 	game.ui.show_room_clear("Ashen Cells")
 	game.ui.show_litany("Some of them get up.")
 	game.ui.hide_room_clear()
-	check(not litany.is_visible_in_tree(), "hiding the clear card takes the litany with it")
+	check(not litany.is_visible_in_tree() and not hud._chip.visible, "hiding the clear card takes the litany with it")
 
 
 ## The chamber veil burns fully open from any arrival point and leaves nothing.
@@ -150,18 +156,23 @@ func _test_title_return() -> void:
 	check(is_equal_approx(game.ui._title_holder.modulate.a, 1.0), "the title menu is fully lit after BACK from options")
 
 
-## The HUD counts chambers and names the throne; the clear card steps aside.
+## The track marks the chamber by numeral and name and crowns the throne;
+## the chamber card counts chambers; the clear card steps aside into a chip.
 func _test_chamber_banners() -> void:
+	var hud: UiHud = game.ui.hud
 	game.ui.set_room(3, 8)
-	check(game.ui._room_label.text == "CHAMBER IV / VII", "the HUD counts chambers (got %s)" % game.ui._room_label.text)
+	check(hud._track.current == 3 and hud._track.filled == 3 and hud._chamber.text == "CHAMBER IV", "the track marks the chamber the knight stands in (got %s)" % hud._chamber.text)
+	game.ui.show_room_intro(3, 8, "ASHEN CELLS")
+	check(hud._room_intro.kicker.text == "CHAMBER IV OF VII" and hud._room_intro.title.text == "Ashen Cells", "the chamber card counts chambers and names this one")
+	check(hud._chamber.text == "IV · ASHEN CELLS", "the track takes the chamber's name from its card (got %s)" % hud._chamber.text)
 	game.ui.set_room(7, 8)
-	check(game.ui._room_label.text == "THE EMBER THRONE", "the throne is named, not counted")
+	check(hud._chamber.text == "THE EMBER THRONE" and hud._track.current == -1 and hud._track.filled == 8, "the throne is named, not counted")
 	game.ui.show_room_clear("Ashen Cells")
-	await _wait_real(2.2)
-	var banner: Control = game.ui._room_clear_banner
-	check(banner.visible and banner.scale.x < 0.8 and banner.position.y < 40.0, "the clear card shrinks into the top slot")
+	await _wait_real(2.5)
+	var chip: Control = hud._chip
+	check(not hud._clear.visible and chip.visible and chip.get_global_rect().position.y < 40.0, "the clear card steps aside into a chip in the top slot")
 	game.ui.hide_room_clear()
-	check(not banner.visible and banner.scale == Vector2.ONE, "hiding the clear card resets it")
+	check(not chip.visible and not hud._clear.visible, "hiding the clear card takes its chip")
 
 
 ## The pause card shows the build, and quitting asks before abandoning it.
@@ -201,15 +212,16 @@ func _stick(axis: JoyAxis, value: float) -> void:
 func _test_prompts() -> void:
 	game.ui.binding_changed.emit("heal", KEY_H)
 	await ticks(2)
-	var flask: Label = game.ui._flask_count_label
-	check(flask.text.ends_with("[H]"), "the flask counter follows a rebind (got %s)" % flask.text)
+	var flask: UiKit.Glyph = game.ui.hud._heal
+	check(flask.action == "heal" and flask.is_in_group(UiInput.PROMPT_GROUP), "the flask cap is the live Flask glyph")
+	check(UiInput.first_binding("heal").name == "H", "the flask cap follows a rebind (got %s)" % UiInput.first_binding("heal"))
 	await _stick(JOY_AXIS_RIGHT_Y, 0.9)
 	var pad_cap := str(UI._binding_text("heal")["pad"]).get_slice(" / ", 0)
-	check(flask.text.ends_with("[%s]" % pad_cap), "touching the pad switches prompts to pad buttons (got %s)" % flask.text)
+	check(UiInput.first_binding("heal") == { "name": pad_cap, "device": "pad" }, "touching the pad switches caps to pad buttons (got %s)" % UiInput.first_binding("heal"))
 	var rise: Array = (_panel("pause").get_meta("footer") as Control).find_children("*", "Control", true, false).filter(func(c): return c is UiKit.Glyph)
 	check(rise.size() == 1 and rise[0].action == "pause" and UI.prompt("pause") == "[START]", "the pause footer's cap is the pad's pause button (got %s)" % UI.prompt("pause"))
 	await tap_key(KEY_SHIFT)
-	check(flask.text.ends_with("[H]"), "a keypress switches prompts back to keys")
+	check(UiInput.first_binding("heal") == { "name": "H", "device": "key" }, "a keypress switches caps back to keys")
 
 
 func _wait_real(seconds: float) -> void:

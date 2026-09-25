@@ -1438,3 +1438,189 @@ static func roll_number(l: Label, to: float, shown: Callable, delay := 0.0, dura
 	t.tween_interval(delay)
 	t.tween_method(func(v: float) -> void: l.text = shown.call(v), 0.0, to, duration).set_trans(Tween.TRANS_QUART).set_ease(Tween.EASE_OUT)
 	return t
+# --- HUD additions -------------------------------------------------------------------
+# Pieces the in-descent HUD (ui_hud.gd) is cut from, added by the HUD rebuild.
+# Everything above this section is the shared kit and is left as it was.
+
+## Words with the player's live key caps drawn inline: each {action} token in
+## `template` becomes that action's Glyph, which repaints itself on a device
+## switch or a rebind. A lesson that opens with its name in capitals
+## ("{parry} — PARRY.  Time it...", "HOPPER.  It leaps...") prints that name
+## as an ember kicker after its caps, so the eye lands on the key, then the
+## name, then the sentence.
+static func prompt_line(template: String, role := T.BODY, color := T.BONE, cap_height := 24.0) -> PromptLine:
+	var line := PromptLine.new()
+	line.setup(template, role, color, cap_height)
+	return line
+
+
+class PromptLine extends HBoxContainer:
+	## Leading caps, the capitalised name, then the sentence.
+	const LESSON := "^((?:\\{\\w+\\}\\s*)*)(?:—\\s*)?([A-Z][A-Z' ]*[A-Z])\\.\\s+(.*)$"
+	const TOKEN := "\\{(\\w+)\\}"
+	## The words as written, tokens and all.
+	var template := ""
+
+	func setup(p_template: String, role: String, color: Color, cap_height: float) -> void:
+		template = p_template
+		mouse_filter = Control.MOUSE_FILTER_IGNORE
+		add_theme_constant_override("separation", T.S2)
+		var lesson := RegEx.create_from_string(LESSON).search(template)
+		if lesson == null:
+			_add_run(template, role, color, cap_height)
+			return
+		_add_run(lesson.get_string(1), role, color, cap_height)
+		_add_words(lesson.get_string(2), T.CAPS, T.EMBER_HI)
+		_add_run(lesson.get_string(3), role, color, cap_height)
+
+	## Words and caps in reading order.
+	func _add_run(text: String, role: String, color: Color, cap_height: float) -> void:
+		var at := 0
+		for token in RegEx.create_from_string(TOKEN).search_all(text):
+			_add_words(text.substr(at, token.get_start() - at), role, color)
+			add_child(UiKit.glyph(token.get_string(1), cap_height))
+			at = token.get_end()
+		_add_words(text.substr(at), role, color)
+
+	func _add_words(words: String, role: String, color: Color) -> void:
+		var trimmed := words.strip_edges()
+		if trimmed.is_empty():
+			return
+		var l := UiKit.label(trimmed, role, color, HORIZONTAL_ALIGNMENT_LEFT)
+		l.size_flags_horizontal = Control.SIZE_SHRINK_BEGIN
+		add_child(l)
+
+
+## The knight's flame in an inked medallion, the portrait on the knight's
+## slip. The flame stands as tall as `vitality` (0..1) allows. `roaring`
+## (Ignite is ready) rings it in ember and burns its heart white-hot;
+## `guttering` (vitality low) rings it in blood. It flickers only while it
+## roars or gutters, so an idle HUD never redraws; reduced motion holds it
+## still in every state.
+static func vital_flame(diameter := 52.0) -> VitalFlame:
+	var f := VitalFlame.new()
+	f.custom_minimum_size = Vector2(diameter, diameter)
+	f.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+	f.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	return f
+
+
+class VitalFlame extends Control:
+	var vitality := 1.0:
+		set(v):
+			vitality = clampf(v, 0.0, 1.0)
+			queue_redraw()
+	var roaring := false:
+		set(v):
+			roaring = v
+			_sync()
+	var guttering := false:
+		set(v):
+			guttering = v
+			_sync()
+	var _t := 0.0
+
+	func _ready() -> void:
+		_sync()
+
+	func _sync() -> void:
+		set_process(roaring or guttering)
+		queue_redraw()
+
+	func _process(delta: float) -> void:
+		if not T.still():
+			# A guttering flame stutters; a roaring one runs hot and quick.
+			_t += delta * (1.5 if roaring else 0.8)
+			queue_redraw()
+
+	func _draw() -> void:
+		var ci := get_canvas_item()
+		var c := size * 0.5
+		var r := minf(size.x, size.y) * 0.5 - 2.0
+		var ring := T.EMBER_HI if roaring else (T.BLOOD if guttering else T.GOLD)
+		draw_circle(c + Vector2(2.0, 3.0), r, Color(0.0, 0.0, 0.0, 0.5))
+		if roaring:
+			for i in range(3):
+				draw_arc(c, r + 3.0 + 3.0 * float(i), 0.0, TAU, 40, Color(T.EMBER, 0.34 - 0.1 * float(i)), 3.0, true)
+		draw_circle(c, r, T.SHEET_LO)
+		draw_circle(c + Vector2(0.0, -r * 0.08), r * 0.66, Color(T.EMBER, 0.22 if roaring else 0.09))
+		draw_arc(c, r, 0.0, TAU, 40, ring, 1.5, true)
+		draw_arc(c, r - 3.5, 0.0, TAU, 40, Color(ring, 0.22), 1.0, true)
+		var base := c + Vector2(0.0, r * 0.62)
+		var tall := r * (1.5 if roaring else lerpf(0.5, 1.2, vitality))
+		P.flame(ci, base, tall, tall * 0.6, _t)
+		if roaring:
+			P.fill(ci, P.VFX.flame_tongues(base, tall * 0.5, tall * 0.26, _t * 1.3, 2.0)[0], T.HOT)
+
+
+## A wax seal pressed on `meter` at the fraction `at`: a threshold the fight
+## turns on. `broken` cracks the wax and bares an ember seam, so a threshold
+## passed reads by shape as well as colour. It follows the meter's width.
+static func meter_seal(meter: Meter, at: float, diameter := 20.0) -> MeterSeal:
+	var s := MeterSeal.new()
+	s.at = at
+	s.size = Vector2(diameter, diameter)
+	s.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	meter.add_child(s)
+	meter.resized.connect(s.place)
+	s.place()
+	return s
+
+
+class MeterSeal extends Control:
+	var at := 0.5
+	var wax := T.WAX
+	var broken := false:
+		set(v):
+			broken = v
+			queue_redraw()
+
+	func place() -> void:
+		var meter := get_parent() as Control
+		position = Vector2(meter.size.x * at, meter.size.y * 0.5) - size * 0.5
+
+	func _draw() -> void:
+		var ci := get_canvas_item()
+		var c := size * 0.5
+		var r := minf(size.x, size.y) * 0.5 - 1.0
+		P.seal(ci, c, r, wax.darkened(0.25) if broken else wax, "flame" if broken else "crown")
+		if broken:
+			var seam := PackedVector2Array([
+				c + Vector2(-r * 0.15, -r), c + Vector2(r * 0.12, -r * 0.4), c + Vector2(-r * 0.12, r * 0.05),
+				c + Vector2(r * 0.18, r * 0.5), c + Vector2(-r * 0.05, r),
+			])
+			RenderingServer.canvas_item_add_polyline(ci, seam, PackedColorArray([T.INK_DEEP]), 3.0, true)
+			RenderingServer.canvas_item_add_polyline(ci, seam, PackedColorArray([T.EMBER_HI]), 1.2, true)
+
+
+## A wick that burns down as `fraction` falls: the fury's window. The spent
+## length stays as a charred thread; the live end carries an ember.
+static func wick(color := T.GOLD, height := 6.0) -> Wick:
+	var w := Wick.new()
+	w.color = color
+	w.custom_minimum_size = Vector2(0.0, height)
+	w.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	return w
+
+
+class Wick extends Control:
+	var color := T.GOLD:
+		set(v):
+			color = v
+			queue_redraw()
+	var fraction := 1.0:
+		set(v):
+			var f := clampf(v, 0.0, 1.0)
+			if not is_equal_approx(f, fraction):
+				fraction = f
+				queue_redraw()
+
+	func _draw() -> void:
+		var y := size.y * 0.5
+		draw_line(Vector2(0.0, y), Vector2(size.x, y), Color(T.SOOT, 0.55), 1.0)
+		var x := size.x * fraction
+		if x < 1.0:
+			return
+		draw_line(Vector2(0.0, y), Vector2(x, y), color, 2.0)
+		draw_circle(Vector2(x, y), 3.0, Color(T.EMBER, 0.45))
+		draw_circle(Vector2(x, y), 1.6, T.HOT)

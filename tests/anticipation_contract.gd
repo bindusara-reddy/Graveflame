@@ -58,10 +58,11 @@ func run() -> void:
 	await ticks(10)
 	var total: int = game.room.wave_count()
 	check(total >= 1, "a combat chamber declares at least one wave")
-	check(game.ui._wave_label.visible, "the wave counter is shown in a combat chamber")
+	var waves: UiKit.Pips = game.ui.hud._waves
+	check(waves.visible, "the wave pips are shown in a combat chamber")
 	check(
-		game.ui._wave_label.text == "WAVE 1 / %d" % total,
-		"the wave counter opens on wave 1 (got %s)" % game.ui._wave_label.text
+		waves.count == total and waves.filled == 1,
+		"the wave pips open on wave 1 (got %d of %d)" % [waves.filled, waves.count]
 	)
 	if total >= 2:
 		# A shielded brute absorbs the first frontal hit and only breaks its
@@ -77,13 +78,13 @@ func run() -> void:
 				e.take_damage(99999.0, Vector2.RIGHT, 0.0)
 		await ticks(80)
 		check(
-			game.ui._wave_label.text == "WAVE 2 / %d" % total,
-			"the wave counter advances with the fight (got %s)" % game.ui._wave_label.text
+			waves.filled == 2 and waves.count == total,
+			"the wave pips advance with the fight (got %d of %d)" % [waves.filled, waves.count]
 		)
 
 	game.run.room_index = game.run.rooms_total() - 2
 	game._advance_room()
 	await ticks(20)
-	check(not game.ui._wave_label.visible, "the throne room carries no wave counter")
+	check(not waves.visible, "the throne room carries no wave pips")
 
 	await finish("ANTICIPATION")

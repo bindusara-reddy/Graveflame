@@ -154,7 +154,7 @@ func _test_dead_knight() -> void:
 func _test_throne() -> void:
 	await enter_throne(true)
 	check(game.room.is_boss and game.room.trial and not game.run.trial_next, "a Trial taken before the throne is paid at the throne")
-	check((game.ui._boss_intro.sub as Label).text == "TRIAL OF THE THRONE", "the Warden's card names the Trial of the Throne")
+	check(game.ui.hud._boss_intro.kicker.text == "TRIAL OF THE THRONE", "the Warden's card names the Trial of the Throne")
 	var boss: Boss = game.room.boss
 	if "trial" in boss:
 		check(boss.trial, "the Warden knows it is a Trial")

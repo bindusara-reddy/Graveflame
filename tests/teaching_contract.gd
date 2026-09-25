@@ -29,9 +29,11 @@ func run() -> void:
 	windup_near_player()
 	await ticks(3)
 	check(Save.has_learned("parry"), "a close windup teaches parry")
-	check(game.ui._hint_panel.visible, "the lesson is actually shown")
-	check(game.ui._hint_label.text == UI.fill_prompts(Content.HINTS["parry"]), "the lesson shows its own text")
-	check(game.ui._hint_label.text.begins_with(UI.prompt("parry")), "the lesson names the live parry key (got %s)" % game.ui._hint_label.text)
+	check(game.ui.hud._hint.visible, "the lesson is actually shown")
+	var lesson: UiKit.PromptLine = game.ui.hud._hint_line
+	check(lesson.template == Content.HINTS["parry"], "the lesson shows its own text")
+	var first: Control = lesson.get_child(0)
+	check(first is UiKit.Glyph and first.action == "parry", "the lesson opens on the live parry key cap")
 
 	# ...and never again.
 	game._hint_cooldown = 0.0
@@ -67,6 +69,6 @@ func run() -> void:
 	game._hint_cooldown = 0.0
 	windup_near_player()
 	await ticks(3)
-	check(not game.ui._hint_panel.visible, "a returning player is not interrupted again")
+	check(not game.ui.hud._hint.visible, "a returning player is not interrupted again")
 
 	await finish("TEACHING")

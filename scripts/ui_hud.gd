@@ -1,377 +1,252 @@
 class_name UiHud
 extends Control
-## The in-descent overlay: the knight's vitality, Graveflame and flasks, the
-## chamber track and cells, the Warden's bar, and every pop-up that plays over
-## a live fight (chamber and boss cards, the clear card, lessons, the streak,
-## threat pips). Built once by the UI facade and driven through it.
+## The in-descent overlay, cut from the kit's paper (ui_design.md §10.1-10.5):
+## the knight's slip (the flame portrait, vitality, the Graveflame and the
+## flasks), the fury slip, the chamber track with cells and renown, the
+## Warden's strip, and every pop-up that plays over a live fight (chamber and
+## Warden cards, the clear card and its chip, lessons, the phase tag, the
+## inscription, threat pips). It hugs the frame's edges and the upper strip,
+## so the fight is never covered. Nothing here redraws while the descent is
+## idle: meters and flames animate only while they carry news. Built once by
+## the UI facade and driven through it.
 
 const Kit := preload("res://scripts/ui_kit.gd")
 const T := preload("res://scripts/ui_theme.gd")
+const P := preload("res://scripts/ui_paint.gd")
 
-var _hp_bar: ProgressBar
-## Pale "chip" behind a bar: what was just lost lingers, then drains away.
-var _hp_trail: ProgressBar
-var _boss_trail: ProgressBar
-var _trail_tweens: Dictionary = {}
-var _hp_value_label: Label
-var _special_bar: ProgressBar
-var _special_value_label: Label
-## Graveflame last shown, kept so the IGNITE prompt can be repainted.
-var _special_shown := Vector2(0.0, Content.P_SPECIAL_MAX)
-## The Graveflame fill's own style: it breathes white while Ignite is ready.
-var _special_fill: StyleBoxFlat
-var _ignite_tween: Tween
-var _room_label: Label
-var _wave_label: Label
-## The wave on the HUD as (current, total); zero when the chamber has none.
-var _wave_shown := Vector2i.ZERO
-## Paper arrows at the frame's edge for threats beyond it (see track_threats).
-var _threat_pips: ThreatPips
-var _score_label: Label
-var _boss_panel: Control
-var _boss_bar: ProgressBar
-var _boss_value_label: Label
-var _boss_name_label: Label
-## Whether the boss bar wears its second-phase ember colours.
-var _boss_ignited := false
-var _flask_container: HBoxContainer
-var _flask_sigils: Array = []
-var _flask_count_label: Label
-## Charges and belt size last shown, kept so the key prompt can be repainted.
-var _flask_shown := Vector2i(Content.FLASK_MAX, Content.FLASK_MAX)
-var _cells_label: Label
-var _best_label: Label
-
-var _room_clear_banner: Control
-var _room_clear_name: Label
-var _room_clear_tween: Tween
-const ROOM_CLEAR_TOP := 148.0
-
-var _streak_panel: PanelContainer
-var _streak_kills_label: Label
-var _streak_mult_label: Label
-var _streak_bar: ProgressBar
-var _streak_tier := 0
-var _streak_tween: Tween
-
-var _room_intro: Dictionary = {}
-var _boss_intro: Dictionary = {}
-## One-time contextual lesson, shown low and out of the play space.
-var _hint_panel: Control
-var _hint_label: Label
-## The lesson as written, with {action} tokens, so a device switch can re-fill it.
-var _hint_template := ""
-var _hint_tween: Tween
-var _boss_phase_tag: Label
-var _boss_phase_tween: Tween
-var _hud_tween: Tween
-## The keep's voice over a chamber (show_inscription): one label per line.
-var _inscription: VBoxContainer
-var _inscription_tween: Tween
-## The litany line on the chamber-clear card (show_litany).
-var _litany: Label
-var _litany_tween: Tween
-## How long the clear card stands before it steps aside into the chip, and
-## how much longer it stands while it carries a litany line to read.
+## Below this share of vitality the knight's flame gutters: the line the red
+## vignette starts at (game.gd).
+const LOW_VITALITY := 0.34
+## Fury tiers by name, one per Content.STREAK_TIERS threshold.
+const FURY_NAMES := ["FURY", "WRATH", "RAPTURE", "INFERNO"]
+## Where the Warden's fight turns, as shares of its vitality: it ignites,
+## then burns its Last Ember. Each is a wax seal on its strip.
+const WARDEN_TURNS := [Content.BOSS_PHASE2_AT, Boss.LAST_EMBER_AT]
+## How long the clear card stands before it steps aside into its chip, and
+## how much longer while it carries a litany line to read.
 const CLEAR_HOLD := 1.4
 const LITANY_HOLD := 2.6
+
+# The knight's slip.
+var _flame: Kit.VitalFlame
+var _vitality: Kit.Meter
+var _vitality_value: Label
+var _graveflame: Kit.Meter
+## The Ignite key beside the Graveflame: dim until the flame is full.
+var _ignite: Kit.Glyph
+var _ignite_ready := false
+var _flasks: Kit.Pips
+var _heal: Kit.Glyph
+# The fury slip.
+var _fury: PanelContainer
+var _fury_name: Label
+var _fury_pips: Kit.Pips
+var _fury_mult: Label
+var _fury_wick: Kit.Wick
+var _fury_tier := 0
+# The chamber track.
+var _track: Kit.Pips
+var _chamber: Label
+var _waves: Kit.Pips
+var _cells: Label
+var _renown: Label
+var _renown_value := 0
+var _best := 0
+# The Warden.
+var _warden: Control
+var _warden_name: Label
+var _warden_value: Label
+var _warden_meter: Kit.Meter
+var _warden_seals: Array = []
+var _boss_ignited := false
+var _phase_tag: Control
+var _phase_text: Label
+# Cards: banners unrolled over the top and foot of the frame.
+var _room_intro: Kit.Banner
+var _trial_seal: Kit.Seal
+var _boss_intro: Kit.Banner
+var _clear: Kit.Banner
+## The chamber the clear card names; empty while no card is up.
+var _clear_name := ""
+var _chip: Control
+var _litany_tween: Tween
+# Notes and the keep's voice.
+var _hint: Control
+var _hint_stack: VBoxContainer
+## The lesson on show, its {action} tokens drawn as live caps.
+var _hint_line: Kit.PromptLine
+var _inscription: VBoxContainer
+var _inscription_tween: Tween
+## Paper arrows at the frame's edge for threats beyond it (see track_threats).
+var _threat_pips: ThreatPips
+var _hud_tween: Tween
+## The wave on the HUD as (current, total); zero when the chamber has none.
+var _wave_shown := Vector2i.ZERO
+## The tween moving each note or popping each slip now, so a new showing
+## replaces the last one instead of fighting it.
+var _motion: Dictionary = {}
 
 
 ## Lay out every HUD element. Called once the HUD fills the frame.
 func build() -> void:
 	mouse_filter = Control.MOUSE_FILTER_IGNORE
-	add_to_group(UiInput.PROMPT_GROUP)
-	_build_player_status()
-	_build_streak_meter()
-	_build_run_status()
-	_build_boss_status()
-	_build_boss_phase_tag()
-	_build_room_clear_banner()
-	# The chamber card takes the boss bar's slot, always empty outside the
-	# throne, so it never covers the platforms where enemies arrive. The boss
-	# card sits on the throne room's brick foundation, clear of the Warden.
-	_room_intro = _build_banner("RoomIntro", 18.0, 96.0, Vector2(470, 70), 26, 11, T.C_EMBER, Color("14101ceb"))
-	_boss_intro = _build_banner("BossIntro", 546.0, 666.0, Vector2(620, 118), 40, 14, T.C_RED, Color("1a0c11f0"))
+	var left := _column(Control.PRESET_TOP_LEFT, Control.GROW_DIRECTION_END)
+	_build_knight_slip(left)
+	_build_fury(left)
+	_build_chamber_track(_column(Control.PRESET_TOP_RIGHT, Control.GROW_DIRECTION_BEGIN))
+	_build_warden()
+	# The chamber card takes the Warden's slot, empty outside the throne, so it
+	# never covers the platforms where foes arrive. The Warden's card lies on
+	# the throne room's brick foundation, clear of the Warden.
+	_room_intro = Kit.banner(self, T.EMBER, 10.0, 104.0)
+	_room_intro.name = "ChamberCard"
+	_trial_seal = _pin_seal(_room_intro, "tick")
+	_boss_intro = Kit.banner(self, T.WARDEN, 546.0, 666.0, T.TITLE, T.WARDEN)
+	_boss_intro.name = "WardenCard"
+	_build_clear()
 	_build_hint()
-	_build_story_lines()
+	_build_inscription()
 	_threat_pips = ThreatPips.new()
+	_threat_pips.name = "ThreatPips"
 	_threat_pips.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	add_child(_threat_pips)
 	_threat_pips.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	for meter in [_vitality, _graveflame, _warden_meter]:
+		_animate(meter, false)
+	set_hp(Content.P_MAX_HP, Content.P_MAX_HP)
 
 
-## Teaching prompt: sits below the fight, clear of the fighters and the HUD.
-func _build_hint() -> void:
-	_hint_panel = _hud_strip("HintBanner", Control.PRESET_BOTTOM_WIDE, -112.0, -54.0)
-	var panel := Kit.passive_panel(_hint_panel, T.panel_box(Color("0f0b16f2"), T.C_EMBER, 10, 1, 10))
-	var margin := Kit.margin(26, 26, 9, 9)
-	margin.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	panel.add_child(margin)
-	# This is the one line a new player must read, so it is set a step larger
-	# than the ambient HUD text rather than matching it.
-	_hint_label = Kit.label("", 16, T.C_TEXT)
-	# Inside the margin, or the first glyph sits on the panel's edge.
-	margin.add_child(_hint_label)
-	_hint_panel.visible = false
+## A column of slips hugging one top corner of the frame; each slip keeps its
+## own width, lined up on that corner's edge.
+func _column(preset: Control.LayoutPreset, grow: Control.GrowDirection) -> VBoxContainer:
+	var col := VBoxContainer.new()
+	col.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	col.add_theme_constant_override("separation", T.S2 - 2)
+	add_child(col)
+	col.set_anchors_and_offsets_preset(preset, Control.PRESET_MODE_MINSIZE, T.S4)
+	col.offset_top = 14.0
+	col.grow_horizontal = grow
+	return col
 
 
-func _build_streak_meter() -> void:
-	_streak_panel = Kit.passive_panel(self, T.panel_box(Color("1b1624d9"), Color("715026"), 10, 1, 8))
-	_streak_panel.name = "StreakMeter"
-	_streak_panel.set_anchors_and_offsets_preset(Control.PRESET_TOP_LEFT)
-	_streak_panel.offset_left = 16.0
-	_streak_panel.offset_top = 122.0
-	_streak_panel.offset_right = 216.0
-	_streak_panel.offset_bottom = 166.0
-	_streak_panel.pivot_offset = Vector2(0.0, 25.0)
-	var stack := Kit.padded_stack(_streak_panel, 14, 8, 3)
-	var head := HBoxContainer.new()
-	head.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	stack.add_child(head)
-	head.add_child(Kit.label("STREAK", 11, T.C_MUTED, HORIZONTAL_ALIGNMENT_LEFT))
-	_streak_kills_label = Kit.label("2 KILLS", 13, T.C_TEXT)
-	head.add_child(_streak_kills_label)
-	_streak_mult_label = Kit.label("x1.25", 15, T.C_GOLD, HORIZONTAL_ALIGNMENT_RIGHT)
-	head.add_child(_streak_mult_label)
-	_streak_bar = Kit.bar(T.C_GOLD, Color("3a2c14"), 6.0)
-	_streak_bar.max_value = 100.0
-	_streak_bar.value = 100.0
-	stack.add_child(_streak_bar)
-	_streak_panel.visible = false
+## A slip of paper in `col`, lined up on the column's edge.
+func _slip(col: VBoxContainer, node_name: String, accent := T.HAIRLINE) -> PanelContainer:
+	var slip := Kit.sheet(col, "slip", accent)
+	slip.name = node_name
+	var left := col.grow_horizontal == Control.GROW_DIRECTION_END
+	slip.size_flags_horizontal = Control.SIZE_SHRINK_BEGIN if left else Control.SIZE_SHRINK_END
+	return slip
 
 
-## Fading title card used for room entries and the boss reveal.
-func _build_banner(node_name: String, top: float, bottom: float, minimum: Vector2, title_size: int, sub_size: int, accent: Color, background: Color) -> Dictionary:
-	var center := _hud_strip(node_name, Control.PRESET_TOP_WIDE, top, bottom)
-	var panel := Kit.passive_panel(center, T.panel_box(background, accent, 10, 1, 12), minimum)
-	var stack := Kit.padded_stack(panel, 28, 10, 1)
-	var sub := Kit.label("", sub_size, T.C_MUTED)
-	stack.add_child(sub)
-	var title := Kit.label("", title_size, accent)
-	stack.add_child(title)
-	center.visible = false
-	return { "root": center, "title": title, "sub": sub, "tween": null }
+## A row that lets clicks through, spaced on the grid.
+static func _row(separation := T.S2) -> HBoxContainer:
+	var row := HBoxContainer.new()
+	row.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	row.add_theme_constant_override("separation", separation)
+	return row
 
 
-func _play_banner(banner: Dictionary, title: String, subtitle: String, hold: float) -> void:
-	(banner.title as Label).text = title
-	(banner.sub as Label).text = subtitle
-	banner.tween = Kit.flash_card(banner.root, banner.tween, 0.22, hold, 0.55)
+## A full-width band of the frame that centres whatever note it holds. With
+## PRESET_BOTTOM_WIDE, negative offsets measure up from the bottom edge. The
+## band remembers where it rests, so a note that slid or folded goes back.
+func _band(node_name: String, preset: Control.LayoutPreset, top: float, bottom: float) -> CenterContainer:
+	var band := CenterContainer.new()
+	band.name = node_name
+	band.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	add_child(band)
+	band.set_anchors_and_offsets_preset(preset)
+	band.offset_top = top
+	band.offset_bottom = bottom
+	band.set_meta("rest", Vector2(top, bottom))
+	band.visible = false
+	return band
 
 
-## Cut a title card short: stop its fade and hide it.
-func _hide_banner(banner: Dictionary) -> void:
-	if banner.is_empty():
-		return
-	Kit.kill_tween(banner.tween)
-	(banner.root as Control).visible = false
+# --- The knight's slip -------------------------------------------------------------
+
+## The flame portrait, then three lines: vitality with its numeral, the
+## Graveflame notched at each Lance's cost with the Ignite key, and the flasks
+## with the Flask key. Both meters end at the same x.
+func _build_knight_slip(col: VBoxContainer) -> void:
+	var row := _row(T.S3)
+	_slip(col, "KnightSlip").add_child(row)
+	_flame = Kit.vital_flame(52.0)
+	row.add_child(_flame)
+	var gauges := VBoxContainer.new()
+	gauges.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	gauges.custom_minimum_size.x = 206.0
+	gauges.alignment = BoxContainer.ALIGNMENT_CENTER
+	gauges.add_theme_constant_override("separation", T.S1 + 1)
+	row.add_child(gauges)
+	_vitality = Kit.meter(T.BLOOD, 12.0)
+	_vitality_value = Kit.label("", T.NUMERAL, T.BONE, HORIZONTAL_ALIGNMENT_RIGHT)
+	_vitality_value.add_theme_font_size_override("font_size", 18)
+	_gauge(gauges, _vitality, _vitality_value)
+	_graveflame = Kit.meter(T.SPIRIT, 8.0, _lance_marks(Content.P_SPECIAL_MAX))
+	_ignite = Kit.glyph("ignite", 18.0)
+	_gauge(gauges, _graveflame, _ignite)
+	var belt := _row()
+	gauges.add_child(belt)
+	_flasks = Kit.pips(Content.FLASK_MAX, Content.FLASK_MAX, "flame")
+	_flasks.spacing = 14.0
+	belt.add_child(_flasks)
+	_heal = Kit.glyph("heal", 18.0)
+	belt.add_child(_heal)
+	_paint_ignite(false)
 
 
-func _build_player_status() -> void:
-	var panel := Kit.passive_panel(self, T.panel_box(Color("100c16b8"), Color("3a3048"), 8, 1, 6))
-	panel.name = "PlayerStatus"
-	panel.set_anchors_and_offsets_preset(Control.PRESET_TOP_LEFT)
-	panel.offset_left = 16.0
-	panel.offset_top = 14.0
-	panel.offset_right = 296.0
-	panel.offset_bottom = 112.0
-	var stack := Kit.padded_stack(panel, 12, 8, 5)
-
-	_hp_value_label = Kit.stat_line(stack, "VITALITY", "100 / 100", T.C_TEXT, 11)
-	var hp_pair := Kit.trailed_bar(T.C_RED, Color("4a1820"), 12.0)
-	stack.add_child(hp_pair.holder)
-	_hp_bar = hp_pair.bar
-	_hp_trail = hp_pair.trail
-
-	_special_value_label = Kit.stat_line(stack, "GRAVEFLAME", "0 / 100", T.C_BLUE, 10)
-	_special_bar = Kit.bar(T.C_BLUE, Color("153243"), 7.0)
-	_special_bar.max_value = Content.P_SPECIAL_MAX
-	_special_bar.value = 0.0
-	_special_fill = _special_bar.get_theme_stylebox("fill") as StyleBoxFlat
-	stack.add_child(_special_bar)
-	Kit.notch_bar(_special_bar, _lance_marks(Content.P_SPECIAL_MAX))
-
-	var supplies := HBoxContainer.new()
-	supplies.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	supplies.add_theme_constant_override("separation", 8)
-	stack.add_child(supplies)
-	var flask_tag := Kit.label("FLASK", 10, T.C_MUTED, HORIZONTAL_ALIGNMENT_LEFT)
-	flask_tag.size_flags_horizontal = Control.SIZE_SHRINK_BEGIN
-	supplies.add_child(flask_tag)
-	_flask_container = HBoxContainer.new()
-	_flask_container.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	_flask_container.add_theme_constant_override("separation", 5)
-	_flask_container.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	supplies.add_child(_flask_container)
-	_flask_count_label = Kit.label("", 10, T.C_MINT, HORIZONTAL_ALIGNMENT_RIGHT)
-	_flask_count_label.size_flags_horizontal = Control.SIZE_SHRINK_END
-	supplies.add_child(_flask_count_label)
-	_rebuild_flask_sigils(Content.FLASK_MAX)
+## One gauge line: the meter fills the width and its mark stands in a fixed
+## slot after it, so a longer numeral never shortens the meter.
+func _gauge(gauges: VBoxContainer, meter: Kit.Meter, mark: Control) -> void:
+	var line := _row()
+	gauges.add_child(line)
+	meter.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	meter.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+	line.add_child(meter)
+	var slot := _row(0)
+	slot.alignment = BoxContainer.ALIGNMENT_END
+	slot.custom_minimum_size.x = 34.0
+	line.add_child(slot)
+	mark.size_flags_horizontal = Control.SIZE_SHRINK_END
+	slot.add_child(mark)
 
 
-func _build_run_status() -> void:
-	var panel := Kit.passive_panel(self, T.panel_box(Color("100c16b8"), Color("3a3048"), 8, 1, 6))
-	panel.name = "RunStatus"
-	panel.set_anchors_and_offsets_preset(Control.PRESET_TOP_RIGHT)
-	panel.offset_left = -226.0
-	panel.offset_top = 14.0
-	panel.offset_right = -16.0
-	panel.offset_bottom = 132.0
-	var stack := Kit.padded_stack(panel, 12, 8, 4)
+## Kit meters flicker their burning tip every frame. The HUD lets a meter
+## flicker only while it carries news (Ignite ready, vitality low, the Warden
+## burning) and otherwise holds its tip still, so an idle HUD never redraws.
+static func _animate(meter: Kit.Meter, on: bool) -> void:
+	meter.set_process(on)
 
-	_room_label = Kit.label("ROOM 01 / 06", 12, T.C_EMBER_HI, HORIZONTAL_ALIGNMENT_RIGHT)
-	stack.add_child(_room_label)
-	_wave_label = Kit.label("", 11, T.C_MUTED, HORIZONTAL_ALIGNMENT_RIGHT)
-	_wave_label.visible = false
-	stack.add_child(_wave_label)
-	stack.add_child(Kit.separator(T.C_EDGE))
-	_score_label = Kit.stat_line(stack, "SCORE", "0", T.C_TEXT)
-	_cells_label = Kit.stat_line(stack, "CELLS", "0", T.C_GOLD)
-	_best_label = Kit.stat_line(stack, "BEST", "0", T.C_MUTED)
-
-
-func _build_boss_status() -> void:
-	_boss_panel = _hud_strip("BossStatusAnchor", Control.PRESET_TOP_WIDE, 18.0, 96.0)
-	var panel := Kit.passive_panel(_boss_panel, T.panel_box(Color("221019e6"), Color("8e3c49"), 10, 1, 8), Vector2(470, 70))
-	panel.name = "BossStatus"
-	var stack := Kit.padded_stack(panel, 18, 10, 4)
-	var head := HBoxContainer.new()
-	head.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	stack.add_child(head)
-	_boss_name_label = Kit.label("THE EMBER WARDEN", 13, Color("f2c3c6"), HORIZONTAL_ALIGNMENT_LEFT)
-	head.add_child(_boss_name_label)
-	_boss_value_label = Kit.label("", 12, T.C_RED, HORIZONTAL_ALIGNMENT_RIGHT)
-	head.add_child(_boss_value_label)
-	var boss_pair := Kit.trailed_bar(Color("b94350"), Color("41131b"), 13.0)
-	stack.add_child(boss_pair.holder)
-	_boss_bar = boss_pair.bar
-	_boss_trail = boss_pair.trail
-	# The Warden ignites at this mark, so the fight's midpoint is readable.
-	Kit.notch_bar(boss_pair.holder, [Content.BOSS_PHASE2_AT])
-	_boss_panel.visible = false
-
-
-func _build_boss_phase_tag() -> void:
-	# Compact phase-2 callout pinned under the boss bar: never center-screen.
-	_boss_phase_tag = Kit.label("", 13, Color("f2c3c6"))
-	_boss_phase_tag.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	_boss_phase_tag.set_anchors_and_offsets_preset(Control.PRESET_CENTER_TOP)
-	_boss_phase_tag.offset_left = -260.0
-	_boss_phase_tag.offset_right = 260.0
-	_boss_phase_tag.offset_top = 100.0
-	_boss_phase_tag.offset_bottom = 124.0
-	_boss_phase_tag.visible = false
-	add_child(_boss_phase_tag)
-
-
-func _build_room_clear_banner() -> void:
-	_room_clear_banner = _hud_strip("RoomClearBanner", Control.PRESET_TOP_WIDE, ROOM_CLEAR_TOP, ROOM_CLEAR_TOP + 104.0)
-	var panel := Kit.passive_panel(_room_clear_banner, T.panel_box(Color("141020eb"), T.C_MINT, 10, 1, 12), Vector2(490, 88))
-	var stack := Kit.padded_stack(panel, 24, 10, 1)
-	stack.add_child(Kit.label("CHAMBER CLEARED", 22, T.C_MINT))
-	_room_clear_name = Kit.label("PATH UNSEALED", 12, T.C_MUTED)
-	stack.add_child(_room_clear_name)
-	# The litany is printed on the card itself, so it is read with the card
-	# and leaves with it (show_litany).
-	_litany = Kit.label("", T.VOICE, T.ASH)
-	_litany.visible = false
-	stack.add_child(_litany)
-	_room_clear_banner.visible = false
-
-
-## The inscription carries no paper: only the keep's voice, ink-haloed so it
-## holds over a lit chamber, placed above the fight.
-func _build_story_lines() -> void:
-	var holder := _hud_strip("Inscription", Control.PRESET_TOP_WIDE, 150.0, 290.0)
-	_inscription = VBoxContainer.new()
-	_inscription.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	_inscription.add_theme_constant_override("separation", T.S2)
-	holder.add_child(_inscription)
-	holder.visible = false
-
-
-## A full-width HUD strip that centres whatever card it holds. With
-## PRESET_BOTTOM_WIDE, negative offsets measure up from the bottom edge.
-func _hud_strip(node_name: String, preset: Control.LayoutPreset, top: float, bottom: float) -> CenterContainer:
-	var center := CenterContainer.new()
-	center.name = node_name
-	center.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	add_child(center)
-	center.set_anchors_and_offsets_preset(preset)
-	center.offset_top = top
-	center.offset_bottom = bottom
-	return center
-
-
-# --- Prompts -----------------------------------------------------------------------
-
-## Repaint every key prompt the HUD shows (see UiInput.PROMPT_GROUP).
-func refresh_prompts() -> void:
-	_paint_flask_label()
-	_paint_special_label()
-	if _hint_panel.visible:
-		_hint_label.text = UiInput.fill_prompts(_hint_template)
-
-
-# --- Vitality, Graveflame, flasks --------------------------------------------------
 
 func set_hp(hp: float, max_hp: float) -> void:
-	_set_trailed(_hp_bar, _hp_trail, hp, max_hp)
-	_hp_value_label.text = "%d / %d" % [roundi(hp), roundi(max_hp)]
-
-
-## Losses hold as a pale chip for a beat, then drain; gains fill at once.
-func _set_trailed(front: ProgressBar, trail: ProgressBar, value: float, maximum: float) -> void:
-	front.max_value = maxf(1.0, maximum)
-	trail.max_value = front.max_value
-	var v := clampf(value, 0.0, front.max_value)
-	front.value = v
-	Kit.kill_tween(_trail_tweens.get(trail))
-	if v >= trail.value or Feedback.motion_reduced:
-		trail.value = v
-		return
-	var tw := Kit.tween(self)
-	tw.tween_interval(0.35)
-	tw.tween_property(trail, "value", v, 0.45).set_trans(Tween.TRANS_SINE).set_ease(Tween.EASE_IN_OUT)
-	_trail_tweens[trail] = tw
+	_vitality.set_value(hp, max_hp)
+	_vitality_value.text = str(maxi(0, roundi(hp)))
+	var share := clampf(hp / maxf(1.0, max_hp), 0.0, 1.0)
+	var low := share <= LOW_VITALITY
+	_flame.vitality = share
+	if _flame.guttering != low:
+		_flame.guttering = low
+		_animate(_vitality, low)
+		_vitality_value.add_theme_color_override("font_color", T.BLOOD if low else T.BONE)
 
 
 func set_special(value: float, maximum: float) -> void:
-	_special_bar.max_value = maxf(1.0, maximum)
-	_special_bar.value = clampf(value, 0.0, maximum)
-	var was_ready := _ignite_ready()
-	_special_shown = Vector2(value, maximum)
-	if _ignite_ready() != was_ready:
-		_set_ignite_ready(_ignite_ready())
-	_paint_special_label()
+	_graveflame.set_value(value, maximum)
+	var ready := value >= maximum
+	if ready != _ignite_ready:
+		_paint_ignite(ready)
 
 
-## Whether the Graveflame on the HUD is full, which is what Ignite spends.
-func _ignite_ready() -> bool:
-	return _special_shown.x >= _special_shown.y
-
-
-## A full Graveflame names the Ignite key in gold; otherwise the count.
-func _paint_special_label() -> void:
-	var lit := _ignite_ready()
-	if lit:
-		_special_value_label.text = "IGNITE  %s" % UiInput.prompt("ignite")
-	else:
-		_special_value_label.text = "%d / %d" % [roundi(_special_shown.x), roundi(_special_shown.y)]
-	_special_value_label.add_theme_color_override("font_color", T.C_GOLD if lit else T.C_BLUE)
-
-
-## While Ignite is ready the fill breathes between blue and white-hot, so a
-## full bar reads as a prompt; reduced motion holds it white-hot instead.
-func _set_ignite_ready(lit: bool) -> void:
-	Kit.kill_tween(_ignite_tween)
-	var hot := T.C_BLUE.lerp(Color.WHITE, 0.75)
-	_special_fill.bg_color = hot if lit else T.C_BLUE
-	if not lit or Feedback.motion_reduced:
-		return
-	_ignite_tween = Kit.tween(self).set_loops()
-	_ignite_tween.tween_property(_special_fill, "bg_color", T.C_BLUE, 0.42).set_trans(Tween.TRANS_SINE)
-	_ignite_tween.tween_property(_special_fill, "bg_color", hot, 0.42).set_trans(Tween.TRANS_SINE)
+## A full Graveflame is a prompt: the meter breathes white-hot, the Ignite key
+## lights in ember and the knight's flame roars. Otherwise the key waits dim.
+func _paint_ignite(ready: bool) -> void:
+	_ignite_ready = ready
+	_graveflame.hot = ready
+	_graveflame.queue_redraw()
+	_animate(_graveflame, ready)
+	_ignite.lit = ready
+	_ignite.modulate.a = 1.0 if ready else 0.4
+	_flame.roaring = ready
 
 
 ## Notch fractions for every Lance's worth of Graveflame below a full bar.
@@ -384,73 +259,176 @@ static func _lance_marks(maximum: float) -> Array:
 	return marks
 
 
+## A lit flame per charge on the belt, a snuffed wick per spent one. A charge
+## that comes back pops the belt, so a refill is noticed mid-fight.
 func set_flask(charges: int, max_charges: int) -> void:
-	var safe_max := maxi(0, max_charges)
-	var safe_charges := clampi(charges, 0, safe_max)
-	if _flask_sigils.size() != safe_max:
-		_rebuild_flask_sigils(safe_max)
-	for i in range(_flask_sigils.size()):
-		_fill_flask_sigil(_flask_sigils[i], i < safe_charges, i >= _flask_shown.x and i < safe_charges)
-	_flask_shown = Vector2i(safe_charges, safe_max)
-	_paint_flask_label()
+	var belt := maxi(0, max_charges)
+	var lit := clampi(charges, 0, belt)
+	var refilled := lit > _flasks.filled and belt == _flasks.count
+	_flasks.count = belt
+	_flasks.filled = lit
+	_heal.modulate.a = 1.0 if lit > 0 else 0.4
+	if refilled:
+		_pop(_flasks, 1.3, Vector2(0.0, 0.5))
 
 
-func _paint_flask_label() -> void:
-	_flask_count_label.text = "%d / %d  %s" % [_flask_shown.x, _flask_shown.y, UiInput.prompt("heal")]
-
-
-## One flask sigil per charge on the belt, drawn like the Forge's flask relic.
-func _rebuild_flask_sigils(count: int) -> void:
-	Kit.clear_children(_flask_container)
-	_flask_sigils.clear()
-	for i in range(count):
-		var sigil := Kit.BoonSigil.new()
-		sigil.setup("flask", T.C_MINT, Vector2(16.0, 18.0))
-		sigil.pivot_offset = Vector2(8.0, 9.0)
-		_flask_container.add_child(sigil)
-		_flask_sigils.append(sigil)
-
-
-## A charged flask glows mint; a spent one is a dim ghost of the glass. A
-## charge that has just come back pops, so a refill is noticed mid-fight.
-func _fill_flask_sigil(sigil: Control, filled: bool, refilled: bool) -> void:
-	sigil.modulate = Color.WHITE if filled else Color(0.32, 0.4, 0.38, 0.55)
-	if not refilled or Feedback.motion_reduced:
+## Paper that just changed swells and settles. Reduced motion keeps it still.
+## `pivot` is the point it swells from, as a share of its size.
+func _pop(node: Control, swell: float, pivot: Vector2) -> void:
+	Kit.kill_tween(_motion.get(node))
+	node.scale = Vector2.ONE
+	if T.still():
 		return
-	sigil.scale = Vector2.ONE * 1.3
-	Kit.tween(self).tween_property(sigil, "scale", Vector2.ONE, 0.2).set_trans(Tween.TRANS_BACK).set_ease(Tween.EASE_OUT)
+	node.pivot_offset = node.size * pivot
+	node.scale = Vector2.ONE * swell
+	var t := Kit.tween(node)
+	t.tween_property(node, "scale", Vector2.ONE, T.MED).set_trans(Tween.TRANS_BACK).set_ease(Tween.EASE_OUT)
+	_motion[node] = t
 
 
-# --- Chamber track, score, cells ---------------------------------------------------
+# --- Fury --------------------------------------------------------------------------
+
+## A slim slip under the knight's: the tier's name, its pips, the multiplier
+## and a wick that burns down with the window to keep the fury alive.
+func _build_fury(col: VBoxContainer) -> void:
+	_fury = _slip(col, "Fury", T.GOLD)
+	var stack := VBoxContainer.new()
+	stack.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	stack.add_theme_constant_override("separation", 0)
+	_fury.add_child(stack)
+	var head := _row()
+	head.custom_minimum_size.x = 150.0
+	stack.add_child(head)
+	_fury_name = Kit.label("", T.CAPS, T.GOLD, HORIZONTAL_ALIGNMENT_LEFT)
+	_fury_name.size_flags_horizontal = Control.SIZE_SHRINK_BEGIN
+	head.add_child(_fury_name)
+	_fury_pips = Kit.pips(FURY_NAMES.size(), 1, "lozenge")
+	_fury_pips.spacing = 13.0
+	_fury_pips.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+	head.add_child(_fury_pips)
+	_fury_mult = Kit.label("", T.NUMERAL, T.GOLD, HORIZONTAL_ALIGNMENT_RIGHT)
+	_fury_mult.add_theme_font_size_override("font_size", 22)
+	head.add_child(_fury_mult)
+	_fury_wick = Kit.wick()
+	stack.add_child(_fury_wick)
+	_fury.visible = false
+
+
+func set_streak(kills: int, frac: float, mult: float) -> void:
+	if kills < 2:
+		hide_streak()
+		return
+	var tier := clampi(Content.streak_tier(kills), 1, FURY_NAMES.size())
+	if tier != _fury_tier:
+		var color: Color = T.STREAK_TIER_COLORS[tier]
+		_fury_name.text = FURY_NAMES[tier - 1]
+		_fury_pips.color = color
+		_fury_pips.filled = tier
+		_fury_wick.color = color
+		for word in [_fury_name, _fury_mult]:
+			word.add_theme_color_override("font_color", color)
+		_fury.add_theme_stylebox_override("panel", T.slip_style(color))
+		_fury.visible = true
+		if tier > _fury_tier:
+			_pop(_fury, 1.12, Vector2(0.0, 0.5))
+		_fury_tier = tier
+	_fury_mult.text = "×" + String.num(mult, 2)
+	_fury_wick.fraction = frac
+
+
+## The window drains every frame; everything else changes only on a kill.
+func set_streak_fraction(frac: float) -> void:
+	_fury_wick.fraction = frac
+
+
+func hide_streak() -> void:
+	Kit.kill_tween(_motion.get(_fury))
+	_fury.visible = false
+	_fury.scale = Vector2.ONE
+	_fury_tier = 0
+
+
+# --- Chamber track, cells, renown --------------------------------------------------
+
+## Top right: the descent as pips (cleared chambers gold, the current one a
+## flame, the throne a crown), the chamber by numeral and name, the waves of
+## this chamber, the cells carried, and renown, quieter below.
+func _build_chamber_track(col: VBoxContainer) -> void:
+	var stack := VBoxContainer.new()
+	stack.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	stack.add_theme_constant_override("separation", 1)
+	_slip(col, "ChamberTrack").add_child(stack)
+	_track = Kit.pips(8, 0)
+	_track.crowned = true
+	_track.size_flags_horizontal = Control.SIZE_SHRINK_END
+	stack.add_child(_track)
+	_chamber = Kit.label("", T.CAPS, T.BONE, HORIZONTAL_ALIGNMENT_RIGHT)
+	stack.add_child(_chamber)
+	var purse := _row()
+	stack.add_child(purse)
+	_waves = Kit.pips(0, 0, "lozenge", T.EMBER_HI)
+	_waves.spacing = 13.0
+	_waves.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+	_waves.visible = false
+	purse.add_child(_waves)
+	var cell := Kit.pips(1, 1, "cell")
+	cell.size_flags_horizontal = Control.SIZE_EXPAND | Control.SIZE_SHRINK_END
+	cell.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+	purse.add_child(cell)
+	_cells = Kit.label("0", T.NUMERAL, T.GOLD, HORIZONTAL_ALIGNMENT_RIGHT)
+	_cells.add_theme_font_size_override("font_size", 22)
+	_cells.size_flags_horizontal = Control.SIZE_SHRINK_END
+	purse.add_child(_cells)
+	var fame := _row()
+	stack.add_child(fame)
+	fame.add_child(Kit.label("RENOWN", T.MICRO, T.SOOT, HORIZONTAL_ALIGNMENT_LEFT))
+	_renown = Kit.label("0", T.CAPS, T.ASH, HORIZONTAL_ALIGNMENT_RIGHT)
+	fame.add_child(_renown)
+
 
 ## Seven chambers lead down to the throne, which is named rather than counted.
+## The chamber's own name joins its numeral when its card is dealt.
 func set_room(idx: int, total: int) -> void:
-	var chamber := "CHAMBER %s / %s" % [Kit.roman(idx + 1), Kit.roman(total - 1)]
-	_room_label.text = "THE EMBER THRONE" if idx >= total - 1 else chamber
+	var throne := idx >= total - 1
+	_track.count = total
+	_track.filled = total if throne else idx
+	_track.current = -1 if throne else idx
+	_chamber.text = "THE EMBER THRONE" if throne else "CHAMBER %s" % Kit.roman(idx + 1)
 
 
-## Waves remaining in the current chamber, so the fight has a visible end.
+## Waves in the current chamber, so the fight has a visible end: one pip per
+## wave, lit up to the one being fought.
 func set_wave(current: int, total: int) -> void:
-	_wave_label.text = "WAVE %d / %d" % [current, total]
-	_wave_label.visible = true
+	_waves.count = total
+	_waves.filled = current
+	_waves.visible = true
 	_wave_shown = Vector2i(current, total)
 
 
 func hide_wave() -> void:
-	_wave_label.visible = false
+	_waves.visible = false
 	_wave_shown = Vector2i.ZERO
 
 
 func set_score(score: int) -> void:
-	_score_label.text = Kit.format_number(score)
+	_renown_value = score
+	_paint_renown()
 
 
 func set_cells(value: int) -> void:
-	_cells_label.text = Kit.format_number(value)
+	_cells.text = Kit.format_number(value)
 
 
 func set_best(value: int) -> void:
-	_best_label.text = Kit.format_number(value)
+	_best = value
+	_paint_renown()
+
+
+## Renown turns gold once this descent climbs past the highest ever reached.
+func _paint_renown() -> void:
+	_renown.text = Kit.format_number(_renown_value)
+	var height := _best > 0 and _renown_value > _best
+	_renown.add_theme_color_override("font_color", T.GOLD if height else T.ASH)
 
 
 ## Ease the whole HUD out for a cinematic beat, or snap it back for play.
@@ -486,199 +464,270 @@ func track_threats(enemies: Array, view: Transform2D) -> void:
 
 
 ## Small cut-paper arrowheads at the frame's edge, each pointing at a foe
-## beyond it in that foe's colour. A foe winding up gets a larger arrow that
-## throbs (steady under reduced motion); a straggler's is small and still.
+## beyond it in that foe's colour. A foe winding up gets a larger arrow in an
+## ember halo that throbs (steady under reduced motion); a straggler's is
+## small and still. Repaints only when a pip moves or throbs.
 class ThreatPips extends Control:
 	const INSET := 22.0
 	var _pips: Array = []
 
 	func show_pips(pips: Array) -> void:
-		if pips.is_empty() and _pips.is_empty():
+		var throbbing := pips.any(func(p): return p.winding) and not T.still()
+		if pips == _pips and not throbbing:
 			return
 		_pips = pips
 		queue_redraw()
 
 	func _draw() -> void:
+		var ci := get_canvas_item()
 		var t := Time.get_ticks_msec() * 0.001
 		for pip in _pips:
-			var span := 13.0 if pip.winding else 9.0
-			if pip.winding and not Feedback.motion_reduced:
-				span *= 1.0 + 0.18 * sin(t * 14.0)
-			draw_set_transform(pip.at, float(pip.angle))
+			var span := 14.0 if pip.winding else 9.0
+			if pip.winding and not T.still():
+				span *= 1.0 + 0.16 * sin(t * 14.0)
 			# A notched arrowhead, tip first, pointing along +x.
-			var head := PackedVector2Array([
+			var head := Transform2D(float(pip.angle), pip.at) * PackedVector2Array([
 				Vector2(span, 0.0), Vector2(-0.7 * span, -0.75 * span),
 				Vector2(-0.35 * span, 0.0), Vector2(-0.7 * span, 0.75 * span),
 			])
-			var shadow := head.duplicate()
-			for i in range(shadow.size()):
-				shadow[i] += Vector2(2.0, 3.0).rotated(-float(pip.angle))
-			draw_colored_polygon(shadow, Color(0.0, 0.0, 0.0, 0.55))
-			draw_colored_polygon(head, pip.color)
-			head.append(head[0])
-			draw_polyline(head, Color("100d18"), 1.5)
-		draw_set_transform(Vector2.ZERO)
+			P.fill(ci, P.moved(head, Vector2(2.0, 3.0)), Color(0.0, 0.0, 0.0, 0.55))
+			if pip.winding:
+				P.halo(ci, head, Color(T.EMBER, 0.9))
+			P.fill(ci, head, pip.color)
+			P.stroke(ci, head, T.INK, 1.5)
 
 
 # --- The Warden --------------------------------------------------------------------
 
+## A torn strip in the Warden's red across the top: its name, its vitality,
+## and a wax seal at each turn of the fight, broken as the fight passes it.
+## The phase tag hangs under it on a slip of its own.
+func _build_warden() -> void:
+	_warden = _band("Warden", Control.PRESET_TOP_WIDE, 10.0, 94.0)
+	var strip := Kit.sheet(_warden, "strip", T.WARDEN, Vector2(480.0, 0.0))
+	var stack := VBoxContainer.new()
+	stack.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	stack.add_theme_constant_override("separation", T.S1)
+	strip.add_child(stack)
+	var head := _row()
+	stack.add_child(head)
+	_warden_name = Kit.label("The Ember Warden", T.SUBHEAD, T.BONE, HORIZONTAL_ALIGNMENT_LEFT)
+	head.add_child(_warden_name)
+	_warden_value = Kit.label("", T.CAPS, T.WAX_HI, HORIZONTAL_ALIGNMENT_RIGHT)
+	_warden_value.size_flags_horizontal = Control.SIZE_SHRINK_END
+	head.add_child(_warden_value)
+	_warden_meter = Kit.meter(T.WARDEN, 12.0, WARDEN_TURNS)
+	stack.add_child(_warden_meter)
+	for turn in WARDEN_TURNS:
+		_warden_seals.append(Kit.meter_seal(_warden_meter, turn, 22.0))
+	_phase_tag = _band("WardenPhase", Control.PRESET_TOP_WIDE, 94.0, 130.0)
+	var tag := Kit.caption("", T.WARDEN)
+	_phase_tag.add_child(tag)
+	_phase_text = tag.get_child(0) as Label
+	_phase_text.add_theme_font_override("font", T.font(T.CAPS))
+	_phase_text.add_theme_font_size_override("font_size", T.size(T.CAPS))
+	_phase_text.add_theme_color_override("font_color", T.EMBER_HI)
+
+
 func show_boss_bar(max_hp: float) -> void:
-	_boss_panel.visible = true
-	_boss_bar.max_value = maxf(1.0, max_hp)
-	_boss_bar.value = max_hp
-	_boss_trail.max_value = _boss_bar.max_value
-	_boss_trail.value = max_hp
-	_boss_value_label.text = str(roundi(max_hp))
+	_warden.visible = true
+	_warden_meter.set_value(max_hp, max_hp)
+	_warden_value.text = str(roundi(max_hp))
+	for seal in _warden_seals:
+		seal.broken = false
 	_set_boss_ignited(false)
 
 
+## Called every frame of the throne fight; repaints only when the Warden's
+## vitality moves. Each turn of the fight it passes breaks its seal.
 func update_boss_bar(hp: float) -> void:
-	if not is_equal_approx(hp, _boss_bar.value):
-		_set_trailed(_boss_bar, _boss_trail, hp, _boss_bar.max_value)
-	_boss_value_label.text = str(maxi(0, roundi(hp)))
-	if not _boss_ignited and hp <= _boss_bar.max_value * Content.BOSS_PHASE2_AT:
+	if is_equal_approx(hp, _warden_meter.value):
+		return
+	_warden_meter.set_value(hp, _warden_meter.max_value)
+	_warden_value.text = str(maxi(0, roundi(hp)))
+	var share := hp / _warden_meter.max_value
+	for i in range(WARDEN_TURNS.size()):
+		if share <= WARDEN_TURNS[i] and not _warden_seals[i].broken:
+			_warden_seals[i].broken = true
+			_pop(_warden_seals[i], 1.6, Vector2(0.5, 0.5))
+	if not _boss_ignited and share <= Content.BOSS_PHASE2_AT:
 		_set_boss_ignited(true)
 
 
-## Past the phase notch the Warden burns: its bar and name take the ember.
+## Past its first seal the Warden burns: its meter takes the ember and its
+## leading edge flickers for the rest of the fight.
 func _set_boss_ignited(on: bool) -> void:
 	_boss_ignited = on
-	_boss_bar.add_theme_stylebox_override("fill", T.bar_box(T.C_EMBER if on else Color("b94350")))
-	_boss_name_label.text = "THE EMBER WARDEN  ·  IGNITED" if on else "THE EMBER WARDEN"
-	_boss_name_label.add_theme_color_override("font_color", T.C_EMBER_HI if on else Color("f2c3c6"))
+	_warden_meter.fill = T.EMBER if on else T.WARDEN
+	_warden_meter.queue_redraw()
+	_animate(_warden_meter, on)
 
 
 func hide_boss_bar() -> void:
-	_boss_panel.visible = false
+	_warden.visible = false
+	_animate(_warden_meter, false)
 
 
-## Phase-2 callout: a small tag under the boss bar that fades on its own.
+## The phase callout: a small slip hung under the Warden's strip, never over
+## the fighters. It drops in, holds and folds away on its own.
 func flash_boss_phase(text: String, hold: float = 1.7) -> void:
-	_boss_phase_tag.text = text
-	_boss_phase_tween = Kit.flash_card(_boss_phase_tag, _boss_phase_tween, 0.18, hold, 0.5)
+	_phase_text.text = text.to_upper()
+	_note(_phase_tag, Vector2(0.0, -8.0), hold)
 
 
 func show_boss_intro(boss_name: String, subtitle: String, hold: float = 2.4) -> void:
-	# The boss card owns the screen: drop any chamber card still fading out,
-	# and any lesson in the low strip it now covers.
-	_hide_banner(_room_intro)
+	# The Warden's card owns the frame: drop any chamber card still folding,
+	# and any lesson in the low band it now covers.
+	_room_intro.stop()
 	hide_hint()
-	_play_banner(_boss_intro, boss_name.to_upper(), subtitle.to_upper(), hold)
+	_warden_name.text = boss_name
+	_boss_intro.play(subtitle.to_upper(), boss_name, "", hold)
 
 
-# --- Streak ------------------------------------------------------------------------
+# --- Chamber cards -----------------------------------------------------------------
 
-func set_streak(kills: int, frac: float, mult: float) -> void:
-	if _streak_panel == null:
-		return
-	if kills < 2:
-		hide_streak()
-		return
-	_streak_panel.visible = true
-	_streak_kills_label.text = "%d KILLS" % kills
-	_streak_mult_label.text = "x" + String.num(mult, 2)
-	_streak_bar.value = clampf(frac, 0.0, 1.0) * 100.0
-	var tier := Content.streak_tier(kills)
-	var col: Color = T.STREAK_TIER_COLORS[clampi(tier, 0, T.STREAK_TIER_COLORS.size() - 1)]
-	_streak_mult_label.add_theme_color_override("font_color", col)
-	_streak_bar.add_theme_stylebox_override("fill", T.bar_box(col))
-	if tier > _streak_tier and not Feedback.motion_reduced:
-		Kit.kill_tween(_streak_tween)
-		_streak_panel.scale = Vector2(1.12, 1.12)
-		_streak_tween = Kit.tween(self)
-		_streak_tween.tween_property(_streak_panel, "scale", Vector2.ONE, 0.22).set_trans(Tween.TRANS_BACK).set_ease(Tween.EASE_OUT)
-	_streak_tier = tier
+## A wax seal pinned over the left end of a banner's strip, riding its
+## unroll: the Trial's mark on the chamber card.
+static func _pin_seal(banner: Kit.Banner, emboss: String) -> Kit.Seal:
+	var pin := Control.new()
+	pin.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	banner.strip.add_child(pin)
+	var seal := Kit.seal(34.0, T.WAX, emboss)
+	pin.add_child(seal)
+	seal.set_anchors_preset(Control.PRESET_CENTER_LEFT)
+	seal.offset_left = -T.S6 - 17.0
+	seal.offset_right = -T.S6 + 17.0
+	seal.offset_top = -17.0
+	seal.offset_bottom = 17.0
+	seal.visible = false
+	return seal
 
-
-## The streak timer drains every frame; everything else changes only on a kill.
-func set_streak_fraction(frac: float) -> void:
-	_streak_bar.value = clampf(frac, 0.0, 1.0) * 100.0
-
-
-func hide_streak() -> void:
-	if _streak_panel != null:
-		_streak_panel.visible = false
-		_streak_panel.scale = Vector2.ONE
-	_streak_tier = 0
-
-
-# --- Chamber cards and lessons -----------------------------------------------------
 
 func show_room_intro(idx: int, total: int, room_name: String, trial: bool = false) -> void:
-	var sub := "CHAMBER %s OF %s" % [Kit.roman(idx + 1), Kit.roman(total - 1)]
+	var numeral := Kit.roman(idx + 1)
+	_chamber.text = "%s · %s" % [numeral, room_name.to_upper()]
+	var kicker := "CHAMBER %s OF %s" % [numeral, Kit.roman(total - 1)]
 	if trial:
-		sub += "  ·  TRIAL"
-	_play_banner(_room_intro, room_name.to_upper(), sub, 1.5)
+		kicker += "  ·  TRIAL"
+	_trial_seal.visible = trial
+	_room_intro.play(kicker, room_name.to_lower().capitalize(), "", 1.5)
 
 
-## The clear card lands, holds, then steps aside into a small chip in the top
-## slot, so it no longer hangs over the walk to the rifts.
+## The clear card (a strip in verdigris under the Warden's slot) and the chip
+## it steps aside into: a slip in the top slot that stays until a rift is
+## taken, saying only where to go.
+func _build_clear() -> void:
+	_clear = Kit.banner(self, T.VERDIGRIS, 100.0, 216.0, T.HEADLINE, T.VERDIGRIS)
+	_clear.name = "ClearCard"
+	_chip = _band("ClearChip", Control.PRESET_TOP_WIDE, 14.0, 54.0)
+	var line := _row()
+	Kit.sheet(_chip, "slip", T.VERDIGRIS).add_child(line)
+	line.add_child(Kit.seal(20.0, T.VERDIGRIS.darkened(0.5), "tick"))
+	line.add_child(Kit.label("THE WAY OPENS", T.CAPS, T.VERDIGRIS, HORIZONTAL_ALIGNMENT_LEFT))
+	line.add_child(Kit.label("·", T.CAPS, T.SOOT))
+	line.add_child(Kit.label("CHOOSE A RIFT", T.CAPS, T.BONE, HORIZONTAL_ALIGNMENT_LEFT))
+
+
 func show_room_clear(room_name: String) -> void:
 	hide_room_clear()
-	_hide_banner(_room_intro)
+	_room_intro.stop()
 	_hide_inscription()
-	_room_clear_name.text = room_name.to_upper() if not room_name.strip_edges().is_empty() else "PATH UNSEALED"
-	_room_clear_banner.visible = true
-	_room_clear_banner.modulate = Color(1.0, 1.0, 1.0, 0.0)
-	_play_clear_card(CLEAR_HOLD)
+	_clear_name = room_name.strip_edges().to_upper()
+	_play_clear("")
 
 
-## Land the clear card (from wherever its fade stands), hold it `hold`
-## seconds, then shrink it into the chip in the top slot.
-func _play_clear_card(hold: float) -> void:
-	Kit.kill_tween(_room_clear_tween)
-	_room_clear_banner.pivot_offset = Vector2(_room_clear_banner.size.x * 0.5, 0.0)
-	var settle := 0.0 if Feedback.motion_reduced else 0.35
-	_room_clear_tween = Kit.tween(self)
-	_room_clear_tween.tween_property(_room_clear_banner, "modulate", Color.WHITE, 0.16)
-	_room_clear_tween.tween_interval(hold)
-	_room_clear_tween.tween_callback(_room_clear_to_chip)
-	_room_clear_tween.tween_property(_room_clear_banner, "scale", Vector2.ONE * 0.7, settle).set_trans(Tween.TRANS_SINE)
-	_room_clear_tween.parallel().tween_property(_room_clear_banner, "position:y", 12.0, settle).set_trans(Tween.TRANS_SINE)
+## A litany line printed on the clear card: it fades in just after the card
+## lands, the card stands longer so it can be read, and it leaves with the
+## card when the card steps aside into its chip. Call it with or after
+## show_room_clear; after the card has stepped aside, the card comes back
+## to carry it.
+func show_litany(text: String) -> void:
+	if not _clear_name.is_empty():
+		_play_clear(text)
 
 
-## The chip says what to do next, set larger so it stays legible once shrunk.
-## The litany has been read by now; the chip carries only the direction.
-func _room_clear_to_chip() -> void:
-	_room_clear_name.text = "PATH UNSEALED  ·  CHOOSE A RIFT"
-	_room_clear_name.add_theme_font_size_override("font_size", 16)
+## Unroll the clear card naming the chamber (and its litany when there is
+## one), hold it long enough to read, then fold it away into the chip.
+func _play_clear(litany: String) -> void:
+	_drop(_chip)
+	var hold := CLEAR_HOLD + (0.0 if litany.is_empty() else LITANY_HOLD)
+	_clear.play(_clear_name, "The Way Opens", litany, hold).tween_callback(_note.bind(_chip, Vector2(0.0, 14.0), -1.0))
 	Kit.kill_tween(_litany_tween)
-	_litany.visible = false
+	if litany.is_empty():
+		return
+	_clear.line.modulate.a = 0.0
+	_litany_tween = Kit.tween(_clear.line)
+	_litany_tween.tween_interval(0.4)
+	_litany_tween.tween_property(_clear.line, "modulate:a", 1.0, 0.15 if T.still() else 0.6)
 
 
 func hide_room_clear() -> void:
-	if _litany != null:
-		Kit.kill_tween(_litany_tween)
-		_litany.visible = false
-	if _room_clear_banner != null:
-		Kit.kill_tween(_room_clear_tween)
-		_room_clear_banner.visible = false
-		_room_clear_banner.modulate = Color.WHITE
-		_room_clear_banner.scale = Vector2.ONE
-		_room_clear_banner.position.y = ROOM_CLEAR_TOP
-		_room_clear_name.add_theme_font_size_override("font_size", 12)
+	_clear_name = ""
+	_clear.stop()
+	Kit.kill_tween(_litany_tween)
+	_drop(_chip)
+
+
+# --- Notes: lessons, the phase tag, the chip ---------------------------------------
+
+## Lay a note down: it slides in from `from` and settles, holds `hold`
+## seconds and folds away; a negative hold keeps it until it is dropped.
+## Showing a note again replaces its last showing.
+func _note(note: Control, from: Vector2, hold: float) -> void:
+	_drop(note)
+	var t := Kit.slide_in(note, from)
+	if hold >= 0.0:
+		t.tween_interval(hold)
+		t.tween_callback(func() -> void: _motion[note] = Kit.fold_out(note))
+	_motion[note] = t
+
+
+## Take a note off the frame at once and set it back where it rests.
+func _drop(note: Control) -> void:
+	Kit.kill_tween(_motion.get(note))
+	note.visible = false
+	note.scale = Vector2.ONE
+	note.modulate = Color.WHITE
+	var rest: Vector2 = note.get_meta("rest")
+	note.offset_top = rest.x
+	note.offset_bottom = rest.y
+
+
+## Lessons sit in the low band, under the fight and clear of the HUD.
+func _build_hint() -> void:
+	_hint = _band("Lesson", Control.PRESET_BOTTOM_WIDE, -118.0, -58.0)
+	_hint_stack = Kit.padded_stack(Kit.sheet(_hint, "slip", T.EMBER), T.S1, 0, 0)
 
 
 ## Show a one-time lesson. Re-showing replaces the current one rather than
 ## stacking, so two triggers in the same second cannot queue up noise. The
-## lesson's {action} tokens become the player's live keys.
+## lesson's {action} tokens become the player's live key caps.
 func show_hint(text: String, hold: float = 4.5) -> void:
-	if _hint_panel == null:
-		return
-	_hint_template = text
-	_hint_label.text = UiInput.fill_prompts(text)
-	_hint_tween = Kit.flash_card(_hint_panel, _hint_tween, 0.25, hold, 0.5)
+	Kit.clear_children(_hint_stack)
+	_hint_line = Kit.prompt_line(text)
+	_hint_stack.add_child(_hint_line)
+	_note(_hint, Vector2(0.0, 12.0), hold)
 
 
 func hide_hint() -> void:
-	Kit.kill_tween(_hint_tween)
-	if _hint_panel != null:
-		_hint_panel.visible = false
+	_drop(_hint)
 
 
-## The keep speaks over a chamber: each line fades up in turn (the last in
-## gold), the lines hold, then all fade together. Replaces any inscription
-## still showing; never takes input. Opacity only, so reduced motion keeps it.
+# --- The keep's voice --------------------------------------------------------------
+
+## The inscription carries no paper: only the keep's voice, ink-haloed so it
+## holds over a lit chamber, placed above the fight.
+func _build_inscription() -> void:
+	var holder := _band("Inscription", Control.PRESET_TOP_WIDE, 150.0, 290.0)
+	_inscription = VBoxContainer.new()
+	_inscription.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_inscription.add_theme_constant_override("separation", T.S2)
+	holder.add_child(_inscription)
+
+
+## The keep speaks over a chamber: each line surfaces in turn (the last in
+## gold) with an ornament between, the lines hold, then all fade together.
+## Replaces any inscription still showing; never takes input.
 func show_inscription(lines: Array) -> void:
 	Kit.kill_tween(_inscription_tween)
 	Kit.clear_children(_inscription)
@@ -687,37 +736,41 @@ func show_inscription(lines: Array) -> void:
 	holder.modulate = Color.WHITE
 	_inscription_tween = Kit.tween(self)
 	for i in range(lines.size()):
-		var last := i == lines.size() - 1 and i > 0
 		if i > 0:
 			var mark := Kit.ornament(T.GOLD)
 			mark.modulate.a = 0.0
 			_inscription.add_child(mark)
 			_inscription_tween.tween_interval(0.5)
 			_inscription_tween.tween_property(mark, "modulate:a", 1.0, 0.3)
-		var line := Kit.outlined(Kit.label(str(lines[i]), T.VOICE, T.GOLD if last else T.BONE), 5)
-		line.add_theme_font_size_override("font_size", 24)
-		line.modulate.a = 0.0
-		_inscription.add_child(line)
-		_inscription_tween.tween_property(line, "modulate:a", 1.0, 0.9).set_trans(Tween.TRANS_SINE)
+		var last := i == lines.size() - 1 and i > 0
+		_surface(_voice_line(str(lines[i]), T.GOLD if last else T.BONE), 0.9)
 	_inscription_tween.tween_interval(3.5)
 	_inscription_tween.tween_property(holder, "modulate:a", 0.0, 0.9)
 	_inscription_tween.tween_callback(holder.hide)
 
 
-## A litany line printed on the chamber-clear card: it fades in just after
-## the card lands, the card stands longer so the line can be read, and it
-## leaves when the card steps aside into its chip. Call it with or after
-## show_room_clear.
-func show_litany(text: String) -> void:
-	Kit.kill_tween(_litany_tween)
-	_litany.text = text
-	_litany.visible = true
-	_litany.modulate.a = 0.0
-	_litany_tween = Kit.tween(self)
-	_litany_tween.tween_interval(0.4)
-	_litany_tween.tween_property(_litany, "modulate:a", 1.0, 0.6)
-	if _room_clear_banner.visible and _room_clear_banner.scale == Vector2.ONE:
-		_play_clear_card(CLEAR_HOLD + LITANY_HOLD)
+## A line of the keep's voice in a slot of its own size, so the words can
+## rise inside it while the column around them keeps still.
+func _voice_line(text: String, color: Color) -> Label:
+	var line := Kit.outlined(Kit.label(text, T.VOICE, color), 5)
+	line.add_theme_font_size_override("font_size", 24)
+	var slot := Control.new()
+	slot.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	slot.custom_minimum_size = line.get_combined_minimum_size()
+	slot.add_child(line)
+	line.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	slot.modulate.a = 0.0
+	_inscription.add_child(slot)
+	return line
+
+
+## The line's turn: it fades up while rising a few pixels into place. Reduced
+## motion keeps only the fade.
+func _surface(line: Label, duration: float) -> void:
+	var slot := line.get_parent() as Control
+	_inscription_tween.tween_property(slot, "modulate:a", 1.0, duration).set_trans(Tween.TRANS_SINE)
+	if not T.still():
+		_inscription_tween.parallel().tween_property(line, "position:y", 0.0, duration).from(10.0).set_trans(Tween.TRANS_SINE).set_ease(Tween.EASE_OUT)
 
 
 func _hide_inscription() -> void:
@@ -728,9 +781,7 @@ func _hide_inscription() -> void:
 func hide_banners() -> void:
 	_hide_inscription()
 	_threat_pips.show_pips([])
-	Kit.kill_tween(_boss_phase_tween)
-	if _boss_phase_tag != null:
-		_boss_phase_tag.visible = false
+	_drop(_phase_tag)
 	hide_hint()
-	for banner in [_room_intro, _boss_intro]:
-		_hide_banner(banner)
+	_room_intro.stop()
+	_boss_intro.stop()

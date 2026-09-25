@@ -86,27 +86,20 @@ func _test_boss_staging() -> void:
 func _test_phase_tag() -> void:
 	check(game.ui.has_method("flash_boss_phase"), "phase-2 callout renders as a small tag, not a center card")
 	game.ui.flash_boss_phase("THE WARDEN IGNITES")
-	var tag: Label = game.ui.get("_boss_phase_tag")
-	check(tag != null and tag.visible, "phase tag shows on trigger")
-	if tag != null:
-		var r: Rect2 = tag.get_global_rect()
-		check(r.position.y < float(Content.VIEW_H) * 0.3, "phase tag stays in the upper strip")
-		check(r.size.x < float(Content.VIEW_W) * 0.55, "phase tag never spans the combat plane")
+	var tag: Control = game.ui.hud._phase_tag.get_child(0)
+	check(tag.is_visible_in_tree(), "phase tag shows on trigger")
+	var r: Rect2 = tag.get_global_rect()
+	check(r.position.y < float(Content.VIEW_H) * 0.3, "phase tag stays in the upper strip")
+	check(r.size.x < float(Content.VIEW_W) * 0.55, "phase tag never spans the combat plane")
 
 
 func _test_banner_placement() -> void:
 	var hud_size := Vector2(float(Content.VIEW_W), float(Content.VIEW_H))
 	var upper_third := hud_size.y / 3.0
-	var clear_banner: Control = game.ui.get("_room_clear_banner")
-	check(clear_banner != null, "room-clear banner exists")
-	if clear_banner != null:
-		var r: Rect2 = clear_banner.get_global_rect()
-		check(r.position.y + r.size.y <= upper_third + 120.0, "room-clear banner stays out of the combat plane")
-	var room_intro: Dictionary = game.ui.get("_room_intro")
-	if not room_intro.is_empty():
-		var root_c: Control = room_intro["root"]
-		var r2: Rect2 = root_c.get_global_rect()
-		check(r2.position.y + r2.size.y * 0.5 <= hud_size.y * 0.55, "chamber card never covers the fighters")
+	var r: Rect2 = game.ui.hud._clear.get_global_rect()
+	check(r.position.y + r.size.y <= upper_third + 120.0, "room-clear banner stays out of the combat plane")
+	var r2: Rect2 = game.ui.hud._room_intro.get_global_rect()
+	check(r2.position.y + r2.size.y * 0.5 <= hud_size.y * 0.55, "chamber card never covers the fighters")
 
 
 ## Damage numbers must disambiguate: player-dealt vs player-taken, capped size.

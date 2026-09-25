@@ -39,7 +39,6 @@ const C_TEXT := UiTheme.C_TEXT
 const C_MUTED := UiTheme.C_MUTED
 const C_EMBER := UiTheme.C_EMBER
 const C_GOLD := UiTheme.C_GOLD
-const BarNotches := UiKit.BarNotches
 const KeptSeal := UiKit.KeptSeal
 
 var hud: UiHud
@@ -387,29 +386,3 @@ var _descent_detail: Label:
 	get: return screens._descent_detail
 var _descent_seed: Label:
 	get: return screens._descent_seed
-var _wave_label: Label:
-	get: return hud._wave_label
-var _room_label: Label:
-	get: return hud._room_label
-var _special_bar: ProgressBar:
-	get: return hud._special_bar
-var _special_value_label: Label:
-	get: return hud._special_value_label
-var _flask_sigils: Array:
-	get: return hud._flask_sigils
-var _flask_count_label: Label:
-	get: return hud._flask_count_label
-var _boss_ignited: bool:
-	get: return hud._boss_ignited
-var _boss_name_label: Label:
-	get: return hud._boss_name_label
-var _boss_intro: Dictionary:
-	get: return hud._boss_intro
-var _room_clear_banner: Control:
-	get: return hud._room_clear_banner
-var _hint_panel: Control:
-	get: return hud._hint_panel
-var _hint_label: Label:
-	get: return hud._hint_label
-var _threat_pips: UiHud.ThreatPips:
-	get: return hud._threat_pips
