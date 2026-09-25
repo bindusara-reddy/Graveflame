@@ -1409,21 +1409,29 @@ func _draw_fg_pillars(ci: CanvasItem, view: Rect2, rim: Color) -> void:
 		var x := _plane_x(depth, float(k) * 900.0 + _plane_hash(k, 162) * 300.0)
 		var shaft := Rect2(x - 35.0, view.position.y - 10.0, 70.0, view.size.y + 20.0)
 		var fade := _fg_alpha(shaft)
+		var seam := Color(FG_INK.lightened(0.08), fade)
 		ci.draw_rect(shaft, Color(FG_INK, fade))
-		ci.draw_rect(Rect2(shaft.end.x - 16.0, shaft.position.y, 10.0, shaft.size.y), Color(FG_INK.lightened(0.05), fade))
+		ci.draw_rect(Rect2(shaft.end.x - 16.0, shaft.position.y, 10.0, shaft.size.y), seam)
+		# Stone drums, so it reads as a pillar close to the eye and not a bar.
+		var drum := 150.0
+		for i in range(int(shaft.size.y / drum) + 1):
+			var y := shaft.position.y + drum - fposmod(shaft.position.y, drum) + float(i) * drum
+			ci.draw_line(Vector2(shaft.position.x, y), Vector2(shaft.end.x, y), seam, 2.0)
 		ci.draw_line(shaft.position + Vector2(1.0, 0.0), Vector2(shaft.position.x + 1.0, shaft.end.y), Color(rim, rim.a * fade), 1.5)
 
-## Opacity for a foreground silhouette over `area`: full with nobody behind it,
-## thinning to 0.3 as the knight or a creature comes within 70px, so a fighter
-## always shows through.
+## Opacity for a foreground silhouette over `area`: full with nothing behind it,
+## thinning to 0.3 as the knight, a creature or a rift comes within 70px, so a
+## fighter or the way out always shows through.
 func _fg_alpha(area: Rect2) -> float:
-	var nearest := INF
-	var fighters: Array = room.enemies.duplicate()
-	fighters.append(player)
-	for f in fighters:
+	var behind := PackedVector2Array()
+	for e in room.exits:
+		behind.append((e.rect as Rect2).get_center())
+	for f in room.enemies + [player]:
 		if is_instance_valid(f):
-			var p: Vector2 = f.global_position
-			nearest = minf(nearest, Vector2(maxf(0.0, maxf(area.position.x - p.x, p.x - area.end.x)), maxf(0.0, maxf(area.position.y - p.y, p.y - area.end.y))).length())
+			behind.append(f.global_position)
+	var nearest := INF
+	for p in behind:
+		nearest = minf(nearest, Vector2(maxf(0.0, maxf(area.position.x - p.x, p.x - area.end.x)), maxf(0.0, maxf(area.position.y - p.y, p.y - area.end.y))).length())
 	return lerpf(0.3, 1.0, clampf((nearest - 70.0) / 80.0, 0.0, 1.0))
 
 # --- Run lifecycle ---
