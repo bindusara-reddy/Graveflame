@@ -124,10 +124,10 @@ const FLOOR_FACE := 120.0
 ## Where the shaft opens onto the sky.
 const RIM_Y := -700.0
 ## The well is drawn from the knight's eye. Ledges above it sag toward the
-## viewer by SAG per unit of height, showing their undersides; the floor's
+## viewer, showing their undersides, up to SAG_RIM at the rim; the floor's
 ## far edge, below it, arches the other way.
-const EYE_Y := 550.0
-const SAG := 0.16
+const EYE_Y := 560.0
+const SAG_RIM := 200.0
 ## Interior half-width at the floor and at the rim: the walls lean in as they
 ## climb, the way a shaft converges when you look up it.
 const HALF_FLOOR := 740.0
@@ -237,7 +237,7 @@ func _init() -> void:
 	for i in range(LEVELS + 1):
 		var u := 1.0 - pow(1.0 - float(i) / LEVELS, 1.3)
 		var y := lerpf(FLOOR_Y, RIM_Y, u)
-		_rings.append({ "y": y, "w": half_width(y), "sag": SAG * (EYE_Y - y), "v": u })
+		_rings.append({ "y": y, "w": half_width(y), "sag": sag(y), "v": u })
 	painter(self, _draw_void)
 	_sky = painter(self, _draw_sky)
 	_dawn_sky = painter(self, _draw_dawn_sky)
@@ -286,6 +286,14 @@ static func painter(parent: Node, paint: Callable, mat: Material = null) -> Node
 ## Interior half-width of the shaft at height `y`.
 static func half_width(y: float) -> float:
 	return lerpf(HALF_FLOOR, HALF_RIM, clampf((FLOOR_Y - y) / (FLOOR_Y - RIM_Y), 0.0, 1.0))
+
+
+## How far a ring at height `y` sags at its far middle. Eased rather than
+## true to perspective, so even the first gallery over the knight's head
+## visibly curves round.
+static func sag(y: float) -> float:
+	var d := (EYE_Y - y) / (EYE_Y - RIM_Y)
+	return SAG_RIM * signf(d) * pow(absf(d), 0.7)
 
 
 ## Fire colours dim for reduced flash (the WardenArt convention).
@@ -805,16 +813,20 @@ func _draw_spill(ci: CanvasItem) -> void:
 	var bottom := FLOOR_Y + FLOOR_FACE
 	var front := bottom + 240.0 if still else lerpf(RIM_Y, bottom + 240.0, 1.0 - pow(1.0 - dawn, 1.6))
 	var strength := dawn if still else minf(1.0, dawn * 2.5)
+	# Rows curve like the galleries, the first along the rim's lip, so the
+	# light falls on the walls and never on the sky seen through the mouth.
+	var rim: Dictionary = _rings[LEVELS]
+	var top_sag := float(rim.sag) - _soffit(rim)
 	var m := PaperMesh.new()
-	var rows := 24
 	var prev := PackedVector2Array()
 	var prev_cols := PackedColorArray()
-	for k in range(rows + 1):
-		var y := lerpf(RIM_Y, minf(front, bottom), float(k) / rows)
-		var w := half_width(y)
-		var row := PackedVector2Array([Vector2(CX - w, y), Vector2(CX + w, y)])
-		var c := Color(DAWN_LIGHT, 0.2 * strength * (1.0 - smoothstep(front - 340.0, front, y)))
-		var cols := PackedColorArray([c, c])
+	for k in range(25):
+		var f := float(k) / 24.0
+		var y := lerpf(RIM_Y, minf(front, bottom), f)
+		var row := _arc({ "y": y, "w": half_width(y), "sag": top_sag * (1.0 - f) }, 0.0, 0.0, 24)
+		var cols := PackedColorArray()
+		for p in row:
+			cols.append(Color(DAWN_LIGHT, 0.2 * strength * (1.0 - smoothstep(front - 340.0, front, p.y))))
 		if k > 0:
 			m.band(prev, row, prev_cols, cols)
 		prev = row
