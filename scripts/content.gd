@@ -257,10 +257,10 @@ static func mood_for(progress: float) -> Dictionary:
 static var UPGRADES: Array = [
 	{ "id": "vitality",  "title": "Vitality",   "desc": "+25 max HP and full heal.",        "kind": "max_hp",     "value": 25.0, "rarity": "common" },
 	{ "id": "swift",     "title": "Swift Feet", "desc": "+12% move speed.",                 "kind": "speed_mul",  "value": 0.12, "rarity": "common" },
-	{ "id": "power",     "title": "Power",      "desc": "+20% melee damage.",               "kind": "dmg_mul",    "value": 0.20, "rarity": "common" },
+	{ "id": "power",     "title": "Grave Iron", "desc": "+20% melee damage.",               "kind": "dmg_mul",    "value": 0.20, "rarity": "common" },
 	{ "id": "edge",      "title": "Razor Edge", "desc": "+35% combo finisher damage.",      "kind": "finish_mul", "value": 0.35, "rarity": "rare" },
-	{ "id": "magnet",    "title": "Magnetism",  "desc": "+40% special meter gain.",         "kind": "special_mul","value": 0.40, "rarity": "common" },
-	{ "id": "warden",    "title": "Warden",     "desc": "+0.4s hurt invulnerability.",      "kind": "iframes",    "value": 0.4, "rarity": "common" },
+	{ "id": "magnet",    "title": "Lodestone",  "desc": "+40% Graveflame gain.",           "kind": "special_mul","value": 0.40, "rarity": "common" },
+	{ "id": "warden",    "title": "Grave Ward", "desc": "+0.4s hurt invulnerability.",      "kind": "iframes",    "value": 0.4, "rarity": "common" },
 	{ "id": "surge",     "title": "Surge",      "desc": "The lance pierces three foes and strikes 35% harder.", "kind": "special_pierce", "value": 0.35, "rarity": "rare", "unique": true },
 	{ "id": "leech",     "title": "Leech",      "desc": "Heal 3 HP per enemy hit.",         "kind": "lifesteal",  "value": 3.0, "rarity": "rare" },
 	{ "id": "ember",     "title": "Ember Heart","desc": "Heal 20 HP now.",                  "kind": "heal",       "value": 20.0, "rarity": "common" },
@@ -273,7 +273,7 @@ static var UPGRADES: Array = [
 	{ "id": "kindling",  "title": "Kindling",   "desc": "Burn +6 dps and +2s. Finishers always ignite.", "kind": "burn", "value": 6.0, "rarity": "common" },
 	{ "id": "momentum",  "title": "Momentum",   "desc": "Kills grant +12% speed & +10% damage for 4s (stacks 3x).", "kind": "momentum", "value": 0.12, "rarity": "rare" },
 	{ "id": "bloodrush", "title": "Bloodrush",  "desc": "Below 40% HP, deal +35% damage.",  "kind": "bloodrush",  "value": 0.35, "rarity": "rare" },
-	{ "id": "secondwind","title": "Second Wind","desc": "Once per run, survive a lethal hit at 30% HP.", "kind": "second_wind", "value": 1.0, "rarity": "epic", "unique": true },
+	{ "id": "secondwind","title": "Second Wind","desc": "Once per descent, survive a lethal hit at 30% HP.", "kind": "second_wind", "value": 1.0, "rarity": "epic", "unique": true },
 	{ "id": "executioner","title": "Executioner","desc": "Enemies below 25% HP take +50% damage.", "kind": "execute", "value": 0.5, "rarity": "rare", "unique": true },
 	{ "id": "pyre",      "title": "Pyre",       "desc": "Burning enemies explode on death for 60 damage.", "kind": "pyre", "value": 60.0, "rarity": "epic", "unique": true },
 	{ "id": "emberwave", "title": "Emberwave",  "desc": "Every combo finisher hurls a flame wave.", "kind": "finisher_wave", "value": 1.0, "rarity": "epic", "unique": true },
@@ -320,7 +320,7 @@ static var ROOM_TEMPLATES: Array = [
 	},
 	{
 		"tag": "tiers",
-		"name": "WARDEN'S ASCENT",
+		"name": "PENITENT STAIR",
 		"platforms": [
 			Rect2(ROOM_LEFT, FLOOR_Y, ROOM_RIGHT - ROOM_LEFT, 120),
 			Rect2(300, FLOOR_Y - 170, 260, 36),
@@ -734,12 +734,12 @@ static func finale_tier(seen_before: int, milestone: String) -> String:
 ## Ranked relics. `costs[r]` buys rank r+1; `value` applies once per rank owned.
 ## Costs climb so cells keep meaning something long after the first few runs.
 const META_UPGRADES: Array = [
-	{ "id": "m_max_hp",  "title": "Ember Soul",    "desc": "+10 starting health per rank.",       "costs": [5, 12, 22, 36, 55], "kind": "max_hp",        "value": 10.0 },
+	{ "id": "m_max_hp",  "title": "Ember Soul",    "desc": "+10 starting HP per rank.",       "costs": [5, 12, 22, 36, 55], "kind": "max_hp",        "value": 10.0 },
 	{ "id": "m_dmg",     "title": "Sharpened",     "desc": "+6% melee damage per rank.",          "costs": [7, 16, 28, 44, 64], "kind": "dmg_mul",       "value": 0.06 },
-	{ "id": "m_flask",   "title": "Potion Belt",   "desc": "+1 flask charge per rank.",           "costs": [8, 30],             "kind": "flask",         "value": 1.0 },
+	{ "id": "m_flask",   "title": "Witch's Belt",  "desc": "+1 flask charge per rank.",           "costs": [8, 30],             "kind": "flask",         "value": 1.0 },
 	{ "id": "m_speed",   "title": "Quickened",     "desc": "+4% move speed per rank.",            "costs": [6, 14, 26],         "kind": "speed_mul",     "value": 0.04 },
-	{ "id": "m_special", "title": "Arcane Spark",  "desc": "Start each run with +20 Graveflame per rank.", "costs": [6, 14, 26], "kind": "special_start", "value": 20.0 },
-	{ "id": "m_kindled", "title": "Kindled Blood", "desc": "Begin every run carrying a common boon.", "costs": [30],          "kind": "start_boon",    "value": 1.0 },
+	{ "id": "m_special", "title": "Kept Spark",    "desc": "Start each descent with +20 Graveflame per rank.", "costs": [6, 14, 26], "kind": "special_start", "value": 20.0 },
+	{ "id": "m_kindled", "title": "Kindled Blood", "desc": "Begin every descent carrying a common boon.", "costs": [30],          "kind": "start_boon",    "value": 1.0 },
 	{ "id": "m_seer",    "title": "Seer's Eye",    "desc": "Boon offers show a fourth choice.",    "costs": [45],             "kind": "offer_count",   "value": 1.0 },
 	{ "id": "m_tithe",   "title": "Tithe",         "desc": "+25% cells from every source per rank.", "costs": [20, 50],        "kind": "cell_mul",      "value": 0.25 },
 ]

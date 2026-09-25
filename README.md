@@ -2,7 +2,7 @@
 
 ![Graveflame title screen: a flame-crowned knight above a vast subterranean fortress and glowing furnace](docs/screenshots/title-screen.png)
 
-A gothic 2D action-roguelite. Parry, riposte and burn through eight chambers to face the Ember Warden.
+A gothic 2D action-roguelite. Parry, riposte and burn through seven chambers to the Ember Warden's throne.
 
 <p align="center">
   <img src="docs/screenshots/magma-slam.png" alt="Airborne combat above the Cinderworks spike pit" width="49%">
