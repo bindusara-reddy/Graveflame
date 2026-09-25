@@ -106,6 +106,13 @@ var _beat_kind := ""
 var _beat_t := 0.0
 var _beat_focus := Vector2.ZERO
 var _beat_embers_at := 0.0
+## The ending, from the Warden's killing blow until NEW RUN or RETURN TO TITLE.
+var finale: Finale
+## Wall sconces sink with the throne's cold during the finale (1 = full flame).
+var sconce_heat := 1.0
+## Held when the ending hands over to the results panel; its buttons wait until
+## every one is released, so a held confirm cannot press NEW RUN.
+const RELEASE_ACTIONS := ["ui_accept", "jump", "attack", "interact", "ignite", "pause"]
 
 func _ready() -> void:
 	process_mode = Node.PROCESS_MODE_ALWAYS
@@ -196,6 +203,7 @@ func _ready() -> void:
 	randomize()
 	_seed = randi()
 	_reset_stats()
+	Save.migrate_falls()
 	_restore_options()
 	music.play_track("title")
 	_set_world_shown(false)
@@ -331,7 +339,7 @@ func _process(delta: float) -> void:
 			_tick_streak(delta)
 		_update_low_hp_vignette(delta)
 		_teach_from_state(delta)
-	else:
+	elif not in_finale():
 		_set_vignette(VIGNETTE_EDGE)
 
 
@@ -376,14 +384,45 @@ func _finish_beat() -> void:
 	var kind := _beat_kind
 	_beat_kind = ""
 	feedback.end_slow_motion()
+	if kind == "victory":
+		# The finale takes the stage; the tree keeps running under it.
+		finale.take_over()
+		return
 	feedback.stop_world_voices()
 	get_tree().paused = true
-	if kind == "death":
-		ui.show_panel("gameover", 0.6)
-		# A slow rise, so the toll rings out into silence before the title.
-		music.play_track("title", 3.0)
-	elif kind == "victory":
-		ui.show_panel("victory", 0.6)
+	ui.show_panel("gameover", 0.6)
+	# A slow rise, so the toll rings out into silence before the title.
+	music.play_track("title", 3.0)
+
+## Ends the end-of-run beat at once (a skip during the victory's slow motion).
+func _cancel_beat() -> void:
+	_beat_kind = ""
+	feedback.end_slow_motion()
+
+func in_finale() -> bool:
+	return is_instance_valid(finale)
+
+## The ending hands over to the results panel, shown over its closed-curtain
+## theatre. Held keys stay locked out until released, so a celebratory jump
+## cannot press NEW RUN.
+func _on_finale_finished(skipped: bool) -> void:
+	feedback.stop_world_voices()
+	get_tree().paused = true
+	ui.set_victory_extras(Content.flame_ordinal(int(finale.ctx.victories)), bool(finale.ctx.first))
+	ui.show_panel("victory", 0.0 if skipped else 0.6)
+	ui.lock_until_released("victory", RELEASE_ACTIONS)
+	music.stop_cues(1.4)
+	music.play_track("title")
+
+## Ends any finale before the next screen: it puts back what it borrowed from
+## the world, then goes with its layers and cast.
+func _end_finale() -> void:
+	if not in_finale():
+		return
+	finale.abort()
+	remove_child(finale)
+	finale.queue_free()
+	finale = null
 
 ## Put the camera back to the locked play framing (after a beat pushed it in).
 func _reset_camera() -> void:
@@ -986,9 +1025,11 @@ func _draw_statue(ci: CanvasItem, foot: Vector2, side: float) -> void:
 	ci.draw_set_transform(Vector2.ZERO, 0.0, Vector2.ONE)
 
 # --- Run lifecycle ---
-## Clear every trace of the current run: its closing beat, the camera, the
-## chamber, projectiles, the knight and the run's HUD cards.
+## Clear every trace of the current run: its finale (first, so it can put back
+## what it borrowed), its closing beat, the camera, the chamber, projectiles,
+## the knight and the run's HUD cards.
 func _teardown_run() -> void:
+	_end_finale()
 	_beat_kind = ""
 	_reset_camera()
 	_clear_room()
@@ -1525,12 +1566,16 @@ func _close_run(victory: bool) -> void:
 	ui.hide_banners()
 
 func _on_player_died() -> void:
+	# A knight that falls with the Warden has traded: the run is lost.
+	if state != GState.PLAYING:
+		return
 	# Embers and paper shards, not a burst: the flame is going out.
 	feedback.burst(player.global_position + Vector2(0.0, -28.0), 16, Content.PAL.player_accent, 180.0)
 	feedback.shake(12.0, 0.4)
 	# A toll rather than a hit: the run itself has ended, not just the player.
 	feedback.play_persistent("defeat")
 	_close_run(false)
+	Save.record_fall(str(_stats.line))
 	# The score drops out under the toll; the title theme returns with the screen.
 	music.play_track("")
 	feedback.slow_motion(0.3, DEATH_BEAT * 0.85)
@@ -1539,7 +1584,7 @@ func _on_player_died() -> void:
 func _on_boss_spawned() -> void:
 	if is_instance_valid(room) and room.boss != null:
 		ui.show_boss_bar(room.boss.hp_max)
-		var subtitle := "Trial of the Throne" if room.trial else "Keeper of the Ember Throne"
+		var subtitle := "Trial of the Throne" if room.trial else Content.boss_subtitle(Save.get_victories(), Save.oath_kept())
 		ui.show_boss_intro("The Ember Warden", subtitle)
 		feedback.shake(8.0, 0.3)
 		feedback.play("boss")
@@ -1582,11 +1627,13 @@ func _on_boss_shattered(pos: Vector2) -> void:
 	feedback.flash_death(pos, Content.BOSS_COLOR, true)
 	feedback.flash_death(pos + Vector2(0.0, -40.0), Content.PAL.player_accent, true)
 	feedback.blast(pos, 280.0)
-	feedback.burst(pos, 40, Content.PAL.player_accent, 520.0)
+	feedback.burst(pos, 14, Content.PAL.player_accent, 520.0)
 	feedback.shake(18.0, 0.6)
 	feedback.play("pyre")
 	feedback.play("elite", 0.667)  # the gong on G, in key
 	feedback.rumble(0.8, 1.0, 0.6)
+	if in_finale():
+		finale.release_hoard(pos)
 
 func _on_slam_landed(pos: Vector2, _radius: float) -> void:
 	feedback.shake(8.0, 0.22)
@@ -1621,15 +1668,19 @@ func _on_enemy_exploded(pos: Vector2, radius: float, damage: float) -> void:
 	feedback.play("boom")
 
 func _victory() -> void:
+	if state != GState.PLAYING:
+		return
 	# Bonus cells for clearing the run
 	_award_cells(20)
-	Save.add_victory(_vows.size())
+	# The ending's single save write: the win is kept even if the finale is not.
+	var rec := Save.record_victory(_vows)
 	_close_run(true)
 	feedback.play("victory")
-	music.play_track("title")
+	# The boss theme drops out and the victory bells ring alone.
+	music.play_track("", 0.35)
 	# The knight has won; nothing left in the hall may still hurt them.
-	if is_instance_valid(player):
-		player.iframes = 99.0
+	player.iframes = 0.0
+	player.cinematic = true
 	_clear_projectiles()
 	var focus := Vector2(640.0, Content.FLOOR_Y - 120.0)
 	if is_instance_valid(room):
@@ -1639,6 +1690,16 @@ func _victory() -> void:
 				e._die(false)
 		if room.boss != null and is_instance_valid(room.boss):
 			focus = room.boss.global_position + Vector2(0.0, -30.0)
+	var ctx := rec.duplicate()
+	ctx.merge({
+		"vows": _vows.duplicate(), "boons": run.taken.keys(), "gold": player._flame_time > 0.0,
+		"tier": Content.finale_tier(int(rec.finale_seen), str(rec.milestone)),
+	})
+	finale = Finale.new()
+	finale.name = "Finale"
+	add_child(finale)
+	finale.finished.connect(_on_finale_finished)
+	finale.setup(self, ctx)
 	feedback.slow_motion(0.25, 1.6)
 	_begin_beat("victory", focus)
 
