@@ -1181,7 +1181,6 @@ func _on_room_completed() -> void:
 
 ## Font and Cache rifts carry their gift straight through into the next chamber.
 func _take_rift_gift(kind: String) -> void:
-	run.room_cleared()
 	var text := ""
 	if kind == "font":
 		# The font restores the flame fully, refills every flask, and leaves the
@@ -1219,7 +1218,6 @@ func _on_upgrade_selected(idx: int) -> void:
 			player.flask_charges = mini(player.flask_max, player.flask_charges + int(taken.get("value", 1)))
 	_pending_upgrades.clear()
 	ui.hide_panel("reward")
-	run.room_cleared()
 	_advance_room()
 	# A charge returns with every chamber cleared.
 	if Content.FLASK_REFILL_ON_CLEAR:

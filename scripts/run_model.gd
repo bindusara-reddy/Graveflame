@@ -9,7 +9,6 @@ var room_index: int = -1
 var build: Dictionary = {}
 var offered: Dictionary = {}      # upgrade ids already offered (to reduce repeats)
 var taken: Dictionary = {}        # upgrade ids applied this run (unique boons leave the pool)
-var rooms_cleared: int = 0
 ## Set by taking a Trial rift: the next chamber is harder, the boon was better.
 var trial_next := false
 ## Boons shown per offer (the Seer's Eye relic adds one).
@@ -19,7 +18,7 @@ func _init(s: int = 0) -> void:
 	seed_value = s if s != 0 else int(Time.get_ticks_msec())
 	rng = RandomNumberGenerator.new()
 	rng.seed = seed_value
-	_reset_build()
+	build = base_build()
 	generate_route()
 
 static func base_build() -> Dictionary:
@@ -61,9 +60,6 @@ static func base_build() -> Dictionary:
 		"brand": 0.0,
 		"skyfall": false,
 	}
-
-func _reset_build() -> void:
-	build = base_build()
 
 func generate_route() -> void:
 	route.clear()
@@ -108,9 +104,6 @@ func rooms_total() -> int:
 func advance_to_next_room() -> Dictionary:
 	room_index += 1
 	return current_room_template()
-
-func room_cleared() -> void:
-	rooms_cleared += 1
 
 ## Boons still eligible for an offer: unique boons already taken leave the pool.
 func available_upgrades() -> Array:
@@ -233,18 +226,3 @@ func roll_exits(hp_frac: float) -> Array:
 			pick = options[i]
 			break
 	return ["boon", pick]
-
-func is_dead() -> bool:
-	return build.hp <= 0.0
-
-func reset_run(new_seed: int) -> void:
-	seed_value = new_seed if new_seed != 0 else int(Time.get_ticks_msec())
-	rng = RandomNumberGenerator.new()
-	rng.seed = seed_value
-	room_index = -1
-	rooms_cleared = 0
-	trial_next = false
-	offered.clear()
-	taken.clear()
-	_reset_build()
-	generate_route()
