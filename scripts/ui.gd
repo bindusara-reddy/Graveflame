@@ -2152,28 +2152,35 @@ func set_hp(hp: float, max_hp: float) -> void:
 func set_special(value: float, maximum: float) -> void:
 	_special_bar.max_value = maxf(1.0, maximum)
 	_special_bar.value = clampf(value, 0.0, maximum)
-	var was_ready := _special_shown.x >= _special_shown.y and _special_shown.y > 0.0
+	var was_ready := _ignite_ready()
 	_special_shown = Vector2(value, maximum)
-	var ready := value >= maximum
-	if ready != was_ready:
-		_set_ignite_ready(ready)
+	if _ignite_ready() != was_ready:
+		_set_ignite_ready(_ignite_ready())
 	_paint_special_label()
+
+
+## Whether the Graveflame on the HUD is full, which is what Ignite spends.
+func _ignite_ready() -> bool:
+	return _special_shown.x >= _special_shown.y
 
 
 ## A full Graveflame names the Ignite key in gold; otherwise the count.
 func _paint_special_label() -> void:
-	var ready := _special_shown.x >= _special_shown.y and _special_shown.y > 0.0
-	_special_value_label.text = "IGNITE  %s" % prompt("ignite") if ready else "%d / %d" % [roundi(_special_shown.x), roundi(_special_shown.y)]
-	_special_value_label.add_theme_color_override("font_color", C_GOLD if ready else C_BLUE)
+	var lit := _ignite_ready()
+	if lit:
+		_special_value_label.text = "IGNITE  %s" % prompt("ignite")
+	else:
+		_special_value_label.text = "%d / %d" % [roundi(_special_shown.x), roundi(_special_shown.y)]
+	_special_value_label.add_theme_color_override("font_color", C_GOLD if lit else C_BLUE)
 
 
 ## While Ignite is ready the fill breathes between blue and white-hot, so a
 ## full bar reads as a prompt; reduced motion holds it white-hot instead.
-func _set_ignite_ready(ready: bool) -> void:
+func _set_ignite_ready(lit: bool) -> void:
 	_kill_tween(_ignite_tween)
 	var hot := C_BLUE.lerp(Color.WHITE, 0.75)
-	_special_fill.bg_color = hot if ready else C_BLUE
-	if not ready or Feedback.motion_reduced:
+	_special_fill.bg_color = hot if lit else C_BLUE
+	if not lit or Feedback.motion_reduced:
 		return
 	_ignite_tween = _ui_tween().set_loops()
 	_ignite_tween.tween_property(_special_fill, "bg_color", C_BLUE, 0.42).set_trans(Tween.TRANS_SINE)
@@ -2262,11 +2269,15 @@ class ThreatPips extends Control:
 	func _draw() -> void:
 		var t := Time.get_ticks_msec() * 0.001
 		for pip in _pips:
-			var size := 13.0 if pip.winding else 9.0
+			var span := 13.0 if pip.winding else 9.0
 			if pip.winding and not Feedback.motion_reduced:
-				size *= 1.0 + 0.18 * sin(t * 14.0)
+				span *= 1.0 + 0.18 * sin(t * 14.0)
 			draw_set_transform(pip.at, float(pip.angle))
-			var head := PackedVector2Array([Vector2(size, 0.0), Vector2(-size * 0.7, -size * 0.75), Vector2(-size * 0.35, 0.0), Vector2(-size * 0.7, size * 0.75)])
+			# A notched arrowhead, tip first, pointing along +x.
+			var head := PackedVector2Array([
+				Vector2(span, 0.0), Vector2(-0.7 * span, -0.75 * span),
+				Vector2(-0.35 * span, 0.0), Vector2(-0.7 * span, 0.75 * span),
+			])
 			var shadow := head.duplicate()
 			for i in range(shadow.size()):
 				shadow[i] += Vector2(2.0, 3.0).rotated(-float(pip.angle))
