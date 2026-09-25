@@ -312,7 +312,7 @@ func _draw_traveler(ci: CanvasItem) -> void:
 			shade.append(c.darkened(0.45))
 			lit.append(c)
 		m.band(tops, hems, shade, lit)
-		m.line(tops[0], hems[0], Color(VELVET_HI.lightened(0.25), 0.6 * alpha), 1.5)
+		m.line(tops[0], hems[0], Color(VELVET_HI.lightened(0.25), 0.35 * alpha), 1.5)
 		m.line(hems[0] + Vector2(0.0, -10.0), Vector2(outer, FLOOR_Y - 10.0), Color(GILT_LO, 0.8 * alpha), 2.0)
 	m.commit(ci)
 
@@ -612,13 +612,13 @@ class FinaleFront extends Node2D:
 		if crowned:
 			_crowns.queue_redraw()
 
-	## The frame, the curtain and the audience take their light from the lamps.
+	## The frame, the curtain, the lamps' tin and the audience take their light from the lamps.
 	func _light_house() -> void:
 		var sum := 0.0
 		for l in lamps:
 			sum += clampf(l, 0.0, 1.0)
 		var k := lerpf(UNLIT, 1.0, sum / float(LAMPS))
-		for piece: Node2D in [_drop, _frame, _house]:
+		for piece: Node2D in [_drop, _frame, _lamps, _house]:
 			piece.modulate = Color(k, k, k, piece.modulate.a)
 
 	func _clock() -> float:
