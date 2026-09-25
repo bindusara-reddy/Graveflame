@@ -1,8 +1,8 @@
 class_name Enemy
 extends CharacterBody2D
 ## Compact state-machine enemy: STALKER (melee), HOPPER (leaping), WISP (ranged),
-## BRUTE (shielded heavy), BOMBER (exploding kamikaze). Any of them may spawn as
-## an elite: larger, tougher, gilded, and worth more cells.
+## BRUTE (shielded heavy), BOMBER (exploding kamikaze), CROW (diving flyer). Any
+## of them may spawn as an elite: larger, tougher, gilded, and worth more cells.
 
 const VFX := preload("res://scripts/vfx.gd")
 
