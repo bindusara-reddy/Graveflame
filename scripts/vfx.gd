@@ -208,16 +208,22 @@ static func draw_ember_dot(ci: CanvasItem, pos: Vector2, radius: float, color: C
 
 ## Two-tongue flame rising from `base`; `t` drives the flicker, `phase` desyncs neighbours.
 static func draw_flame(ci: CanvasItem, base: Vector2, height: float, width: float, t: float, phase: float, outer: Color = ORANGE, inner: Color = GOLD) -> void:
+	var tongues := flame_tongues(base, height, width, t, phase)
+	ci.draw_colored_polygon(tongues[0], outer)
+	ci.draw_colored_polygon(tongues[1], inner)
+
+## draw_flame's outer and inner tongues, for painters that batch their shapes.
+static func flame_tongues(base: Vector2, height: float, width: float, t: float, phase: float) -> Array[PackedVector2Array]:
 	var lick := sin(t * 11.0 + phase) * 0.18 + sin(t * 17.0 + phase * 1.7) * 0.1
 	var tip := base + Vector2(width * lick, -height * (1.0 + lick * 0.5))
-	ci.draw_colored_polygon(PackedVector2Array([
-		base + Vector2(-width * 0.5, 0.0), base + Vector2(-width * 0.3, -height * 0.45), tip,
-		base + Vector2(width * 0.34, -height * 0.4), base + Vector2(width * 0.5, 0.0),
-	]), outer)
 	var inner_tip := base + Vector2(width * lick * 0.6, -height * 0.55 * (1.0 + lick * 0.4))
-	ci.draw_colored_polygon(PackedVector2Array([
-		base + Vector2(-width * 0.26, 0.0), inner_tip, base + Vector2(width * 0.26, 0.0),
-	]), inner)
+	return [
+		PackedVector2Array([
+			base + Vector2(-width * 0.5, 0.0), base + Vector2(-width * 0.3, -height * 0.45), tip,
+			base + Vector2(width * 0.34, -height * 0.4), base + Vector2(width * 0.5, 0.0),
+		]),
+		PackedVector2Array([base + Vector2(-width * 0.26, 0.0), inner_tip, base + Vector2(width * 0.26, 0.0)]),
+	]
 
 ## Hanging chain: dashed links with a terminal ring. `sway` offsets the free end.
 static func draw_chain(ci: CanvasItem, from: Vector2, length: float, sway: float, color: Color) -> void:
