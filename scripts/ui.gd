@@ -1090,7 +1090,9 @@ func _build_title_stack(text: String, size: int) -> Control:
 	var rim := _make_label(text, size, VFX.ORANGE)
 	rim.add_theme_color_override("font_outline_color", VFX.EMBER)
 	rim.add_theme_constant_override("outline_size", 2)
-	var face := _make_label(text, size, VFX.GOLD)
+	# A white face tinted by self_modulate, so the flicker never restyles it.
+	var face := _make_label(text, size, Color.WHITE)
+	face.self_modulate = VFX.GOLD
 	face.add_theme_constant_override("outline_size", 0)
 	var offsets := [5.0, 2.0, 0.0]
 	var layers := [shadow, rim, face]
@@ -1123,13 +1125,14 @@ func _process(delta: float) -> void:
 		var fade := 1.0 if still else clampf(0.35 + 0.65 * (reveal - 0.2) / 0.7, 0.35, 1.0)
 		_title_holder.modulate = Color(1.0, 1.0, 1.0, fade)
 	if still:
-		_title_top_label.add_theme_color_override("font_color", VFX.GOLD)
+		_title_top_label.self_modulate = VFX.GOLD
 		return
 	_title_t += delta
 	var wave := 0.5 + 0.5 * sin(_title_t * 2.6)
 	var flicker := 1.0 + sin(_title_t * 11.0) * 0.03 + sin(_title_t * 29.0) * 0.03
 	var col := VFX.GOLD.lerp(VFX.ORANGE, wave * 0.4)
-	_title_top_label.add_theme_color_override("font_color", Color(col.r * flicker, col.g * flicker, col.b * flicker, 1.0))
+	# Modulating rather than overriding font_color avoids reshaping the wordmark every frame.
+	_title_top_label.self_modulate = Color(col.r * flicker, col.g * flicker, col.b * flicker, 1.0)
 
 
 # --- Responsive building blocks ---------------------------------------------

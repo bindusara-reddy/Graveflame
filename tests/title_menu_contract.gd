@@ -170,9 +170,9 @@ func run() -> void:
 	check(Feedback.motion_reduced, "reduced motion option reaches Feedback")
 	var embers := ui._title_tableau.get_node("Embers") as CPUParticles2D
 	check(embers != null and not embers.visible, "reduced motion hides title embers")
-	var face_a: Color = ui._title_top_label.get_theme_color("font_color")
+	var face_a: Color = ui._title_top_label.self_modulate
 	await ticks(6)
-	var face_b: Color = ui._title_top_label.get_theme_color("font_color")
+	var face_b: Color = ui._title_top_label.self_modulate
 	check(face_a == face_b, "reduced motion freezes the wordmark flicker")
 	ui._reduced_motion_check.button_pressed = false
 	await ticks(3)
