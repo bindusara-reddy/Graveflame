@@ -207,6 +207,7 @@ func heartbeat(phase: float, strength: float) -> void:
 	# A pulse that restarted from zero (the flame recovered) waits for its peak.
 	_heartbeat_beat = beat
 
+## Sound the next take of `name` on a voice from `pool`.
 func _voice(name: String, pitch: float, volume_db: float, humanize: bool, pool: Array[AudioStreamPlayer]) -> void:
 	if _streams.get(name) == null:
 		return
