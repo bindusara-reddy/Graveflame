@@ -155,9 +155,9 @@ func _test_save_ledger() -> void:
 
 ## Stations stay clear of the throne and the space before it.
 func _test_stations() -> void:
-	var places := Finale.stations()
+	var places := Finale.stations(430.0)
 	check(places.size() >= Content.FALLEN_CAP, "there is a station for every fallen")
-	check(places.all(func(p): return absf(float(p.x) - 640.0) >= 236.0), "no station is on the dais or where the knight stands")
+	check(places.all(func(p): return absf(float(p.x) - 640.0) >= 236.0 and absf(float(p.x) - 430.0) >= 36.0), "no station is on the dais, before the throne or on the knight")
 
 
 # --- Runtime checks ------------------------------------------------------------

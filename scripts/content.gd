@@ -618,7 +618,7 @@ static func vow_score_multiplier(sworn: Array) -> float:
 ## The line under the verdict. A run that ends differently reads differently;
 ## the pick is seeded by the run so a replayed seed says the same thing.
 const EPITAPHS := [
-	"Ash remembers every attempt.",
+	"Ash remembers every knight.",
 	"The keep keeps what it takes.",
 	"A crown of fire. A crown of cinders.",
 	"The flame gutters. It does not go out.",
@@ -671,7 +671,7 @@ const WARDEN_TITLES := {
 ## The ending answers the last thing a death screen said, as each ending means
 ## it. An answer may be one String for every ending.
 const EPITAPH_ANSWERS := {
-	"Ash remembers every attempt.": { "given": "And gave every one of them back.", "crown": "So does the throne.", "ended": "There is nothing left to burn." },
+	"Ash remembers every knight.": { "given": "And gave every one of them back.", "crown": "Now it will remember you.", "ended": "There is nothing left to burn." },
 	"The keep keeps what it takes.": { "given": "Not tonight.", "crown": "It kept you.", "ended": "It will take nothing more." },
 	"A crown of fire. A crown of cinders.": { "given": "Neither. You set it down.", "crown": "Both. It fits.", "ended": "Neither. It is broken." },
 	"The flame gutters. It does not go out.": { "given": "It did not go out.", "crown": "It burns red now.", "ended": "Everything else did." },
@@ -682,6 +682,7 @@ const EPITAPH_ANSWERS := {
 	"The Warden stokes its throne with your flame.": { "given": "Your flame is your own again.", "crown": "Now you stoke it.", "ended": "There is no Warden now." },
 	"The throne wears whoever wins it.": { "given": "Not you.", "crown": "It wears you well.", "ended": "No one will wear it now." },
 	"Every Warden was a knight once.": { "given": "This one stayed a knight.", "crown": "And every knight a Warden, after.", "ended": "The last of them has fallen." },
+	"The dead down here still burn.": { "given": "Now they burn in the sky.", "crown": "For you, now.", "ended": "Not any more." },
 }
 ## The answer when no epitaph is remembered (a save older than the count).
 const UNANSWERED := { "given": "Every flame went home.", "crown": "The throne is warm.", "ended": "Nothing burns below." }
@@ -696,10 +697,18 @@ const FOLD_MAJOR := [1.0, 1.1225, 1.2599, 1.4983, 1.6818]
 ## predate the count sees twelve.
 const FALLEN_CAP := 16
 const UNCOUNTED_CROWD := 12
+const NUMBER_WORDS := [
+	"zero", "one", "two", "three", "four", "five", "six", "seven", "eight", "nine", "ten",
+	"eleven", "twelve", "thirteen", "fourteen", "fifteen", "sixteen", "seventeen", "eighteen", "nineteen", "twenty",
+]
 const ORDINAL_WORDS := [
 	"", "FIRST", "SECOND", "THIRD", "FOURTH", "FIFTH", "SIXTH", "SEVENTH", "EIGHTH", "NINTH", "TENTH",
 	"ELEVENTH", "TWELFTH", "THIRTEENTH", "FOURTEENTH", "FIFTEENTH", "SIXTEENTH", "SEVENTEENTH", "EIGHTEENTH", "NINETEENTH", "TWENTIETH",
 ]
+
+## Spelled out to twenty, digits after: the keep's lines read as print, not a HUD.
+static func number_word(n: int) -> String:
+	return NUMBER_WORDS[n] if n >= 0 and n < NUMBER_WORDS.size() else str(n)
 
 ## "THE FOURTH FLAME": the victory panel's kicker counts wins as flames.
 static func flame_ordinal(n: int) -> String:

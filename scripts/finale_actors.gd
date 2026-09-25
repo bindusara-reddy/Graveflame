@@ -310,13 +310,22 @@ class RelicCrown extends Node2D:
 	var crack := 0.0
 	var tilt := 0.0
 	var _t := 0.0
+	var _glow: Node2D
 
 	func _ready() -> void:
 		material = VFX.unshaded_material()
+		# The spark's small warm pool, so the crown reads in the dark.
+		_glow = Node2D.new()
+		_glow.material = VFX.radial_material()
+		_glow.show_behind_parent = true
+		_glow.draw.connect(func() -> void:
+			VFX.draw_radial(_glow, Vector2(0.0, -8.0), 26.0 + 18.0 * burn, Color(VFX.GOLD, (0.45 if Feedback.flash_reduced else 0.6) * burn)))
+		add_child(_glow)
 
 	func advance(dt: float) -> void:
 		_t += dt
 		queue_redraw()
+		_glow.queue_redraw()
 
 	func _draw() -> void:
 		var t := G.flicker_t(_t)

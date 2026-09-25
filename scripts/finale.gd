@@ -42,7 +42,9 @@ const SEAT := Vector2(640.0, 522.0)
 const COLD_AMBIENT := Color(0.46, 0.42, 0.58)
 const STARVED_AMBIENT := Color(0.42, 0.42, 0.46)
 const DARK_AMBIENT := Color(0.07, 0.06, 0.1)
-## The cast's light once the keep is gone: grey dawn over END IT.
+## The cast's light once the keep is gone: the moon over GIVE THEM BACK, grey
+## dawn over END IT.
+const MOONLIT := Color(0.86, 0.88, 1.0)
 const DAWN_LIGHT := Color(0.72, 0.75, 0.86)
 const DARK_EDGE := Color(0.01, 0.0, 0.02, 0.92)
 ## Seconds a choice is held to be kept.
@@ -206,8 +208,8 @@ func shatter(pos: Vector2) -> void:
 		if Feedback.motion_reduced:
 			_ramp(_shell, "modulate:a", 0.0, 0.5)
 		else:
-			_ramp(_shell, "open", 1.0, 1.1, Tween.TRANS_QUAD, Tween.EASE_IN)
-			_after(1.1, _ramp.bind(_shell, "modulate:a", 0.0, 0.12))
+			_ramp(_shell, "open", 1.0, 1.3, Tween.TRANS_QUAD, Tween.EASE_IN)
+			_after(1.45, _ramp.bind(_shell, "modulate:a", 0.0, 0.25))
 	_burnt = Cast.BurntKnight.new()
 	_burnt.setup(pos.x, face, str(ctx.get("last_ending", "")) == "crown")
 	_add_to_world(_burnt, 1)
@@ -238,7 +240,7 @@ func take_over() -> void:
 	var kneel := _burnt.position + Vector2(0.0, -30.0)
 	_move_camera([Vector2(clampf(kneel.x, 360.0, 920.0), kneel.y), float(_cut.zoom)], 2.2 * _pace())
 	var words: String = Content.WARDEN_WORDS.get(str(ctx.get("last_ending", "")), Content.WARDEN_WORDS[""])
-	_after(0.9, _card.bind("“%s”" % words, float(_cut.words), 96.0, 26, UI.C_MUTED))
+	_after(0.9, _card.bind("“%s”" % words, float(_cut.words), 250.0, 26))
 	_after(float(_cut.crumble), _crumble)
 
 ## Swaps the real knight for the stand-in in the same pose. The player stays
@@ -276,14 +278,17 @@ func _crumble() -> void:
 ## Stations beside the dais, filled inner to outer and alternating sides, front
 ## rank first; the back rank stands smaller and darker behind. None comes
 ## within 236 px of the throne, so the knight has the dais and the space
-## before it to itself. The outermost front pair is a spare.
-static func stations() -> Array:
+## before it to itself, or within 36 px of where the knight stands as they
+## rise. The outermost front pair is a spare for the ones the knight blocks.
+static func stations(knight_x: float) -> Array:
 	var out: Array = []
 	# [first k, last k + 1, inner x, scale, back rank]
 	for rank in [[0, 5, 236.0, 1.0, false], [0, 3, 259.0, 0.86, true], [5, 6, 236.0, 1.0, false]]:
 		for k in range(rank[0], rank[1]):
 			for side: float in [-1.0, 1.0]:
-				out.append({ "x": Cast.THRONE_X + side * (float(rank[2]) + 46.0 * float(k)), "scale": rank[3], "back": rank[4] })
+				var x := Cast.THRONE_X + side * (float(rank[2]) + 46.0 * float(k))
+				if absf(x - knight_x) >= 36.0:
+					out.append({ "x": x, "scale": rank[3], "back": rank[4] })
 	return out
 
 ## The crown cracks and lets out every flame the throne swallowed, one for each
@@ -310,7 +315,7 @@ func _pour() -> void:
 ## Builds the crowd folded flat and hidden, back rank first so it draws
 ## behind, then the one crown field over them, the hoard and the stream layer.
 func _spawn_crowd() -> void:
-	var places := stations().slice(0, _crowd)
+	var places := stations(_knight.position.x).slice(0, _crowd)
 	_fallen.resize(places.size())
 	for back: bool in [true, false]:
 		for i in range(places.size()):
@@ -644,7 +649,7 @@ func _let_go() -> void:
 		game.feedback.play("victory")
 	_ramp(_relic, "burn", 0.0, 0.8)
 	_starve(1.6)
-	_after(1.0, _hand_off.bind(Color.WHITE))
+	_after(1.0, _hand_off.bind(MOONLIT))
 	_after(1.0, _stand_rostrum)
 	_after(1.2, _begin_burn.bind(float(_cut.burn)))
 	if float(_cut.tilt) > 0.0:
@@ -941,7 +946,7 @@ func _final_state() -> void:
 			_starve(0.0)
 			_knight.place(Cast.THRONE_X + 176.0 * _side, -_side)
 			_knight.gesture_to("look_up", 60.0)
-			_hand_off(Color.WHITE)
+			_hand_off(MOONLIT)
 			_stand_rostrum()
 			_begin_burn(0.0)
 			_frame_now(_look_up_frame())
