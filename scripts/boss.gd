@@ -46,7 +46,7 @@ const POISE_REGEN_DELAY := 1.2
 ## How long a broken guard keeps the Warden on one knee, and the extra damage
 ## it takes meanwhile: the punish window.
 const BREAK_TIME := 1.2
-const BREAK_DAMAGE_MUL := 1.3
+const KNEEL_DAMAGE_MUL := 1.3
 
 # --- Moves ---
 ## Chance, by phase, that a lunge runs straight on into a string of moves.
@@ -114,8 +114,6 @@ var _haste := 1.0
 var _seated_t := 0.0
 ## Seconds since waking from the throne; negative while it never sat.
 var _rise_t := -1.0
-var _poise: float = POISE[BPhase.ONE]
-var _poise_regen_t := 0.0
 ## The last two moves, so none comes three times running.
 var _history: Array[int] = []
 ## Moves queued to follow the current one without a rest: the strings.
@@ -177,6 +175,7 @@ func _ready() -> void:
 	data.color = Content.BOSS_COLOR
 	data.damage = Content.BOSS_DAMAGE
 	hp = hp_max
+	_poise = POISE[BPhase.ONE]
 	_owner_id = get_instance_id()
 	_build_bodies(Vector2(Content.BOSS_W, Content.BOSS_H), Vector2(60.0, 20.0))
 	phase = BPhase.INTRO
@@ -599,7 +598,7 @@ func take_damage(amount: float, from_dir: Vector2, _kb: float, poise_dmg := 1.0)
 		emit_signal("damaged", 0.0, at, true)
 		return
 	if is_broken():
-		amount *= BREAK_DAMAGE_MUL
+		amount *= KNEEL_DAMAGE_MUL
 	var dealt := minf(amount, maxf(hp, 0.0))
 	hp -= amount
 	_hurt_flash = 0.08
@@ -617,12 +616,12 @@ func take_damage(amount: float, from_dir: Vector2, _kb: float, poise_dmg := 1.0)
 	_poise_regen_t = POISE_REGEN_DELAY
 	_poise -= poise_dmg
 	if _poise <= 0.0:
-		_break_guard(from_dir)
+		_break_guard(from_dir, 0.0)
 
 ## A parried blow always breaks the guard, however much poise is left.
 func on_parried(knock_dir: Vector2) -> void:
 	if not dead and not is_broken() and _beat == Beat.NONE:
-		_break_guard(knock_dir)
+		_break_guard(knock_dir, 0.0)
 
 ## True while the guard is broken and the Warden kneels open to punishment.
 func is_broken() -> bool:
@@ -630,7 +629,7 @@ func is_broken() -> bool:
 
 ## The guard gives: whatever was in hand is dropped and the Warden falls to one
 ## knee for BREAK_TIME. The knee strikes the floor with the slam's dust and thud.
-func _break_guard(from_dir: Vector2) -> void:
+func _break_guard(from_dir: Vector2, _kb: float) -> void:
 	_disarm()
 	_string.clear()
 	_dazed = false
