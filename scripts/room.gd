@@ -39,6 +39,8 @@ var exits: Array = []
 var chosen_exit := "boon"
 ## A Trial chamber: a guaranteed elite and an extra wave.
 var trial := false
+## Depth of this chamber in the run, set by the game before _ready.
+var room_index := 0
 var _near_idx := -1
 var _rng := RandomNumberGenerator.new()
 var _player_ref: Node = null
@@ -61,7 +63,7 @@ func setup(tmpl: Dictionary, p_is_boss: bool, player: Node, seed_val: int) -> vo
 	_rng.seed = seed_val
 
 func _ready() -> void:
-	_difficulty = Content.difficulty_for_room(_room_index_from_template())
+	_difficulty = Content.difficulty_for_room(room_index)
 	_difficulty.dmg_mul = float(_difficulty.dmg_mul) * Enemy.vow_damage()
 	_build_geometry()
 	_build_walls()
@@ -206,8 +208,7 @@ func _spawn_encounter() -> void:
 	if is_boss:
 		_spawn_boss()
 		return
-	var idx := _room_index_from_template()
-	_waves = Content.generate_waves(idx, _rng)
+	_waves = Content.generate_waves(room_index, _rng)
 	_wave_index = 0
 	if trial and not _waves.is_empty():
 		# A Trial doubles down: one more wave, and it always carries an elite.
@@ -215,7 +216,7 @@ func _spawn_encounter() -> void:
 		_difficulty.hp_mul = float(_difficulty.hp_mul) * 1.15
 	# At most one elite per room, placed in a random wave slot.
 	var gilded := Enemy.vows.has("v_gilded")
-	if not _waves.is_empty() and (trial or gilded or _rng.randf() < Content.elite_chance(idx)):
+	if not _waves.is_empty() and (trial or gilded or _rng.randf() < Content.elite_chance(room_index)):
 		var w := _rng.randi_range(0, _waves.size() - 1)
 		var wave: Array = _waves[w]
 		_elite_slot = Vector2i(w, _rng.randi_range(0, wave.size() - 1))
@@ -243,10 +244,6 @@ func _spawn_wave() -> void:
 
 func wave_count() -> int:
 	return _waves.size()
-
-func _room_index_from_template() -> int:
-	# derive from tag count; game.gd passes room index via meta
-	return int(get_meta("room_index", 0))
 
 func _spawn_enemy(kind: int, pos: Vector2, mods: Dictionary = {}) -> void:
 	var e := Enemy.new()

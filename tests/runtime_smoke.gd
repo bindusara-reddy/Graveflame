@@ -189,7 +189,7 @@ func _test_room_exit_flow() -> void:
 	root.add_child(player_stub)
 	var room := Room.new()
 	room.setup(Content.ROOM_TEMPLATES[0], false, player_stub, 2468)
-	room.set_meta("room_index", 0)
+	room.room_index = 0
 	var completed_count := [0]
 	var cleared_count := [0]
 	room.completed.connect(func(): completed_count[0] += 1)
@@ -455,7 +455,7 @@ func _test_boss_room_adds() -> void:
 	root.add_child(player_stub)
 	var room := Room.new()
 	room.setup(Content.BOSS_TEMPLATE, true, player_stub, 1357)
-	room.set_meta("room_index", Content.ROOMS_BEFORE_BOSS + 1)
+	room.room_index = Content.ROOMS_BEFORE_BOSS + 1
 	var completed := [0]
 	var cleared := [0]
 	var deaths: Array = []
@@ -486,7 +486,7 @@ func _test_room_dressing() -> void:
 	var room := Room.new()
 	room.mood = Content.mood_for(0.4)
 	room.setup(Content.ROOM_TEMPLATES[1], false, player_stub, 99)
-	room.set_meta("room_index", 1)
+	room.room_index = 1
 	room.enemy_spawned.connect(func(pos: Vector2, color: Color): spawned.append([pos, color]))
 	root.add_child(room)
 	check(spawned.size() == room.enemies.size() and spawned.size() > 0, "every spawned enemy announces a rift position")
@@ -498,7 +498,7 @@ func _test_room_dressing() -> void:
 	var throne := Room.new()
 	throne.mood = Content.mood_for(1.0)
 	throne.setup(Content.BOSS_TEMPLATE, true, player_stub, 7)
-	throne.set_meta("room_index", Content.ROOMS_BEFORE_BOSS + 1)
+	throne.room_index = Content.ROOMS_BEFORE_BOSS + 1
 	root.add_child(throne)
 	check(throne.light_points().size() >= 3, "the throne room lights its braziers")
 	throne.queue_free()

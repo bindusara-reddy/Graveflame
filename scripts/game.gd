@@ -899,7 +899,7 @@ func _advance_room() -> void:
 		room.exit_kinds = run.roll_exits(hp_frac)
 		room.trial = run.trial_next
 	run.trial_next = false
-	room.set_meta("room_index", run.room_index)
+	room.room_index = run.room_index
 	# Connect before _ready() because boss_spawned and the first wave happen there.
 	room.completed.connect(_on_room_completed)
 	room.cleared.connect(_on_room_cleared)
