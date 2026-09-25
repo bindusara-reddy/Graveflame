@@ -8,43 +8,76 @@ import unittest
 
 ROOT = Path(__file__).resolve().parents[1]
 PLAY = ROOT / "play.sh"
+CLASS_CACHE = Path(".godot") / "global_script_class_cache.cfg"
+
+# Stand-in engine: appends each call (cwd, args and the PRIME offload variables)
+# to FAKE_CALLS, answers --import as FAKE_IMPORT_OUTPUT / FAKE_IMPORT_FAIL say
+# (writing the class cache on success), and otherwise starts "the game".
+FAKE_ENGINE = (
+    "#!/usr/bin/python3\nimport json,os,sys\n"
+    "args=sys.argv[1:]\n"
+    "open(os.environ['FAKE_CALLS'],'a').write(json.dumps({'cwd':os.getcwd(),'args':args,"
+    "'prime':os.getenv('__NV_PRIME_RENDER_OFFLOAD'),"
+    "'vendor':os.getenv('__GLX_VENDOR_LIBRARY_NAME')})+'\\n')\n"
+    "if '--import' in args:\n"
+    "    sys.stdout.write(os.environ.get('FAKE_IMPORT_OUTPUT',''))\n"
+    "    if os.environ.get('FAKE_IMPORT_FAIL')=='1':\n"
+    "        sys.exit(3)\n"
+    "    os.makedirs('.godot',exist_ok=True)\n"
+    "    open('.godot/global_script_class_cache.cfg','w').write('list=[]\\n')\n"
+    "    sys.exit(0)\n"
+    "print('GAME_STARTED')\n"
+)
+
+
+def make_project(directory, *, cold):
+    """Build an isolated fixture in directory: a "project dir" with a copy of
+    play.sh, a minimal project.godot and, unless cold, a class cache, plus the
+    fake engine beside it. The tests never depend on, or touch, the real
+    repository's .godot/ directory. Returns (project, engine, calls_path)."""
+    root = Path(directory)
+    project = root / "project dir"
+    project.mkdir()
+    (project / "play.sh").write_bytes(PLAY.read_bytes())
+    (project / "project.godot").write_text("[application]\nconfig/name=\"Graveflame\"\n")
+    if not cold:
+        (project / CLASS_CACHE).parent.mkdir()
+        (project / CLASS_CACHE).write_text("list=[]\n")
+    engine = root / "fake godot"
+    engine.write_text(FAKE_ENGINE)
+    engine.chmod(0o755)
+    return project, engine, root / "calls.jsonl"
+
+
+def recorded_calls(calls_path):
+    """The engine calls the fake engine recorded, oldest first."""
+    if not calls_path.exists():
+        return []
+    return [json.loads(line) for line in calls_path.read_text().splitlines()]
 
 
 class LauncherTests(unittest.TestCase):
     def launch(self, *, driver_ok=True, gpu="auto", vsync="auto", extra=()):
-        """Run a copy of play.sh in an isolated fixture project that already has
-        a class cache (warm path), so these tests never depend on, or touch, the
-        real repository's .godot/ directory. ColdStartTests cover the cold path."""
+        """Warm launch (class cache present) with a fake nvidia-smi on PATH that
+        reports a working or broken driver. ColdStartTests cover the cold path."""
         self.assertTrue(PLAY.is_file(), "play.sh must launch the game with the appropriate GPU")
         with tempfile.TemporaryDirectory(prefix="graveflame-launch-test-") as directory:
-            root = Path(directory)
-            project = root / "project dir"
-            project.mkdir()
-            (project / "play.sh").write_bytes(PLAY.read_bytes())
-            (project / "project.godot").write_text("[application]\nconfig/name=\"Graveflame\"\n")
-            cache = project / ".godot" / "global_script_class_cache.cfg"
-            cache.parent.mkdir()
-            cache.write_text("list=[]\n")
-            gpu_probe = root / "nvidia-smi"
+            project, engine, calls_path = make_project(directory, cold=False)
+            gpu_probe = Path(directory) / "nvidia-smi"
             gpu_probe.write_text("#!/bin/sh\nexit " + ("0" if driver_ok else "1") + "\n")
             gpu_probe.chmod(0o755)
-            engine = root / "fake godot"
-            engine.write_text(
-                "#!/usr/bin/python3\nimport json,os,sys\n"
-                "print(json.dumps({'cwd':os.getcwd(),'args':sys.argv[1:],"
-                "'prime':os.getenv('__NV_PRIME_RENDER_OFFLOAD'),"
-                "'vendor':os.getenv('__GLX_VENDOR_LIBRARY_NAME')}))\n"
-            )
-            engine.chmod(0o755)
-            env = dict(os.environ, PATH=str(root) + os.pathsep + os.environ["PATH"],
-                       GODOT_BIN=str(engine), GRAVEFLAME_GPU=gpu, GRAVEFLAME_VSYNC=vsync)
+            env = dict(os.environ, PATH=directory + os.pathsep + os.environ["PATH"],
+                       GODOT_BIN=str(engine), GRAVEFLAME_GPU=gpu, GRAVEFLAME_VSYNC=vsync,
+                       FAKE_CALLS=str(calls_path))
             env.pop("__NV_PRIME_RENDER_OFFLOAD", None)
             env.pop("__GLX_VENDOR_LIBRARY_NAME", None)
-            result = subprocess.run(["bash", str(project / "play.sh"), *extra], cwd=root, env=env,
-                                    text=True, capture_output=True, check=True)
-            lines = result.stdout.strip().splitlines()
-            self.assertEqual(len(lines), 1, "warm launch must call the engine exactly once")
-            launched = json.loads(lines[0])
+            result = subprocess.run(["bash", str(project / "play.sh"), *extra], cwd=directory, env=env,
+                                    text=True, capture_output=True)
+            self.assertEqual(result.returncode, 0, result.stderr)
+            calls = recorded_calls(calls_path)
+            self.assertEqual(len(calls), 1, "warm launch must call the engine exactly once")
+            self.assertEqual(result.stdout, "GAME_STARTED\n")
+            launched = calls[0]
             launched["project"] = str(project)
             return launched
 
@@ -86,40 +119,15 @@ class ColdStartTests(unittest.TestCase):
     boot; the launcher must import once (headless, no caller arguments), refuse to
     start on a broken import, and skip the step entirely once the cache exists."""
 
-    CACHE = Path(".godot") / "global_script_class_cache.cfg"
-
     def run_project(self, *, cold, import_fails=False, import_output="", extra=()):
         with tempfile.TemporaryDirectory(prefix="graveflame-cold-test-") as directory:
-            project = Path(directory) / "project dir"
-            project.mkdir()
-            (project / "play.sh").write_bytes(PLAY.read_bytes())
-            (project / "project.godot").write_text("[application]\nconfig/name=\"Graveflame\"\n")
-            if not cold:
-                (project / self.CACHE).parent.mkdir()
-                (project / self.CACHE).write_text("list=[]\n")
-            calls = Path(directory) / "calls.jsonl"
-            engine = Path(directory) / "fake godot"
-            engine.write_text(
-                "#!/usr/bin/python3\nimport json,os,sys\n"
-                "args=sys.argv[1:]\n"
-                "open(os.environ['FAKE_CALLS'],'a').write(json.dumps({'cwd':os.getcwd(),'args':args})+'\\n')\n"
-                "if '--import' in args:\n"
-                "    sys.stdout.write(os.environ.get('FAKE_IMPORT_OUTPUT',''))\n"
-                "    if os.environ.get('FAKE_IMPORT_FAIL')=='1':\n"
-                "        sys.exit(3)\n"
-                "    os.makedirs('.godot',exist_ok=True)\n"
-                "    open('.godot/global_script_class_cache.cfg','w').write('list=[]\\n')\n"
-                "    sys.exit(0)\n"
-                "print('GAME_STARTED')\n"
-            )
-            engine.chmod(0o755)
+            project, engine, calls_path = make_project(directory, cold=cold)
             env = dict(os.environ, GODOT_BIN=str(engine), GRAVEFLAME_GPU="default",
-                       FAKE_CALLS=str(calls), FAKE_IMPORT_FAIL="1" if import_fails else "0",
+                       FAKE_CALLS=str(calls_path), FAKE_IMPORT_FAIL="1" if import_fails else "0",
                        FAKE_IMPORT_OUTPUT=import_output)
             result = subprocess.run(["bash", str(project / "play.sh"), *extra], cwd=directory,
                                     env=env, text=True, capture_output=True)
-            recorded = [json.loads(line) for line in calls.read_text().splitlines()] if calls.exists() else []
-            return result, recorded, project
+            return result, recorded_calls(calls_path), project
 
     def test_cold_start_imports_once_then_launches(self):
         result, calls, project = self.run_project(cold=True, extra=("--quit-after", "240"))
