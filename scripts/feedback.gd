@@ -305,6 +305,9 @@ func damage_number(pos: Vector2, amount: float, kind: String = "hit", text: Stri
 	var label := text if text != "" else str(roundi(amount))
 	if text == "" and roundi(amount) <= 0:
 		return
+	var tally := text == "" and (kind == "hit" or kind == "heavy")
+	if tally and _add_to_number(pos, amount, kind):
+		return
 	var color: Color = VFX.GOLD
 	var size := 26.0
 	match kind:
@@ -330,10 +333,36 @@ func damage_number(pos: Vector2, amount: float, kind: String = "hit", text: Stri
 	var vel := Vector2(randf_range(-26.0, 26.0), -randf_range(120.0, 170.0))
 	if motion_reduced:
 		vel = Vector2(0.0, -40.0)
-	_push_particle({
+	var number := {
 		"kind": "number", "pos": pos + Vector2(randf_range(-8.0, 8.0), 0.0), "vel": vel,
 		"life": 0.85, "max": 0.85, "color": _accessible_color(color), "size": size, "text": label
-	})
+	}
+	if tally:
+		number.merge({ "total": amount, "anchor": pos })
+	_push_particle(number)
+
+## Seconds a damage number stays open for the next blow, and how near (px)
+## that blow must land to add to it instead of stacking a new glyph on top.
+const NUMBER_TALLY_TIME := 0.45
+const NUMBER_TALLY_REACH := 56.0
+
+## Fold `amount` into a damage number still rising from about `pos`: it shows
+## the running total and re-pops a size larger. False when none is open.
+func _add_to_number(pos: Vector2, amount: float, kind: String) -> bool:
+	for p in _particles:
+		var open: bool = p.has("total") and float(p.max) - float(p.life) <= NUMBER_TALLY_TIME
+		if not open or p.anchor.distance_to(pos) > NUMBER_TALLY_REACH:
+			continue
+		p.total += amount
+		p.text = str(roundi(p.total))
+		p.anchor = pos
+		p.life = p.max
+		p.size = minf(float(p.size) + 4.0, 38.0)
+		p.vel = Vector2(0.0, -40.0 if motion_reduced else -110.0)
+		if kind == "heavy":
+			p.color = _accessible_color(VFX.HOT)
+		return true
+	return false
 
 ## Briefly slows the world, measured in real time so restoration is reliable.
 ## Overlapping calls extend the current stop instead of racing separate timers.

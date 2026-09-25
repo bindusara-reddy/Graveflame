@@ -29,13 +29,25 @@ var _trail_times := PackedFloat32Array()
 var _reflected := false
 ## Probes the stonework at the shot's centre each tick.
 var _stone_query := PhysicsPointQueryParameters2D.new()
+## Where the shot was loosed; a parry sends it back to whoever stands there.
+var _origin := Vector2.ZERO
+var _sender: Enemy
+var _homing_t := 0.0
 
 const TRAIL_LIFE := 0.22
 const TRAIL_POINTS := 14
+## A parried shot returns to the live foe nearest its origin (within
+## SENDER_REACH px) at RETURN_SPEED_MUL its old speed, curving toward it at
+## RETURN_TURN rad/s for RETURN_HOMING seconds so a drifting wisp is still hit.
+const SENDER_REACH := 120.0
+const RETURN_SPEED_MUL := 1.3
+const RETURN_TURN := 3.0
+const RETURN_HOMING := 0.6
 
 func setup(p_team: String, p_pos: Vector2, p_vel: Vector2, p_dmg: float, p_kb: float, p_pierce: int, p_life: float, p_color: Color) -> void:
 	team = p_team
 	global_position = p_pos
+	_origin = p_pos
 	vel = p_vel
 	damage = p_dmg
 	knockback = p_kb
@@ -119,6 +131,8 @@ func _step_trail() -> void:
 
 func _physics_process(delta: float) -> void:
 	_age += delta
+	if _homing_t > 0.0:
+		_home_on_sender(delta)
 	global_position += vel * delta
 	if style == "":
 		rotation = vel.angle()
@@ -175,6 +189,12 @@ func reflect(direction: Vector2, damage_boost: float = 1.6) -> void:
 	var out_dir := direction.normalized()
 	if out_dir == Vector2.ZERO:
 		out_dir = -vel.normalized()
+	# Back to whoever loosed it, when they are still standing near the spot.
+	_sender = _foe_nearest(_origin)
+	if _sender != null:
+		out_dir = (_sender.global_position - global_position).normalized()
+		speed = maxf(vel.length() * RETURN_SPEED_MUL, 520.0)
+		_homing_t = RETURN_HOMING
 	vel = out_dir * speed
 	damage *= damage_boost
 	pierce = maxi(pierce, 1)
@@ -186,6 +206,23 @@ func reflect(direction: Vector2, damage_boost: float = 1.6) -> void:
 		_trail.clear_points()
 		_trail_times.clear()
 	queue_redraw()
+
+## The live foe standing nearest `spot`, within SENDER_REACH, or null.
+func _foe_nearest(spot: Vector2) -> Enemy:
+	var best: Enemy = null
+	for foe in Enemy.living_near(get_tree(), spot, SENDER_REACH):
+		if best == null or foe.global_position.distance_to(spot) < best.global_position.distance_to(spot):
+			best = foe
+	return best
+
+## Curve a returned shot toward its sender, gently, while the homing lasts.
+func _home_on_sender(delta: float) -> void:
+	_homing_t -= delta
+	if not is_instance_valid(_sender) or _sender.dead:
+		_homing_t = 0.0
+		return
+	var turn := angle_difference(vel.angle(), (_sender.global_position - global_position).angle())
+	vel = vel.rotated(clampf(turn, -RETURN_TURN * delta, RETURN_TURN * delta))
 
 ## True when the shot's centre is inside the chamber's stonework.
 func _in_stone() -> bool:

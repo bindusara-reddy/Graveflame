@@ -337,7 +337,7 @@ func _step_locomotion(delta: float, controls_locked: bool = false) -> void:
 		_begin_heal()
 		return
 	move_and_slide()
-	_floor_and_wall_tracking()
+	_floor_and_wall_tracking(delta)
 
 ## True (and spent) when `action` was pressed within its PRESS_BUFFER time.
 func _take_press(action: String) -> bool:
@@ -375,7 +375,7 @@ func _try_buffered_jump() -> bool:
 	jump_buffer = 0.0
 	return true
 
-func _floor_and_wall_tracking() -> void:
+func _floor_and_wall_tracking(delta: float) -> void:
 	if is_on_floor():
 		coyote = Content.P_COYOTE
 		jumps_left = Content.P_MAX_JUMPS
@@ -403,7 +403,7 @@ func _floor_and_wall_tracking() -> void:
 				_wall_stick = Content.P_WALL_STICK_TIME
 		else:
 			if _wall_stick > 0.0:
-				_wall_stick -= get_process_delta_time()
+				_wall_stick -= delta
 			else:
 				wall_sliding = false
 
@@ -535,7 +535,7 @@ func _step_attack(delta: float) -> void:
 		state = State.LOCOMOTION
 		attack_index = -1 if def.window <= 0.0 else attack_index
 	move_and_slide()
-	_floor_and_wall_tracking()
+	_floor_and_wall_tracking(delta)
 
 ## Leave the combo for a recovery cancel: the next swing starts from the cut.
 func _drop_combo() -> void:
@@ -837,7 +837,7 @@ func _step_parry(delta: float) -> void:
 	if parry_time <= (0.0 if _parry_succeeded else -PARRY_WHIFF_LAG):
 		state = State.LOCOMOTION
 	move_and_slide()
-	_floor_and_wall_tracking()
+	_floor_and_wall_tracking(delta)
 
 func _scan_parry() -> void:
 	# Persistent enemy hurtboxes are not in this area's mask: only active melee
@@ -857,8 +857,11 @@ func _scan_parry() -> void:
 			var attacker = area.get_meta("owner")
 			if not is_instance_valid(attacker):
 				continue
-			deal(attacker, Content.PARRY_DAMAGE + float(build.get("parry_bonus_dmg", 0.0)), Vector2(-facing, 0.0), 420.0, PARRY_POISE)
-			attacker.on_parried(Vector2(facing, -0.2))
+			# The deflect drives the attacker away from the knight, so a shield
+			# faces it head-on and a parry that kills leaves the body at rest.
+			deal(attacker, Content.PARRY_DAMAGE + float(build.get("parry_bonus_dmg", 0.0)), Vector2(facing, -0.1), 420.0, PARRY_POISE)
+			if not attacker.dead:
+				attacker.on_parried(Vector2(facing, -0.2))
 			# The riposte must land while the foe still reels, longest after a perfect parry.
 			if attacker.state == Enemy.EState.STAGGER:
 				attacker.stagger_t = maxf(attacker.stagger_t, PERFECT_PARRY_STAGGER if perfect else PARRY_STAGGER)
@@ -912,7 +915,7 @@ func _step_heal(delta: float) -> void:
 	velocity.y += Content.GRAVITY * delta
 	velocity.x = move_toward(velocity.x, 0.0, Content.P_FRICTION * 2.0 * delta)
 	move_and_slide()
-	_floor_and_wall_tracking()
+	_floor_and_wall_tracking(delta)
 	_heal_time -= delta
 	if _heal_time <= 0.0:
 		_use_flask()
@@ -1025,7 +1028,7 @@ func _step_hurt(delta: float) -> void:
 	velocity.y += Content.GRAVITY * delta
 	velocity.x = move_toward(velocity.x, 0.0, Content.P_FRICTION * 3.0 * delta)
 	move_and_slide()
-	_floor_and_wall_tracking()
+	_floor_and_wall_tracking(delta)
 	# Keep grounded knockback committed to landing. Airborne hits release only
 	# after the impulse settles and ascent ends, with contact bookkeeping current.
 	if absf(velocity.x) < 30.0 and (is_on_floor() or (_hurt_started_airborne and velocity.y >= 0.0)):

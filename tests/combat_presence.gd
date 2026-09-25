@@ -21,6 +21,8 @@ func run() -> void:
 	await test_buffers_and_cancels()
 	await test_guard_rings_off()
 	await test_shots_strike()
+	await test_parry_aims()
+	test_number_tally()
 	release(["attack", "parry", "move_left"])
 	Feedback.motion_reduced = false
 	await finish("COMBAT_PRESENCE")
@@ -297,6 +299,43 @@ func test_shots_strike() -> void:
 	game.projectiles.add_child(bolt)
 	await ticks_until(func(): return gone[0], 40)
 	check(seen.back() == "stone" and gone[0], "a shot breaks on the stonework")
+
+## A parried shot flies back at the shooter that loosed it, and a parried
+## swing drives its attacker away from the knight.
+func test_parry_aims() -> void:
+	var p := game.player
+	p.respawn_at(Vector2(480.0, Content.FLOOR_Y - Content.P_BODY_H * 0.5))
+	p.facing = 1.0
+	await ticks(60)
+	var shooter := dummy_ahead(220.0)
+	shooter.global_position.y -= 140.0
+	var shot := Projectile.new()
+	shot.setup("enemy", shooter.global_position, Vector2.ZERO, 10.0, 100.0, 0, 2.0, Content.PAL.special)
+	shot.global_position = p.global_position + Vector2(52.0, -5.0)
+	game.projectiles.add_child(shot)
+	await hold_action("parry")
+	await ticks(3)
+	var to_shooter := (shooter.global_position - shot.global_position).normalized()
+	check(shot.team == "player" and shot.vel.normalized().dot(to_shooter) > 0.9, "a parried shot flies back at the foe that loosed it")
+	shot.queue_free()
+	shooter.queue_free()
+	await ticks(60)
+	var swinger := dummy_ahead(44.0)
+	swinger._arm(20.0)
+	await hold_action("parry")
+	await ticks(3)
+	check(swinger._last_hit_dir.x > 0.0 and swinger.state == Enemy.EState.STAGGER, "a parried swing drives its attacker away and staggers it")
+	swinger.queue_free()
+	await ticks(30)
+
+## Blows on one spot in quick succession add up in one number.
+func test_number_tally() -> void:
+	game.feedback._particles.clear()
+	var at := Vector2(600.0, 300.0)
+	game.feedback.damage_number(at, 12.0, "hit")
+	game.feedback.damage_number(at + Vector2(10.0, 0.0), 16.0, "hit")
+	var numbers: Array = game.feedback._particles.filter(func(v): return v.kind == "number")
+	check(numbers.size() == 1 and numbers[0].text == "28", "blows on one foe add up in one damage number")
 
 func test_breakable_crypt() -> void:
 	var props := game.room.props
