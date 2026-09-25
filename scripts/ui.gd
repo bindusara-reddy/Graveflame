@@ -138,15 +138,15 @@ var _hint_tween: Tween
 var _boss_phase_tag: Label
 var _boss_phase_tween: Tween
 var _fade: ColorRect
-var _music_check: CheckBox
 
 var _panels: Dictionary = {}
 var _upgrade_row: HBoxContainer
 var _forge_rows: VBoxContainer
+## The options screen's reduced-motion box; the menu contracts toggle it.
 var _reduced_motion_check: CheckBox
-var _reduced_flash_check: CheckBox
-var _fullscreen_check: CheckBox
-var _vibration_check: CheckBox
+## Save option key -> every CheckBox showing it. The pause card repeats the
+## accessibility and music toggles, so a toggle updates its twins.
+var _option_checks: Dictionary = {}
 ## key -> { slider, readout } for every volume control on the options screen.
 var _option_sliders: Dictionary = {}
 ## Rebinding: the rows container and whichever action is awaiting a keypress.
@@ -839,17 +839,10 @@ func _build_pause() -> void:
 	options.add_theme_constant_override("separation", 10)
 	options_margin.add_child(options)
 	options.add_child(_make_label("ACCESSIBILITY", 12, C_EMBER_HI, HorizontalAlignment.HORIZONTAL_ALIGNMENT_LEFT))
-	_reduced_motion_check = _check("Reduced motion", "Disables camera shake and softens particles.")
-	_reduced_flash_check = _check("Reduced flash", "Reduces high-contrast impact flashes.")
-	options.add_child(_reduced_motion_check)
-	options.add_child(_reduced_flash_check)
-	_reduced_motion_check.toggled.connect(func(value: bool): emit_signal("option_toggled", "reduced_motion", value))
-	_reduced_flash_check.toggled.connect(func(value: bool): emit_signal("option_toggled", "reduced_flash", value))
+	_option_check(options, "reduced_motion", "Reduced motion", "Disables camera shake and softens particles.")
+	_option_check(options, "reduced_flash", "Reduced flash", "Reduces high-contrast impact flashes.")
 	options.add_child(_make_label("SOUND", 12, C_EMBER_HI, HorizontalAlignment.HORIZONTAL_ALIGNMENT_LEFT))
-	_music_check = _check("Music", "Procedural ambient score and boss theme.")
-	_music_check.button_pressed = true
-	options.add_child(_music_check)
-	_music_check.toggled.connect(func(value: bool): emit_signal("option_toggled", "music", value))
+	_option_check(options, "music_on", "Music", "Procedural ambient score and boss theme.")
 
 	content.add_child(_make_label("ESC  resume", 12, C_MUTED, HorizontalAlignment.HORIZONTAL_ALIGNMENT_CENTER))
 
@@ -1098,21 +1091,12 @@ func _build_options() -> void:
 	_slider_row(content, "Effects", "sfx", 0.9)
 
 	content.add_child(_make_label("DISPLAY", 12, C_EMBER_HI, HorizontalAlignment.HORIZONTAL_ALIGNMENT_LEFT))
-	_fullscreen_check = _check("Fullscreen", "Fill the display instead of running in a window.")
-	content.add_child(_fullscreen_check)
-	_fullscreen_check.toggled.connect(func(value: bool): emit_signal("option_toggled", "fullscreen", value))
-
-	_vibration_check = _check("Controller vibration", "The pad rumbles with hits, parries and falls.")
-	content.add_child(_vibration_check)
-	_vibration_check.toggled.connect(func(value: bool): emit_signal("option_toggled", "vibration", value))
+	_option_check(content, "fullscreen", "Fullscreen", "Fill the display instead of running in a window.")
+	_option_check(content, "vibration", "Controller vibration", "The pad rumbles with hits, parries and falls.")
 
 	content.add_child(_make_label("ACCESSIBILITY", 12, C_EMBER_HI, HorizontalAlignment.HORIZONTAL_ALIGNMENT_LEFT))
-	_reduced_motion_check = _check("Reduced motion", "Disables camera shake and softens particles.")
-	_reduced_flash_check = _check("Reduced flash", "Reduces high-contrast impact flashes.")
-	content.add_child(_reduced_motion_check)
-	content.add_child(_reduced_flash_check)
-	_reduced_motion_check.toggled.connect(func(value: bool): emit_signal("option_toggled", "reduced_motion", value))
-	_reduced_flash_check.toggled.connect(func(value: bool): emit_signal("option_toggled", "reduced_flash", value))
+	_reduced_motion_check = _option_check(content, "reduced_motion", "Reduced motion", "Disables camera shake and softens particles.")
+	_option_check(content, "reduced_flash", "Reduced flash", "Reduces high-contrast impact flashes.")
 
 	var footer := HBoxContainer.new()
 	footer.alignment = BoxContainer.ALIGNMENT_CENTER
@@ -1135,16 +1119,9 @@ func sync_options(opts: Dictionary) -> void:
 		var value := clampf(float(opts.get(key, slider.value)), 0.0, 1.0)
 		slider.set_value_no_signal(value)
 		(entry["readout"] as Label).text = "%d%%" % roundi(value * 100.0)
-	if _fullscreen_check != null:
-		_fullscreen_check.set_pressed_no_signal(bool(opts.get("fullscreen", false)))
-	if _reduced_motion_check != null:
-		_reduced_motion_check.set_pressed_no_signal(bool(opts.get("reduced_motion", false)))
-	if _reduced_flash_check != null:
-		_reduced_flash_check.set_pressed_no_signal(bool(opts.get("reduced_flash", false)))
-	if _music_check != null:
-		_music_check.set_pressed_no_signal(bool(opts.get("music_on", true)))
-	if _vibration_check != null:
-		_vibration_check.set_pressed_no_signal(bool(opts.get("vibration", true)))
+	for key in _option_checks:
+		for check: CheckBox in _option_checks[key]:
+			check.set_pressed_no_signal(bool(opts.get(key, false)))
 
 
 ## Keyboard text for one action, or a dash when nothing is bound.
@@ -1596,6 +1573,22 @@ static func _toggle_image(is_on: bool) -> Image:
 			for w in range(2):
 				img.set_pixel(9 + i + w, 12 - i, ink)
 	return img
+
+
+## A toggle bound to Save option `key`. Toggling it updates every other copy of
+## the key first, so the pause card and the options screen never disagree.
+func _option_check(parent: Container, key: String, title: String, description: String) -> CheckBox:
+	var check := _check(title, description)
+	parent.add_child(check)
+	var copies: Array = _option_checks.get_or_add(key, [])
+	copies.append(check)
+	check.toggled.connect(func(value: bool):
+		for twin: CheckBox in copies:
+			if twin != check:
+				twin.set_pressed_no_signal(value)
+		option_toggled.emit(key, value)
+	)
+	return check
 
 
 func _check(title: String, description: String) -> CheckBox:

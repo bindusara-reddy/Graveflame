@@ -46,6 +46,8 @@ var _queued_lesson := ""
 # Run statistics shown on the end screens.
 var _stats: Dictionary = {}
 var _vignette_rect: ColorRect
+## The vignette's shader: retinted as health runs low, de-grained for reduced flash.
+var _vignette_mat: ShaderMaterial
 var _low_hp_t := 0.0
 ## Current depth palette; see Content.MOODS. Snaps per chamber under the rift fade.
 var mood: Dictionary = Content.mood_for(0.0)
@@ -159,7 +161,8 @@ func _ready() -> void:
 	_vignette_rect = ColorRect.new()
 	_vignette_rect.name = "VignetteRect"
 	_vignette_rect.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	_vignette_rect.material = VFX.vignette_material()
+	_vignette_mat = VFX.vignette_material()
+	_vignette_rect.material = _vignette_mat
 	_vignette.add_child(_vignette_rect)
 	_vignette_rect.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	add_child(_vignette)
@@ -197,19 +200,30 @@ func _ready() -> void:
 ## UI reflect the same values without firing the change handlers.
 func _restore_options() -> void:
 	var opts := Save.get_options()
-	feedback.set_reduced_motion(bool(opts.reduced_motion))
-	_atmosphere.set_reduced_motion(bool(opts.reduced_motion))
-	feedback.set_reduced_flash(bool(opts.reduced_flash))
-	Feedback.vibration = bool(opts.get("vibration", true))
-	if _vignette_rect != null and _vignette_rect.material is ShaderMaterial:
-		(_vignette_rect.material as ShaderMaterial).set_shader_parameter("grain", 0.0 if bool(opts.reduced_flash) else VFX.GRAIN_DEFAULT)
-	music.set_enabled(bool(opts.music_on))
+	for key in ["reduced_motion", "reduced_flash", "fullscreen", "music_on", "vibration"]:
+		_apply_toggle(key, bool(opts[key]))
 	_apply_audio_options()
 	ui.sync_options(opts)
 	_apply_bindings()
-	DisplayServer.window_set_mode(
-		DisplayServer.WINDOW_MODE_FULLSCREEN if bool(opts.fullscreen) else DisplayServer.WINDOW_MODE_WINDOWED
-	)
+
+
+## Put one saved on/off setting into effect; boot and the settings screens share it.
+func _apply_toggle(key: String, on: bool) -> void:
+	match key:
+		"reduced_motion":
+			feedback.set_reduced_motion(on)
+			_atmosphere.set_reduced_motion(on)
+		"reduced_flash":
+			feedback.set_reduced_flash(on)
+			var grain := 0.0 if on else VFX.GRAIN_DEFAULT
+			_vignette_mat.set_shader_parameter("grain", grain)
+		"fullscreen":
+			var mode := DisplayServer.WINDOW_MODE_FULLSCREEN if on else DisplayServer.WINDOW_MODE_WINDOWED
+			DisplayServer.window_set_mode(mode)
+		"music_on":
+			music.set_enabled(on)
+		"vibration":
+			Feedback.vibration = on
 
 
 ## The keep's acoustics: the score sits in a large stone hall, effects in a
@@ -412,8 +426,7 @@ func _update_low_hp_vignette(delta: float) -> void:
 	_set_vignette(VIGNETTE_EDGE.lerp(VIGNETTE_LOW_HP, strength))
 
 func _set_vignette(edge: Color) -> void:
-	if _vignette_rect != null and _vignette_rect.material is ShaderMaterial:
-		(_vignette_rect.material as ShaderMaterial).set_shader_parameter("edge_color", edge)
+	_vignette_mat.set_shader_parameter("edge_color", edge)
 
 func _paint_backdrop(ci: CanvasItem) -> void:
 	# Camera-driven parallax crypt. Each plane is shifted by (1 - depth) of the
@@ -1376,23 +1389,7 @@ func _on_quit_to_title() -> void:
 
 func _on_option_toggled(key: String, value: bool) -> void:
 	Save.set_option(key, value)
-	match key:
-		"reduced_motion":
-			feedback.set_reduced_motion(value)
-			_atmosphere.set_reduced_motion(value)
-		"reduced_flash":
-			feedback.set_reduced_flash(value)
-			if _vignette_rect != null and _vignette_rect.material is ShaderMaterial:
-				(_vignette_rect.material as ShaderMaterial).set_shader_parameter("grain", 0.0 if value else VFX.GRAIN_DEFAULT)
-		"fullscreen":
-			DisplayServer.window_set_mode(
-				DisplayServer.WINDOW_MODE_FULLSCREEN if value else DisplayServer.WINDOW_MODE_WINDOWED
-			)
-		"music":
-			Save.set_option("music_on", value)
-			music.set_enabled(value)
-		"vibration":
-			Feedback.vibration = value
+	_apply_toggle(key, value)
 	_apply_audio_options()
 
 func _on_forge_requested() -> void:
