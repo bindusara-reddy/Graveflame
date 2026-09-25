@@ -76,6 +76,44 @@ const SWINGS := {
 	},
 }
 
+## Held poses: fixed keys laid over the idle pose for as long as the state lasts.
+const WALL_SLIDE_POSE := {
+	"torso": -0.18, "head": -0.12,
+	"hip_f": 1.0, "knee_f": 1.7, "hip_b": 0.15, "knee_b": 0.7,
+	"arm_f": -0.55, "sword": 0.9, "arm_b": 2.5,
+	"cape": -0.4, "ground": 0.0,
+}
+## Double-jump somersault: tucked tight, the whole cut-out turning over.
+const FLIP_POSE := {
+	"torso": 0.3,
+	"hip_f": 1.3, "knee_f": 2.1, "hip_b": 1.1, "knee_b": 2.0,
+	"arm_f": 0.4, "arm_b": 1.0,
+}
+const SLAM_POSE := {
+	"torso": 0.2, "head": 0.15,
+	"hip_f": 1.25, "knee_f": 2.1, "hip_b": 0.8, "knee_b": 1.9,
+	"arm_f": PI * 0.5, "sword": 0.0, "arm_b": -2.0 + TAU,
+	"cape": -1.0, "flutter": 1.2, "lean_flame": 0.0, "flame": 1.3, "ground": 0.0,
+}
+const DASH_POSE := {
+	"torso": 0.5, "head": 0.2,
+	"hip_f": 1.0, "knee_f": 1.5, "hip_b": -1.0, "knee_b": 0.6,
+	"arm_f": 2.7, "sword": 0.2, "arm_b": 2.6,
+	"cape": 1.0, "flutter": 1.4, "lean_flame": -1.0, "sx": 1.12, "sy": 0.9, "y": 3.0, "ground": 0.0,
+}
+const PARRY_POSE := {
+	"torso": -0.1, "head": -0.05,
+	"hip_f": 0.45, "knee_f": 0.55, "hip_b": -0.5, "knee_b": 0.25,
+	"arm_f": -0.35, "sword": -1.35, "arm_b": 0.4,
+	"cape": 0.2,
+}
+const HURT_POSE := {
+	"torso": -0.42, "head": -0.45,
+	"hip_f": 0.55, "knee_f": 0.9, "hip_b": -0.45, "knee_b": 0.3,
+	"arm_f": -2.3, "sword": -0.6, "arm_b": -2.6 + TAU,
+	"cape": -0.3, "flutter": 1.2, "rot": -0.12,
+}
+
 static func swing_name(p) -> String:
 	if p._riposte_attack:
 		return "riposte"
@@ -83,12 +121,6 @@ static func swing_name(p) -> String:
 		1: return "cleave"
 		2: return "finish"
 	return "cut"
-
-static func _merged(over: Dictionary) -> Dictionary:
-	var out := REST.duplicate()
-	for k in over:
-		out[k] = over[k]
-	return out
 
 static func _lerp_pose(a: Dictionary, b: Dictionary, t: float) -> Dictionary:
 	var out := a.duplicate()
@@ -154,17 +186,7 @@ static func target(p) -> Dictionary:
 					pose.hip_f = maxf(pose.hip_f, 0.4 * k)
 					rate = 40.0
 			elif p.wall_sliding:
-				pose.torso = -0.18
-				pose.head = -0.12
-				pose.hip_f = 1.0
-				pose.knee_f = 1.7
-				pose.hip_b = 0.15
-				pose.knee_b = 0.7
-				pose.arm_f = -0.55
-				pose.sword = 0.9
-				pose.arm_b = 2.5
-				pose.cape = -0.4
-				pose.ground = 0.0
+				pose.merge(WALL_SLIDE_POSE, true)
 			else:
 				pose.ground = 0.0
 				# Rising: knees tucked. Falling: legs reach for the floor, cape lifts.
@@ -180,14 +202,7 @@ static func target(p) -> Dictionary:
 				pose.sy = lerpf(1.06, 1.0, fall)
 				pose.sx = lerpf(0.96, 1.0, fall)
 				if p._flip_t > 0.0:
-					# Double-jump somersault: tucked tight, the whole cut-out turning over.
-					pose.hip_f = 1.3
-					pose.knee_f = 2.1
-					pose.hip_b = 1.1
-					pose.knee_b = 2.0
-					pose.arm_f = 0.4
-					pose.arm_b = 1.0
-					pose.torso = 0.3
+					pose.merge(FLIP_POSE, true)
 					rate = 45.0
 			if p._cast_t > 0.0:
 				# Flame lance: an open-handed thrust after the bolt.
@@ -209,8 +224,8 @@ static func target(p) -> Dictionary:
 		Player.State.ATTACK:
 			var sw: Dictionary = SWINGS[swing_name(p)]
 			var def: Dictionary = p.get_meta("atk_def", Content.COMBO[0])
-			var wind := _merged(sw.wind)
-			var strike := _merged(sw.strike)
+			var wind := REST.merged(sw.wind, true)
+			var strike := REST.merged(sw.strike, true)
 			match str(p.atk_phase):
 				"startup":
 					pose = wind
@@ -232,50 +247,13 @@ static func target(p) -> Dictionary:
 			pose.cape = 0.45
 			pose.flutter = 0.8
 		Player.State.SLAM:
-			pose.ground = 0.0
-			pose.hip_f = 1.25
-			pose.knee_f = 2.1
-			pose.hip_b = 0.8
-			pose.knee_b = 1.9
-			pose.torso = 0.2
-			pose.head = 0.15
-			pose.arm_f = PI * 0.5
-			pose.sword = 0.0
-			pose.arm_b = -2.0 + TAU
-			pose.cape = -1.0
-			pose.flutter = 1.2
-			pose.lean_flame = 0.0
-			pose.flame = 1.3
+			pose.merge(SLAM_POSE, true)
 			rate = 40.0
 		Player.State.DASH:
-			pose.torso = 0.5
-			pose.head = 0.2
-			pose.hip_f = 1.0
-			pose.knee_f = 1.5
-			pose.hip_b = -1.0
-			pose.knee_b = 0.6
-			pose.arm_f = 2.7
-			pose.sword = 0.2
-			pose.arm_b = 2.6
-			pose.cape = 1.0
-			pose.flutter = 1.4
-			pose.sx = 1.12
-			pose.sy = 0.9
-			pose.y = 3.0
-			pose.ground = 0.0
-			pose.lean_flame = -1.0
+			pose.merge(DASH_POSE, true)
 			rate = 50.0
 		Player.State.PARRY:
-			pose.torso = -0.1
-			pose.head = -0.05
-			pose.hip_f = 0.45
-			pose.knee_f = 0.55
-			pose.hip_b = -0.5
-			pose.knee_b = 0.25
-			pose.arm_f = -0.35
-			pose.sword = -1.35
-			pose.arm_b = 0.4
-			pose.cape = 0.2
+			pose.merge(PARRY_POSE, true)
 			rate = 60.0
 		Player.State.HEAL:
 			var hk := clampf(1.0 - float(p._heal_time) / Content.P_HEAL_TIME, 0.0, 1.0)
@@ -290,18 +268,7 @@ static func target(p) -> Dictionary:
 			pose.flask = 1.0
 			rate = 22.0
 		Player.State.HURT:
-			pose.torso = -0.42
-			pose.head = -0.45
-			pose.hip_f = 0.55
-			pose.knee_f = 0.9
-			pose.hip_b = -0.45
-			pose.knee_b = 0.3
-			pose.arm_f = -2.3
-			pose.sword = -0.6
-			pose.arm_b = -2.6 + TAU
-			pose.cape = -0.3
-			pose.flutter = 1.2
-			pose.rot = -0.12
+			pose.merge(HURT_POSE, true)
 			pose.ground = 1.0 if grounded else 0.0
 			rate = 45.0
 		Player.State.DEAD:
