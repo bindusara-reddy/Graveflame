@@ -83,7 +83,6 @@ static func _stroke_shapes() -> Dictionary:
 		"shoulder_ridge": curve(Vector2(-31,-41), [[Vector2(-17,-50),Vector2(4,-40),Vector2(12,-26)]]),
 		"fissure": PackedVector2Array([Vector2(12,-28),Vector2(3,-12),Vector2(13,-3),Vector2(5,11)]),
 		"jaw": curve(Vector2(9,-51), [[Vector2(18,-43),Vector2(36,-44),Vector2(42,-55)]]),
-		"crest": curve(Vector2(-9,-77), [[Vector2(-23,-81),Vector2(-28,-94),Vector2(-21,-106)]]),
 	}
 
 static func pose(b) -> Dictionary:
@@ -268,7 +267,7 @@ static func paint(b,p: Dictionary) -> void:
 		var r := 4.0+4.0*pk
 		ci.draw_circle(puff,r,Color(RIDGE,0.75*(1.0-pk)))
 		ci.draw_arc(puff,r,0.0,TAU,14,Color(INK,0.6*(1.0-pk)),1.5,true)
-	# Flame crown shares the hero's warm identity but has a swept, bestial crest.
+	# Flame crown shares the hero's warm identity.
 	var crown_scale: float = (1.35 if phase2 else 1.0)*float(p.get("crown",1.0))
 	for i in range(CROWN.size()):
 		var base: Vector2 = CROWN[i][0]
@@ -281,11 +280,6 @@ static func paint(b,p: Dictionary) -> void:
 			ci.draw_circle(tip,2.0,fire)
 		else:
 			VFX.draw_flame(ci,base,height*crown_scale,width,t,[1.0,2.3,4.0][i],fire,Content.PAL.attack)
-	# The crest is the crown's backswept ridge; with the flames burnt to stubs it
-	# would stand alone and read as a horn, so it goes with them.
-	if not p.get("spent",false):
-		ci.draw_polyline(STROKES.crest,INK,7.0,true)
-		ci.draw_polyline(STROKES.crest,RIDGE.darkened(0.15),2.2,true)
 	arm(ci,p.shoulder,p.elbow,p.hand,float(p.claw_angle),rust)
 	if phase2:
 		ci.draw_line(p.elbow+Vector2(3,0),p.hand,fire,2.0,true)
