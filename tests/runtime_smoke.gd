@@ -540,7 +540,7 @@ func _test_full_run_simulation() -> void:
 	root.add_child(game)
 	await process_frame
 	var cells_before := Save.get_cells()
-	game._on_start()
+	game._begin_run()
 	await physics_frame
 	check(game.state == Game.GState.PLAYING and is_instance_valid(game.room), "simulated run starts in its first chamber")
 	var rooms_visited := 0

@@ -42,7 +42,7 @@ func run() -> void:
 	await load_main_scene(0, _vp)
 	await _wait(0.5)
 	await _shot("01_title")
-	game._on_start()
+	game._begin_run()
 	await _wait(0.25)
 	await _shot("02_room_intro")
 	await _wait(1.2)

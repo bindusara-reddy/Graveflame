@@ -552,11 +552,11 @@ func _build_title() -> void:
 	content.add_child(nav)
 	var start := _button("BEGIN DESCENT", "start", true, Vector2(300, 54))
 	start.size_flags_horizontal = Control.SIZE_SHRINK_CENTER
-	start.pressed.connect(func(): emit_signal("start_requested"))
+	start.pressed.connect(start_requested.emit)
 	nav.add_child(start)
 	var forge := _button("THE FORGE", "forge", false, Vector2(300, 46))
 	forge.size_flags_horizontal = Control.SIZE_SHRINK_CENTER
-	forge.pressed.connect(func(): emit_signal("forge_requested"))
+	forge.pressed.connect(forge_requested.emit)
 	_title_quiet_button(forge)
 	nav.add_child(forge)
 	_title_controls_button = _button("CONTROLS", "controls", false, Vector2(300, 46))
@@ -567,7 +567,7 @@ func _build_title() -> void:
 	# OPTIONS goes after CONTROLS so the tested BEGIN > FORGE > CONTROLS pad focus chain holds.
 	var options_button := _button("OPTIONS", "options", false, Vector2(300, 46))
 	options_button.size_flags_horizontal = Control.SIZE_SHRINK_CENTER
-	options_button.pressed.connect(func(): emit_signal("options_requested"))
+	options_button.pressed.connect(options_requested.emit)
 	_title_quiet_button(options_button)
 	nav.add_child(options_button)
 	_title_nav_buttons = [start, forge, _title_controls_button, options_button]
@@ -781,7 +781,7 @@ func _unhandled_input(event: InputEvent) -> void:
 				var action := _listening_action
 				_listening_action = ""
 				_listening_button = null
-				emit_signal("binding_changed", action, code)
+				binding_changed.emit(action, code)
 			get_viewport().set_input_as_handled()
 		return
 	# Boon cards print their index, so the number keys have to actually pick one.
@@ -821,13 +821,13 @@ func _build_pause() -> void:
 	actions.add_theme_constant_override("separation", 12)
 	content.add_child(actions)
 	var resume := _button("RESUME", "resume", true, Vector2(230, 54))
-	resume.pressed.connect(func(): emit_signal("resume_requested"))
+	resume.pressed.connect(resume_requested.emit)
 	actions.add_child(resume)
 	var quit := _button("QUIT TO TITLE", "quit", false, Vector2(230, 54))
-	quit.pressed.connect(func(): emit_signal("quit_to_title_requested"))
+	quit.pressed.connect(quit_to_title_requested.emit)
 	actions.add_child(quit)
 	var options_button := _button("OPTIONS", "pause_options", false, Vector2(230, 54))
-	options_button.pressed.connect(func(): emit_signal("options_requested"))
+	options_button.pressed.connect(options_requested.emit)
 	actions.add_child(options_button)
 
 	var options_panel := PanelContainer.new()
@@ -922,10 +922,10 @@ func _build_game_over() -> void:
 	actions.add_theme_constant_override("separation", 12)
 	content.add_child(actions)
 	var retry := _button("DESCEND AGAIN", "restart", true, Vector2(250, 56))
-	retry.pressed.connect(func(): emit_signal("restart_requested"))
+	retry.pressed.connect(restart_requested.emit)
 	actions.add_child(retry)
 	var title := _button("RETURN TO TITLE", "title", false, Vector2(230, 56))
-	title.pressed.connect(func(): emit_signal("quit_to_title_requested"))
+	title.pressed.connect(quit_to_title_requested.emit)
 	actions.add_child(title)
 
 
@@ -953,10 +953,10 @@ func _build_victory() -> void:
 	actions.add_theme_constant_override("separation", 12)
 	content.add_child(actions)
 	var again := _button("NEW RUN", "again", true, Vector2(230, 56))
-	again.pressed.connect(func(): emit_signal("restart_requested"))
+	again.pressed.connect(restart_requested.emit)
 	actions.add_child(again)
 	var title := _button("RETURN TO TITLE", "title", false, Vector2(230, 56))
-	title.pressed.connect(func(): emit_signal("quit_to_title_requested"))
+	title.pressed.connect(quit_to_title_requested.emit)
 	actions.add_child(title)
 
 
@@ -1038,7 +1038,7 @@ func _build_forge() -> void:
 	footer.alignment = BoxContainer.ALIGNMENT_CENTER
 	content.add_child(footer)
 	var back := _button("BACK", "back", false, Vector2(220, 50), "ui_back")
-	back.pressed.connect(func(): emit_signal("back_from_forge_requested"))
+	back.pressed.connect(back_from_forge_requested.emit)
 	footer.add_child(back)
 	panel.set_meta("back_button", back)
 
@@ -1069,7 +1069,7 @@ func _slider_row(parent: VBoxContainer, title: String, key: String, value: float
 	row.add_child(slider)
 	slider.value_changed.connect(func(v: float):
 		readout.text = "%d%%" % roundi(v * 100.0)
-		emit_signal("option_value_changed", key, v)
+		option_value_changed.emit(key, v)
 	)
 	_option_sliders[key] = { "slider": slider, "readout": readout }
 
@@ -1103,10 +1103,10 @@ func _build_options() -> void:
 	footer.add_theme_constant_override("separation", 12)
 	content.add_child(footer)
 	var keys := _button("KEYS", "options_keys", false, Vector2(200, 50))
-	keys.pressed.connect(func(): emit_signal("keys_requested"))
+	keys.pressed.connect(keys_requested.emit)
 	footer.add_child(keys)
 	var back := _button("BACK", "options_back", false, Vector2(200, 50), "ui_back")
-	back.pressed.connect(func(): emit_signal("back_from_options_requested"))
+	back.pressed.connect(back_from_options_requested.emit)
 	footer.add_child(back)
 
 
@@ -1161,7 +1161,7 @@ func _build_keys() -> void:
 	var back := _button("BACK", "keys_back", false, Vector2(220, 50), "ui_back")
 	back.pressed.connect(func():
 		_cancel_rebind()
-		emit_signal("back_from_keys_requested")
+		back_from_keys_requested.emit()
 	)
 	footer.add_child(back)
 
@@ -1508,7 +1508,7 @@ func _button(text: String, node_name: String, primary: bool, minimum: Vector2, c
 	button.add_theme_constant_override("outline_size", 1)
 	button.add_theme_color_override("font_outline_color", Color("00000080"))
 	if not cue_kind.is_empty():
-		button.pressed.connect(func(): emit_signal("cue", cue_kind))
+		button.pressed.connect(cue.emit.bind(cue_kind))
 
 	var normal_bg := C_EMBER if primary else C_SURFACE_HI
 	var normal_border := C_EMBER_HI if primary else C_EDGE
@@ -1607,7 +1607,7 @@ func _check(title: String, description: String) -> CheckBox:
 	check.add_theme_icon_override("unchecked_disabled", icons["unchecked"])
 	check.add_theme_constant_override("h_separation", 10)
 	check.add_theme_constant_override("icon_max_width", 22)
-	check.toggled.connect(func(_on: bool): emit_signal("cue", "ui_confirm"))
+	check.toggled.connect(func(_on: bool): cue.emit("ui_confirm"))
 	return check
 
 
@@ -1906,7 +1906,7 @@ func setup_upgrades(upgrades: Array) -> void:
 		var rc: Color = Content.rarity_color(rarity)
 		var button := _upgrade_card(i, upgrade, rarity, rc)
 		button.name = "Boon%d" % i
-		button.pressed.connect(_on_upgrade_pressed.bind(i))
+		button.pressed.connect(upgrade_selected.emit.bind(i))
 		_upgrade_row.add_child(button)
 		buttons.append(button)
 	(_panels["reward"] as Control).set_meta("buttons", buttons)
@@ -1985,7 +1985,7 @@ func setup_forge(cells: int) -> void:
 		if mastered:
 			buy.add_theme_color_override("font_disabled_color", C_MINT)
 		else:
-			buy.pressed.connect(_on_buy_meta_pressed.bind(i))
+			buy.pressed.connect(buy_meta_requested.emit.bind(i))
 		line.add_child(buy)
 		if focus_target == null and not buy.disabled:
 			focus_target = buy
@@ -2030,7 +2030,7 @@ func _build_vow_rows() -> void:
 		copy.add_child(_make_label(str(v.title).to_upper(), 14, C_RED if on else C_TEXT, HorizontalAlignment.HORIZONTAL_ALIGNMENT_LEFT))
 		copy.add_child(_make_label("%s   +%d%% score" % [str(v.desc), roundi(float(v.score) * 100.0)], 12, C_MUTED, HorizontalAlignment.HORIZONTAL_ALIGNMENT_LEFT))
 		var toggle := _button("SWORN" if on else "SWEAR", "Vow%d" % i, on, Vector2(132, 40), "")
-		toggle.pressed.connect(func(): emit_signal("vow_toggled", str(v.id)))
+		toggle.pressed.connect(vow_toggled.emit.bind(str(v.id)))
 		line.add_child(toggle)
 
 
@@ -2273,14 +2273,6 @@ func _focus_first_control(root: Node) -> bool:
 		if _focus_first_control(child):
 			return true
 	return false
-
-
-func _on_upgrade_pressed(index: int) -> void:
-	emit_signal("upgrade_selected", index)
-
-
-func _on_buy_meta_pressed(index: int) -> void:
-	emit_signal("buy_meta_requested", index)
 
 
 func _format_number(value: int) -> String:

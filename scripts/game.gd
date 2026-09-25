@@ -167,16 +167,17 @@ func _ready() -> void:
 	_vignette_rect.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	add_child(_vignette)
 	# Wire UI signals
-	ui.start_requested.connect(_on_start)
+	ui.start_requested.connect(_begin_run)
 	ui.resume_requested.connect(_on_resume)
-	ui.restart_requested.connect(_on_restart)
+	ui.restart_requested.connect(_begin_run)
 	ui.quit_to_title_requested.connect(_on_quit_to_title)
 	ui.upgrade_selected.connect(_on_upgrade_selected)
 	ui.option_toggled.connect(_on_option_toggled)
 	ui.forge_requested.connect(_on_forge_requested)
 	ui.buy_meta_requested.connect(_on_buy_meta)
 	ui.back_from_forge_requested.connect(_on_back_from_forge)
-	ui.cue.connect(_on_ui_cue)
+	# Menu feedback stays flat and dry: it is heard up close, at the cursor.
+	ui.cue.connect(feedback.play)
 	ui.options_requested.connect(_on_options_requested)
 	ui.back_from_options_requested.connect(_on_back_from_options)
 	ui.option_value_changed.connect(_on_option_value_changed)
@@ -807,12 +808,6 @@ func _draw_fog(ci: CanvasItem, horizon: float) -> void:
 			VFX.draw_ellipse(ci, Vector2(x, yy), rx, ry, col)
 
 # --- Run lifecycle ---
-func _on_start() -> void:
-	_begin_run()
-
-func _on_restart() -> void:
-	_begin_run()
-
 func _begin_run() -> void:
 	# cleanup
 	_beat_kind = ""
@@ -912,11 +907,11 @@ func _advance_room() -> void:
 	room.enemy_died.connect(_on_enemy_died)
 	room.enemy_damaged.connect(_on_enemy_damaged)
 	room.pyre_burst.connect(_on_pyre_burst)
-	room.projectile_requested.connect(_on_enemy_projectile)
+	room.projectile_requested.connect(_spawn_projectile)
 	room.boss_spawned.connect(_on_boss_spawned)
 	room.boss_phase_changed.connect(_on_boss_phase)
 	room.enemy_exploded.connect(_on_enemy_exploded)
-	room.enemy_spawned.connect(_on_enemy_spawned)
+	room.enemy_spawned.connect(feedback.spawn_rift)
 	room.wave_started.connect(_on_wave_started)
 	room.telegraphed.connect(_on_enemy_telegraphed)
 	room.prop_shattered.connect(feedback.shatter)
@@ -988,9 +983,6 @@ func _on_enemy_damaged(amount: float, pos: Vector2, blocked: bool) -> void:
 		return
 	feedback.damage_number(pos, amount, "heavy" if amount >= 40.0 else "hit")
 	_stats.damage_dealt += amount
-
-func _on_enemy_spawned(pos: Vector2, color: Color) -> void:
-	feedback.spawn_rift(pos, color)
 
 ## Voice every windup, attenuated by distance from the player. The refractory
 ## keeps a room full of simultaneous tells readable instead of deafening.
@@ -1086,9 +1078,6 @@ func _on_player_action(kind: String, pos: Vector2) -> void:
 func _on_player_projectile(team: String, pos: Vector2, vel: Vector2, dmg: float, kb: float, pierce: int, life: float, color: Color) -> void:
 	_spawn_projectile(team, pos, vel, dmg, kb, pierce, life, color)
 	feedback.play("shoot")
-
-func _on_enemy_projectile(team: String, pos: Vector2, vel: Vector2, dmg: float, kb: float, pierce: int, life: float, color: Color) -> void:
-	_spawn_projectile(team, pos, vel, dmg, kb, pierce, life, color)
 
 func _spawn_projectile(team: String, pos: Vector2, vel: Vector2, dmg: float, kb: float, pierce: int, life: float, color: Color) -> void:
 	var p := Projectile.new()
@@ -1488,10 +1477,6 @@ func _on_back_from_forge() -> void:
 	ui.show_panel("title")
 	ui.set_cells(Save.get_cells())
 	ui.set_best(Save.get_best_score())
-
-## Menu feedback stays flat and dry: it is heard up close, at the cursor.
-func _on_ui_cue(kind: String) -> void:
-	feedback.play(kind)
 
 func _unhandled_input(event: InputEvent) -> void:
 	if event.is_action_pressed("pause") and state == GState.PLAYING:

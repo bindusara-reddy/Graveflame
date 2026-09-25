@@ -137,7 +137,7 @@ func _build_props() -> void:
 			prop.position = point
 			prop.kind = props.size() % 2
 			prop.z_index = 0
-			prop.shattered.connect(func(pos, force, color): prop_shattered.emit(pos, force, color))
+			prop.shattered.connect(prop_shattered.emit)
 			add_child(prop)
 			props.append(prop)
 
@@ -253,40 +253,28 @@ func _spawn_enemy(kind: int, pos: Vector2, mods: Dictionary = {}) -> void:
 	var e := Enemy.new()
 	e.setup(kind, pos, mods)
 	add_child(e)
-	e.died.connect(_on_enemy_died.bind(e))
-	e.damaged.connect(_on_enemy_damaged)
-	e.projectile_requested.connect(_on_proj_requested)
-	e.exploded.connect(_on_enemy_exploded)
-	e.pyre_burst.connect(_on_pyre_burst)
-	e.telegraphed.connect(_on_enemy_telegraphed)
+	_relay(e)
 	enemies.append(e)
 	emit_signal("enemy_spawned", pos, Content.ELITE_COLOR if bool(mods.get("elite", false)) else Color(e.data.color))
 
-func _on_enemy_exploded(pos: Vector2, radius: float, damage: float) -> void:
-	emit_signal("enemy_exploded", pos, radius, damage)
-
-func _on_pyre_burst(pos: Vector2, radius: float) -> void:
-	emit_signal("pyre_burst", pos, radius)
-
-func _on_enemy_telegraphed(kind: String, pos: Vector2, elite: bool) -> void:
-	emit_signal("telegraphed", kind, pos, elite)
-
-func _on_enemy_damaged(amount: float, pos: Vector2, blocked: bool) -> void:
-	emit_signal("enemy_damaged", amount, pos, blocked)
+## Pass a creature's combat signals up as the room's own: the game listens to
+## the room, never to the creatures inside it.
+func _relay(foe: Enemy) -> void:
+	foe.died.connect(_on_enemy_died.bind(foe))
+	foe.damaged.connect(enemy_damaged.emit)
+	foe.projectile_requested.connect(projectile_requested.emit)
+	foe.exploded.connect(enemy_exploded.emit)
+	foe.pyre_burst.connect(pyre_burst.emit)
+	foe.telegraphed.connect(telegraphed.emit)
 
 func _spawn_boss() -> void:
 	boss = Boss.new()
 	boss.global_position = Vector2(900, Content.FLOOR_Y - 80)
-	boss.data = Content.ENEMY[Enemy.Kind.STALKER].duplicate()
 	add_child(boss)
-	boss.died.connect(_on_enemy_died.bind(boss))
-	boss.damaged.connect(_on_enemy_damaged)
-	boss.projectile_requested.connect(_on_proj_requested)
-	boss.phase_changed.connect(func(p: int): emit_signal("boss_phase_changed", p))
-	boss.exploded.connect(_on_enemy_exploded)
+	_relay(boss)
+	boss.phase_changed.connect(boss_phase_changed.emit)
 	boss.summon_requested.connect(_on_boss_summon)
-	boss.telegraphed.connect(_on_enemy_telegraphed)
-	boss.shattered.connect(func(pos: Vector2): boss_shattered.emit(pos))
+	boss.shattered.connect(boss_shattered.emit)
 	emit_signal("boss_spawned")
 
 func _on_boss_summon(kind: int, pos: Vector2) -> void:
@@ -341,9 +329,6 @@ func _all_enemies_dead() -> bool:
 		if is_instance_valid(e) and not e.dead:
 			return false
 	return true
-
-func _on_proj_requested(team: String, pos: Vector2, vel: Vector2, dmg: float, kb: float, pierce: int, life: float, color: Color) -> void:
-	emit_signal("projectile_requested", team, pos, vel, dmg, kb, pierce, life, color)
 
 func get_entry_point() -> Vector2:
 	return Vector2(template.get("entry", Vector2(180, Content.FLOOR_Y - 80)))
