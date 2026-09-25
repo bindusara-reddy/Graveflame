@@ -28,6 +28,8 @@ const SLAM_POISE := 2.0
 const PARRY_POISE := 99.0
 ## A finisher or riposte that lands on the ground rocks the knight back (px/s).
 const HEAVY_RECOIL := 90.0
+## A blow that rings off a shield throws the knight back this fast (px/s).
+const GUARD_RECOIL := 220.0
 ## A deflect inside the first PERFECT_PARRY seconds of the window is perfect:
 ## the foe reels longer, the meter pays more and the riposte it banks hits
 ## harder. A whiff holds the stance PARRY_WHIFF_LAG longer, so spam costs.
@@ -600,11 +602,14 @@ func _scan_attack_hits(def: Dictionary, areas: Array) -> void:
 			if _flame_time > 0.0:
 				dmg *= Content.P_FLAME_DAMAGE_MUL
 			deal(tgt, dmg, Vector2(facing, -0.2), def.knock, blow.poise)
+			var contact := _contact_point(area)
+			if tgt.get("last_hit_blocked") == true:
+				_ring_off_guard(contact)
+				continue
 			# Graveflame ignites every hit; Kindling makes finishers ignite too.
 			var kindling := float(build.get("burn_bonus_dps", 0.0)) > 0.0
 			if (_flame_time > 0.0 or (finisher and kindling)) and tgt.has_method("apply_burn"):
 				tgt.apply_burn(Content.P_FLAME_BURN_DPS + float(build.get("burn_bonus_dps", 0.0)), Content.P_FLAME_BURN_TIME + float(build.get("burn_bonus_time", 0.0)))
-			var contact := _contact_point(area)
 			emit_signal("hit_landed", dmg, contact, finisher)
 			_feel_blow(tgt, contact, blow, finisher)
 			if finisher and is_on_floor() and atk_hit.size() == 1:
@@ -632,6 +637,19 @@ func _contact_point(area: Area2D) -> Vector2:
 		half = (box.shape as RectangleShape2D).size * 0.5
 	var y := clampf(global_position.y - 10.0, center.y - half.y * 0.8, center.y + half.y * 0.6)
 	return Vector2(center.x - facing * half.x * 0.6, y)
+
+## The blade rings off a raised guard: no flesh-hit feedback, meter or
+## lifesteal, but a clang, slate sparks thrown back, a tick of freeze and a
+## recoil that pushes the knight off the shield.
+func _ring_off_guard(contact: Vector2) -> void:
+	velocity.x = -facing * GUARD_RECOIL
+	emit_signal("action_feedback", "blocked", contact)
+	if feedback == null:
+		return
+	feedback.play("clang")
+	feedback.burst_sparks(contact, 10, 260.0, VFX.SLATE.lightened(0.4), Vector2(-facing, -0.4))
+	feedback.hit_stop(0.03)
+	feedback.kick(Vector2(-facing, 0.0), 3.0)
 
 ## A blow's own weight on top of the game's sparks and base freeze: the victim
 ## shivers, the world holds per the swing (longer on a kill), and the camera is
@@ -686,6 +704,8 @@ func _do_slam_impact() -> void:
 				var kdir: Vector2 = (tgt.global_position - center).normalized()
 				if kdir == Vector2.ZERO: kdir = Vector2.UP
 				deal(tgt, base_dmg * _damage_mul(tgt), Vector2(kdir.x, -0.7), Content.P_SLAM_KNOCK, SLAM_POISE)
+				if tgt.get("last_hit_blocked") == true:
+					continue
 				struck += 1
 				# Each foe caught gets its own contact burst, thrown away from the crater.
 				VFX.jolt(tgt, 0.05)

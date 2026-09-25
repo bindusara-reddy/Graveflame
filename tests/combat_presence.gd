@@ -19,6 +19,7 @@ func run() -> void:
 	await test_impact_grammar()
 	await test_parry_tiers()
 	await test_buffers_and_cancels()
+	await test_guard_rings_off()
 	release(["attack", "parry", "move_left"])
 	Feedback.motion_reduced = false
 	await finish("COMBAT_PRESENCE")
@@ -229,6 +230,47 @@ func test_buffers_and_cancels() -> void:
 	await ticks_until(func(): return p.state != Player.State.ATTACK and p.state != Player.State.LOCOMOTION, 20)
 	check(p.state == Player.State.HEAL, "a flask pressed during a swing is drunk when it ends")
 	await ticks(40)
+
+## A foe whose every blow is caught on its guard, as a brute's shield reports it.
+class Guard extends Node2D:
+	var last_hit_blocked := true
+	var blows := 0
+	func take_damage(_amount: float, _dir: Vector2, _knock: float, _poise := 1.0) -> void:
+		blows += 1
+
+## A blow caught on a guard rings off: no hit feedback, meter or lifesteal,
+## and the knight is thrown back off the shield.
+func test_guard_rings_off() -> void:
+	var p := game.player
+	p.respawn_at(Vector2(480.0, Content.FLOOR_Y - Content.P_BODY_H * 0.5))
+	p.facing = 1.0
+	await ticks(80)
+	var guard := Guard.new()
+	var box := Area2D.new()
+	box.collision_layer = Content.L_ENEMY_HURT
+	box.add_child(Content.rect_shape(Vector2(40.0, 54.0)))
+	box.set_meta("team", "enemy")
+	box.set_meta("owner", guard)
+	box.set_meta("owner_id", guard.get_instance_id())
+	guard.add_child(box)
+	game.world.add_child(guard)
+	guard.global_position = p.global_position + Vector2(50.0, 0.0)
+	p.special = 0.0
+	p.build.lifesteal = 10.0
+	p.build.hp = float(p.build.max_hp) - 30.0
+	var hp_before := float(p.build.hp)
+	var landed := [0]
+	var probe := func(_dmg, _pos, _heavy): landed[0] += 1
+	p.hit_landed.connect(probe)
+	await hold_action("attack")
+	await ticks_until(func(): return guard.blows > 0, 20)
+	p.hit_landed.disconnect(probe)
+	check(guard.blows == 1 and landed[0] == 0, "a blow on a raised guard gives no flesh-hit feedback")
+	check(is_zero_approx(p.special) and is_equal_approx(float(p.build.hp), hp_before), "a guarded blow pays neither meter nor lifesteal")
+	check(p.velocity.x < 0.0, "a guarded blow throws the knight back off the shield")
+	p.build.lifesteal = 0.0
+	guard.queue_free()
+	await ticks(30)
 
 func test_breakable_crypt() -> void:
 	var props := game.room.props
