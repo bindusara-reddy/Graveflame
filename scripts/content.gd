@@ -361,6 +361,8 @@ static var ROOM_TEMPLATES: Array = [
 	{
 		"tag": "arena",
 		"name": "BLOODLESS YARD",
+		# A roofless yard: the backdrop breaks its colonnade down to a curtain wall.
+		"open_sky": true,
 		"platforms": [
 			Rect2(ROOM_LEFT, FLOOR_Y, ROOM_RIGHT - ROOM_LEFT, 120),
 			Rect2(240, FLOOR_Y - 200, 160, 36),

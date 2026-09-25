@@ -107,9 +107,10 @@ func setup(tmpl: Dictionary, p_is_boss: bool, player: Node, seed_val: int) -> vo
 	_rng.seed = seed_val
 
 func _ready() -> void:
-	# The back decor sways, so it repaints every frame; the stonework is fixed
-	# for the chamber, so it is painted once. Both sit behind the room's own
-	# drawing, back decor first.
+	# The set piece and the stonework are fixed for the chamber, so they are
+	# painted once; the back decor sways, so it repaints every frame. All three
+	# sit behind the room's own drawing: set piece, back decor, stonework.
+	_add_paint_layer("SetPiece", _draw_set_piece)
 	_back_decor = _add_paint_layer("BackDecor", _draw_decor_back)
 	_add_paint_layer("Masonry", _draw_masonry_layer)
 	_difficulty = Content.difficulty_for_room(room_index)
@@ -887,16 +888,22 @@ func _drip(x: float, y0: float, y1: float, t: float) -> void:
 		var r := (y - y1) / 40.0
 		draw_arc(Vector2(x, y1), 4.0 + r * 12.0, 0.0, TAU, 12, Color(0.7, 0.85, 1.0, 0.5 * (1.0 - r)), 1.0)
 
-func _gallows(ci: CanvasItem, top: Vector2, t: float, m: Dictionary) -> void:
+## A floor-standing gallows: a 330px post, a beam reaching `reach` out over the
+## pit (negative reaches left) on a braced corner, and a cage on a long chain.
+func _gallows(ci: CanvasItem, base: Vector2, reach: float, t: float, m: Dictionary) -> void:
 	var wood := Color("2b1d12").lerp(m.stone, 0.25)
-	ci.draw_rect(Rect2(top.x - 6.0, top.y - 130.0, 12.0, 130.0), wood)
-	ci.draw_rect(Rect2(top.x - 6.0, top.y - 130.0, 90.0, 10.0), wood)
-	ci.draw_line(Vector2(top.x + 4.0, top.y - 96.0), Vector2(top.x + 40.0, top.y - 124.0), wood, 6.0)
-	var sway := sin(t * 0.7) * 5.0
-	var hook := Vector2(top.x + 70.0, top.y - 120.0)
-	_chain(ci, hook, 44.0, sway, false)
-	# Hanging cage.
-	var cage := hook + Vector2(sway, 44.0)
+	var top := base.y - 330.0
+	var dir := signf(reach)
+	ci.draw_rect(Rect2(base.x - 7.0, top, 14.0, 330.0), wood)
+	ci.draw_rect(Rect2(minf(base.x, base.x + reach) - 7.0, top, absf(reach) + 14.0, 12.0), wood)
+	ci.draw_line(Vector2(base.x, top + 56.0), Vector2(base.x + dir * 56.0, top + 6.0), wood, 7.0)
+	ci.draw_rect(Rect2(base.x - 16.0, base.y - 10.0, 32.0, 10.0), wood.darkened(0.2))
+	_hanging_cage(ci, Vector2(base.x + reach - dir * 12.0, top + 12.0), 150.0, sin(t * 0.7 + reach) * 5.0)
+
+## An iron gibbet cage hung on a chain from `hook`, holding a skull.
+func _hanging_cage(ci: CanvasItem, hook: Vector2, length: float, sway: float) -> void:
+	_chain(ci, hook, length, sway, false)
+	var cage := hook + Vector2(sway, length)
 	var iron := Color("2a2430")
 	ci.draw_arc(cage + Vector2(0.0, 8.0), 14.0, PI, TAU, 12, iron, 2.5)
 	for i in range(5):
@@ -912,6 +919,143 @@ func _stain(base: Vector2, w: float, color: Color) -> void:
 func _fallen_blade(base: Vector2) -> void:
 	draw_line(base + Vector2(-16.0, -3.0), base + Vector2(14.0, -12.0), Color("7f8896"), 3.0, true)
 	draw_line(base + Vector2(-13.0, -8.0), base + Vector2(-9.0, 0.0), Color("8a6a3a"), 3.0, true)
+
+## A dead yard tree grown from hashed angles: each limb forks twice, four levels
+## deep, and both first forks hang a gibbet cage.
+func _dead_branch(ci: CanvasItem, from: Vector2, angle: float, length: float, level: int, key: int, t: float, m: Dictionary) -> void:
+	var to := from + Vector2.from_angle(angle) * length
+	ci.draw_line(from, to, Color("2b1d12").lerp(m.stone, 0.3), [10.0, 6.0, 3.0, 1.5][level])
+	if level == 1:
+		_hanging_cage(ci, to + Vector2(0.0, 6.0), 70.0 + VFX.hash01(key, 131) * 50.0, sin(t * 0.7 + float(key)) * 4.0)
+	if level == 3:
+		return
+	for side: int in [-1, 1]:
+		var spread := 0.3 + VFX.hash01(key * 2 + side, 132) * 0.45
+		_dead_branch(ci, to, angle + float(side) * spread, length * 0.68, level + 1, key * 2 + (side + 1) / 2, t, m)
+
+## Each chamber's signature architecture, fixed for the chamber and painted once
+## behind everything else the room draws.
+func _draw_set_piece(ci: CanvasItem) -> void:
+	var m := _mood()
+	var fy := Content.FLOOR_Y
+	match str(template.get("tag", "intro")):
+		"intro":
+			_cell_door(ci, -120.0, m, false, false)
+			_cell_door(ci, 420.0, m, false, true)
+			_cell_door(ci, 760.0, m, true, false)
+		"gap":
+			_broken_span(ci, 620.0, 860.0, m)
+		"tiers":
+			_grand_stair(ci, m)
+			_warden_statue(ci, Vector2(40.0, fy), m)
+			_warden_statue(ci, Vector2(1380.0, fy), m)
+		"chamber":
+			# The shaft darkens as it deepens, under a pale disc of daylight far above.
+			VFX.draw_vgradient(ci, Rect2(390.0, 100.0, 500.0, fy + 20.0), Color(m.pit, 0.0), Color(m.pit, 0.55))
+			var day := Color("dfe6f0")
+			ci.draw_polygon(PackedVector2Array([Vector2(600.0, -120.0), Vector2(680.0, -120.0), Vector2(890.0, fy), Vector2(390.0, fy)]),
+				PackedColorArray([Color(day, 0.05), Color(day, 0.05), Color(day, 0.0), Color(day, 0.0)]))
+			ci.draw_circle(Vector2(640.0, -120.0), 60.0, Color(day, 0.08))
+			ci.draw_circle(Vector2(640.0, -120.0), 40.0, Color(day, 0.5))
+
+## A cell in the crypt wall: a recess behind six iron bars under a lintel, with a
+## shackle chain on the jamb. `open` swings the barred door 20 degrees out on its
+## hinge; `hand` curls a bone hand round one bar from inside.
+func _cell_door(ci: CanvasItem, x: float, m: Dictionary, open: bool, hand: bool) -> void:
+	var fy := Content.FLOOR_Y
+	var hole := Rect2(x - 42.0, fy - 140.0, 84.0, 140.0)
+	var iron := Color("2a2430")
+	ci.draw_rect(hole.grow_individual(6.0, 6.0, 6.0, 0.0), (m.stone as Color).darkened(0.1))
+	ci.draw_rect(hole, (m.wall as Color).darkened(0.4))
+	ci.draw_rect(Rect2(hole.position.x - 10.0, hole.position.y - 14.0, hole.size.x + 20.0, 8.0), (m.edge as Color).lightened(0.1))
+	_chain(ci, Vector2(hole.end.x + 12.0, fy - 118.0), 46.0, 0.0)
+	if open:
+		# Hinged on the left jamb and foreshortened as it swings toward us.
+		ci.draw_set_transform_matrix(Transform2D(Vector2(cos(deg_to_rad(20.0)), 0.12), Vector2(0.0, 1.0), hole.position))
+	else:
+		ci.draw_set_transform(hole.position)
+	for i in range(6):
+		var bx := 7.0 + float(i) * 14.0
+		ci.draw_line(Vector2(bx, 0.0), Vector2(bx, 140.0), iron, 2.5)
+	for ry: float in [10.0, 128.0]:
+		ci.draw_line(Vector2(0.0, ry), Vector2(84.0, ry), iron, 4.0)
+	if hand:
+		var bone := Color("bdb3a3").darkened(0.2)
+		VFX.draw_ellipse(ci, Vector2(38.0, 72.0), 6.0, 8.0, bone)
+		for f in range(3):
+			ci.draw_line(Vector2(38.0, 66.0 + float(f) * 5.0), Vector2(47.0, 64.0 + float(f) * 5.0), bone, 2.0)
+	ci.draw_set_transform(Vector2.ZERO)
+
+## The Broken Causeway's fallen bridge: voussoirs along a radius-150 arc sprung
+## from each pit lip, five a side, the crown gone and each side's last wedge
+## slipped 30px and turned 25 degrees on its way down.
+func _broken_span(ci: CanvasItem, left: float, right: float, m: Dictionary) -> void:
+	var fy := Content.FLOOR_Y
+	var half := (right - left) * 0.5
+	var centre := Vector2(left + half, fy + sqrt(150.0 * 150.0 - half * half))
+	var spring := atan2(fy - centre.y, -half)
+	var step := (-PI * 0.5 - spring) / 6.0
+	var stone := (m.wall as Color).lightened(0.06)
+	for side: float in [-1.0, 1.0]:
+		for i in range(5):
+			var a0 := spring + step * float(i) + 0.012
+			var a1 := a0 + step - 0.024
+			var pts := PackedVector2Array([
+				centre + Vector2.from_angle(a0) * 150.0, centre + Vector2.from_angle(a1) * 150.0,
+				centre + Vector2.from_angle(a1) * 176.0, centre + Vector2.from_angle(a0) * 176.0,
+			])
+			if side > 0.0:
+				# The right half mirrors the left about the span's centre line.
+				for j in range(pts.size()):
+					pts[j].x = 2.0 * centre.x - pts[j].x
+			if i == 4:
+				var mid := (pts[0] + pts[2]) * 0.5
+				pts = Transform2D(-side * deg_to_rad(25.0), mid + Vector2(0.0, 30.0)) * (Transform2D(0.0, -mid) * pts)
+			VFX.draw_shaded_polygon(ci, pts, stone)
+			pts.append(pts[0])
+			ci.draw_polyline(pts, VFX.JOINT, 1.5)
+
+## Warden's Ascent: a grand stair of 18 steps climbing the back wall across the
+## chamber on three piers, with a balustrade along its flight.
+func _grand_stair(ci: CanvasItem, m: Dictionary) -> void:
+	var fy := Content.FLOOR_Y
+	var stone := (m.wall as Color).lightened(0.04)
+	var nosing := Color(m.edge, 0.5)
+	var pts := PackedVector2Array([Vector2(-160.0, fy)])
+	for i in range(18):
+		var y := fy - float(i + 1) * 22.0
+		pts.append(Vector2(-160.0 + float(i) * 70.0, y))
+		pts.append(Vector2(-90.0 + float(i) * 70.0, y))
+	pts.append(Vector2(1100.0, fy - 336.0))
+	pts.append(Vector2(-100.0, fy + 20.0))
+	ci.draw_colored_polygon(pts, stone)
+	for i in range(18):
+		ci.draw_line(pts[i * 2 + 1], pts[i * 2 + 2], nosing, 2.0)
+	for px: float in [260.0, 610.0, 960.0]:
+		var under := fy - (px + 160.0) / 70.0 * 22.0 + 50.0
+		ci.draw_rect(Rect2(px - 22.0, under, 44.0, fy - under), stone.darkened(0.12))
+	# Balustrade: a rail 44px over the nosings, on a post every second step.
+	ci.draw_line(Vector2(-160.0, fy - 66.0), Vector2(1100.0, fy - 462.0), nosing, 3.0)
+	for i in range(0, 18, 2):
+		var foot := Vector2(-125.0 + float(i) * 70.0, fy - float(i + 1) * 22.0)
+		ci.draw_line(foot, foot + Vector2(0.0, -55.0), nosing, 2.0)
+
+## An armoured Warden carved in stone on a pedestal, hunched under its horned helm.
+func _warden_statue(ci: CanvasItem, base: Vector2, m: Dictionary) -> void:
+	var stone := (m.stone as Color).lightened(0.05)
+	ci.draw_rect(Rect2(base.x - 34.0, base.y - 40.0, 68.0, 40.0), stone.darkened(0.2))
+	ci.draw_rect(Rect2(base.x - 40.0, base.y - 46.0, 80.0, 8.0), stone.darkened(0.05))
+	var body := PackedVector2Array([
+		base + Vector2(-26.0, -46.0), base + Vector2(-34.0, -110.0), base + Vector2(-20.0, -140.0),
+		base + Vector2(20.0, -140.0), base + Vector2(34.0, -110.0), base + Vector2(26.0, -46.0),
+	])
+	VFX.draw_shaded_polygon(ci, body, stone)
+	VFX.draw_shaded_polygon(ci, PackedVector2Array([
+		base + Vector2(-14.0, -138.0), base + Vector2(-26.0, -176.0), base + Vector2(-10.0, -158.0), base + Vector2(0.0, -166.0),
+		base + Vector2(10.0, -158.0), base + Vector2(26.0, -176.0), base + Vector2(14.0, -138.0),
+	]), stone)
+	ci.draw_line(base + Vector2(-8.0, -150.0), base + Vector2(8.0, -150.0), VFX.VOID, 2.0)
+	VFX.draw_rim(ci, body, 1.0, 0.5)
 
 func _draw_decor_back(ci: CanvasItem) -> void:
 	var tag := str(template.get("tag", "intro"))
@@ -933,8 +1077,12 @@ func _draw_decor_back(ci: CanvasItem) -> void:
 		"chamber":
 			_roots(ci, Vector2(400.0, 100.0), t, m)
 			_roots(ci, Vector2(880.0, 100.0), t, m)
+		"arena":
+			_dead_branch(ci, Vector2(700.0, fy), -PI * 0.5, 170.0, 0, 1, t, m)
 		"crossfire":
-			_gallows(ci, Vector2(640.0, fy - 360.0), t, m)
+			# One gallows each side of the pit, their cages hung out over the spikes.
+			_gallows(ci, Vector2(300.0, fy), 180.0, t, m)
+			_gallows(ci, Vector2(980.0, fy), -180.0, t, m)
 		"boss":
 			_throne(ci, Vector2(640.0, fy), m)
 			_banner_prop(ci, Vector2(120.0, 120.0), 230.0, t, m, 3)

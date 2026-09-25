@@ -61,6 +61,8 @@ var _low_hp_t := 0.0
 var mood: Dictionary = Content.mood_for(0.0)
 ## Current chamber's depth band (Content.zone_for): picks the backdrop's architecture.
 var zone := "crypt"
+## A roofless chamber (template "open_sky"): its colonnade stands broken to a curtain wall.
+var _open_sky := false
 const VIGNETTE_EDGE := Color(0.027, 0.02, 0.043, 0.78)
 const VIGNETTE_LOW_HP := Color(0.46, 0.04, 0.07, 0.92)
 ## Attack anticipation: a windup the player cannot hear reads as an unfair hit.
@@ -555,7 +557,10 @@ func _paint_backdrop(ci: CanvasItem) -> void:
 				_draw_ruin_arches(ci, horizon)
 			_:
 				_draw_spires(ci, horizon)
-				_draw_arches(ci, horizon)
+				if _open_sky:
+					_draw_curtain_wall(ci, horizon)
+				else:
+					_draw_arches(ci, horizon)
 		_draw_light_shafts(ci, top, horizon)
 		_draw_buttresses(ci, horizon)
 		_draw_rubble(ci, horizon)
@@ -768,6 +773,32 @@ func _draw_spandrel(ci: CanvasItem, cx: float, arch_top: float, wall: Color, edg
 	spandrel.append(Vector2(cx - 80.0, arch_top + 110.0))
 	ci.draw_colored_polygon(spandrel, wall)
 	ci.draw_arc(Vector2(cx, arch_top + 110.0), 52.0, PI, TAU, 16, edge, 1.5)
+
+## Crypt yard, middle plane: the colonnade's outer curtain wall, roofless and
+## broken to a jagged top 180-260px over the floor, so the yard opens on the sky.
+## The stumps of its pillars still stand proud of the wall.
+func _draw_curtain_wall(ci: CanvasItem, horizon: float) -> void:
+	var depth := 0.35
+	var period := 200.0
+	var wall: Color = _haze(mood.wall, depth)
+	var edge: Color = _haze(mood.edge, depth)
+	var r := _plane_range(depth, period, 160.0)
+	var base := horizon + 60.0
+	for k in range(r.x, r.y + 1):
+		var x := _plane_x(depth, float(k) * period)
+		var crest := PackedVector2Array()
+		for i in range(6):
+			crest.append(Vector2(x + float(i) * period / 5.0, horizon - 220.0 + (VFX.hash01(k * 6 + i, 16) - 0.5) * 80.0))
+		var mass := crest.duplicate()
+		mass.append(Vector2(x + period, base))
+		mass.append(Vector2(x, base))
+		VFX.draw_shaded_polygon(ci, mass, wall)
+		ci.draw_polyline(crest, edge, 1.5)
+		var stump := horizon - 250.0 - VFX.hash01(k, 17) * 60.0
+		_draw_shaft(ci, x - 14.0, 28.0, stump, base, wall)
+		ci.draw_colored_polygon(PackedVector2Array([
+			Vector2(x - 14.0, stump + 6.0), Vector2(x - 6.0, stump - 8.0), Vector2(x + 2.0, stump + 2.0), Vector2(x + 14.0, stump - 6.0), Vector2(x + 14.0, stump + 8.0),
+		]), wall)
 
 ## Works, far plane: foundry chimney stacks over a sawtooth shed roofline, each
 ## breathing a slow smoke plume. It stands where the crypt's spires stand, so
@@ -1311,6 +1342,7 @@ func _advance_room() -> void:
 	var tmpl := run.advance_to_next_room()
 	var is_boss := run.is_boss_room()
 	zone = Content.zone_for(str(tmpl.tag))
+	_open_sky = bool(tmpl.get("open_sky", false))
 	mood = Content.mood_for_zone(zone, _zone_progress())
 	RenderingServer.set_default_clear_color(mood.bg_top)
 	_lights.set_ambient(mood.ambient)
