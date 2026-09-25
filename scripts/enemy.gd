@@ -17,16 +17,11 @@ signal telegraphed(kind: String, pos: Vector2, elite: bool)
 enum Kind { STALKER, HOPPER, WISP, BRUTE, BOMBER, CROW }
 enum EState { SPAWN, SEEK, WINDUP, ATTACK, RECOVER, STAGGER, DEAD }
 
-## Telegraph id for an archetype's windup. The game resolves these to sounds, so
-## enemy code never names an audio cue directly.
+## Telegraph id for an archetype's windup: the Kind's own name, lower-cased
+## ("stalker", "crow"). The game resolves it to a sound, so enemy code never
+## names an audio cue directly; anticipation_contract checks every Kind has one.
 static func telegraph_id(p_kind: int) -> String:
-	match p_kind:
-		Kind.HOPPER: return "hopper"
-		Kind.WISP: return "wisp"
-		Kind.BRUTE: return "brute"
-		Kind.BOMBER: return "bomber"
-		Kind.CROW: return "crow"
-		_: return "stalker"
+	return str(Kind.keys()[p_kind]).to_lower()
 
 ## Pyre boon damage, mirrored from the player's build by the game so a burning
 ## enemy can detonate against its neighbours without holding a player reference.
@@ -142,17 +137,17 @@ func attack_damage() -> float:
 	return float(data.damage) * damage_mul
 
 func _ready() -> void:
+	if data.is_empty():
+		data = Content.ENEMY[Kind.STALKER]
+		# A ghost keeps the token health its echo gave it.
+		if not ghost:
+			hp_max = float(data.hp)
+			hp = hp_max
 	if ghost:
 		set_physics_process(false)
 		collision_layer = 0
 		collision_mask = 0
-		if data.is_empty():
-			data = Content.ENEMY[Kind.STALKER]
 		return
-	if data.is_empty():
-		data = Content.ENEMY[Kind.STALKER]
-		hp_max = float(data.hp)
-		hp = hp_max
 	_build_bodies(Vector2(float(data.w), float(data.h)), Vector2(40.0, 10.0))
 	if kind == Kind.WISP or kind == Kind.CROW:
 		_wisp_y = global_position.y
@@ -263,38 +258,37 @@ func _physics_process(delta: float) -> void:
 
 func _step_seek(delta: float) -> void:
 	var player = _get_player()
-	if player == null or not is_instance_valid(player):
-		_apply_gravity(delta)
-		_move_x(0.0, delta)
-		move_and_slide()
+	if player == null:
+		_walk(0.0, delta)
 		return
 	var to_p: Vector2 = player.global_position - global_position
 	facing = signf(to_p.x) if absf(to_p.x) > 4.0 else facing
 	match kind:
 		Kind.STALKER: _seek_stalker(to_p, delta)
-		Kind.HOPPER: _seek_hopper(to_p, delta, player)
-		Kind.WISP: _seek_wisp(to_p, delta, player)
+		Kind.HOPPER: _seek_hopper(to_p, delta)
+		Kind.WISP: _seek_wisp(to_p, delta)
 		Kind.BRUTE: _seek_brute(to_p, delta)
 		Kind.BOMBER: _seek_bomber(to_p, delta)
 		Kind.CROW: _seek_crow(to_p, delta, player)
 
-func _seek_stalker(to_p: Vector2, delta: float) -> void:
+## One grounded step at `speed`: gravity, the ledge-aware horizontal move, slide.
+func _walk(speed: float, delta: float) -> void:
 	_apply_gravity(delta)
-	if absf(to_p.x) > 44.0:
-		_move_x(facing * float(data.speed), delta)
-	else:
-		_move_x(0.0, delta)
+	_move_x(speed, delta)
 	move_and_slide()
+
+## Walk at the knight until within stop_x of them, then hold.
+func _close_in(dx: float, stop_x: float, delta: float, speed_mul := 1.0) -> void:
+	var speed := facing * float(data.speed) * speed_mul if absf(dx) > stop_x else 0.0
+	_walk(speed, delta)
+
+func _seek_stalker(to_p: Vector2, delta: float) -> void:
+	_close_in(to_p.x, 44.0, delta)
 	if absf(to_p.x) < 50.0 and absf(to_p.y) < 60.0 and cd <= 0.0:
 		_begin_windup()
 
-func _seek_hopper(to_p: Vector2, delta: float, player) -> void:
-	_apply_gravity(delta)
-	if absf(to_p.x) > 70.0:
-		_move_x(facing * float(data.speed), delta)
-	else:
-		_move_x(0.0, delta)
-	move_and_slide()
+func _seek_hopper(to_p: Vector2, delta: float) -> void:
+	_close_in(to_p.x, 70.0, delta)
 	# Hop toward player when grounded and in range band
 	if is_on_floor() and cd <= 0.0 and absf(to_p.x) < 360.0 and absf(to_p.x) > 50.0:
 		velocity.y = -560.0
@@ -302,7 +296,7 @@ func _seek_hopper(to_p: Vector2, delta: float, player) -> void:
 	if absf(to_p.x) < 52.0 and absf(to_p.y) < 60.0 and cd <= 0.0:
 		_begin_windup()
 
-func _seek_wisp(to_p: Vector2, delta: float, player) -> void:
+func _seek_wisp(to_p: Vector2, delta: float) -> void:
 	# Hover with sine bob, maintain distance, shoot
 	_wisp_t += delta
 	var target_y := _wisp_y + sin(_wisp_t * 2.0) * 22.0
@@ -333,25 +327,14 @@ func _seek_crow(to_p: Vector2, delta: float, player) -> void:
 
 func _seek_brute(to_p: Vector2, delta: float) -> void:
 	# Slow heavy melee approach
-	_apply_gravity(delta)
-	if absf(to_p.x) > 60.0:
-		_move_x(facing * float(data.speed), delta)
-	else:
-		_move_x(0.0, delta)
-	move_and_slide()
+	_close_in(to_p.x, 60.0, delta)
 	if absf(to_p.x) < 64.0 and absf(to_p.y) < 70.0 and cd <= 0.0:
 		_begin_windup()
 
 func _seek_bomber(to_p: Vector2, delta: float) -> void:
 	# Rush toward player; arm and start fuse when close
-	_apply_gravity(delta)
-	var dist := absf(to_p.x)
-	if dist > 48.0:
-		_move_x(facing * float(data.speed) * 1.15, delta)
-	else:
-		_move_x(0.0, delta)
-	move_and_slide()
-	if dist < 56.0 and absf(to_p.y) < 80.0 and not _bomb_armed:
+	_close_in(to_p.x, 48.0, delta, 1.15)
+	if absf(to_p.x) < 56.0 and absf(to_p.y) < 80.0 and not _bomb_armed:
 		_bomb_armed = true
 		_begin_windup()
 
@@ -369,15 +352,13 @@ func _step_windup(delta: float) -> void:
 		velocity = velocity.move_toward(Vector2(0.0, -30.0), 1200.0 * delta)
 		global_position += velocity * delta
 		var p = _get_player()
-		if p != null and is_instance_valid(p):
+		if p != null:
 			facing = signf(p.global_position.x - global_position.x) if absf(p.global_position.x - global_position.x) > 4.0 else facing
 		st_timer -= delta
 		if st_timer <= 0.0:
 			_begin_dive()
 		return
-	_apply_gravity(delta)
-	_move_x(0.0, delta)
-	move_and_slide()
+	_walk(0.0, delta)
 	st_timer -= delta
 	if st_timer <= 0.0:
 		if kind == Kind.WISP:
@@ -395,7 +376,7 @@ func _step_windup(delta: float) -> void:
 func _begin_dive() -> void:
 	var p = _get_player()
 	var aim := Vector2(facing, 1.2).normalized()
-	if p != null and is_instance_valid(p):
+	if p != null:
 		aim = (p.global_position - global_position).normalized()
 		if aim.y < 0.35:
 			aim = Vector2(signf(aim.x) if aim.x != 0.0 else facing, 0.35).normalized()
@@ -418,9 +399,7 @@ func _step_attack(delta: float) -> void:
 	if kind == Kind.CROW:
 		_step_dive(delta)
 		return
-	_apply_gravity(delta)
-	_move_x(facing * float(data.speed) * 0.3, delta)
-	move_and_slide()
+	_walk(facing * float(data.speed) * 0.3, delta)
 	st_timer -= delta
 	_strike_overlaps(attack_damage(), Vector2(facing, -0.2), float(data.knock))
 	if st_timer <= 0.0:
@@ -429,7 +408,7 @@ func _step_attack(delta: float) -> void:
 func _wisp_shoot() -> void:
 	var player = _get_player()
 	var dir := Vector2(facing, 0.0)
-	if player != null and is_instance_valid(player):
+	if player != null:
 		var d: Vector2 = (player.global_position - global_position).normalized()
 		dir = d
 	var color: Color = Content.ELITE_COLOR if elite else data.color
@@ -445,7 +424,7 @@ func _do_explosion(reduced: bool = false) -> void:
 	var blast := _blast_radius * (0.55 if reduced else 1.0)
 	var blast_damage := attack_damage() * (0.4 if reduced else 1.0)
 	var player = _get_player()
-	if player != null and is_instance_valid(player):
+	if player != null:
 		var d: float = global_position.distance_to(player.global_position)
 		if d <= blast:
 			var kdir: Vector2 = (player.global_position - global_position).normalized()
@@ -463,9 +442,7 @@ func _step_recover(delta: float) -> void:
 		if st_timer <= 0.0:
 			state = EState.SEEK
 		return
-	_apply_gravity(delta)
-	_move_x(0.0, delta)
-	move_and_slide()
+	_walk(0.0, delta)
 	st_timer -= delta
 	if st_timer <= 0.0:
 		state = EState.SEEK
@@ -585,9 +562,10 @@ func _move_x(speed: float, delta: float) -> void:
 			speed = 0.0
 	velocity.x = move_toward(velocity.x, speed, 2000.0 * delta)
 
+## The knight, or null. Freed nodes leave their groups, so a non-null result is
+## always valid.
 func _get_player():
-	var g = get_tree().get_first_node_in_group("player")
-	return g
+	return get_tree().get_first_node_in_group("player")
 
 func _draw() -> void:
 	# Value plan per creature: a dark base, the archetype hue for mid tones and a
@@ -642,8 +620,7 @@ func _draw() -> void:
 		VFX.draw_contact_shadow(self, Vector2(0.0, h * 0.5 + 1.0), w * 1.1 * (2.0 - squash), 8.0, air)
 		VFX.set_pose(self, Vector2(0.0, h * 0.5), facing, Vector2(pop * (2.0 - squash), pop * squash), lean)
 	if elite:
-		var et := _anim_t if not Feedback.motion_reduced else 0.0
-		var pulse := 0.10 + sin(et * 3.0) * 0.03
+		var pulse := 0.10 + sin(t * 3.0) * 0.03
 		var escale := Content.ELITE_SCALE if _elite_anim <= 0.0 else lerpf(1.0, Content.ELITE_SCALE, clampf(1.0 - _elite_anim / 0.25, 0.0, 1.0))
 		VFX.set_pose(self, Vector2(0.0, h * 0.5), facing, Vector2(pop * (2.0 - squash) * escale, pop * squash * escale), lean)
 		draw_circle(Vector2(0.0, -h * 0.1), w * 1.15, Color(Content.ELITE_COLOR, pulse))
@@ -667,7 +644,7 @@ func _draw() -> void:
 	# shows where the dive will go, so a sidestep is a read, not a guess.
 	if kind == Kind.CROW and state == EState.WINDUP and tw > 0.45:
 		var pl = _get_player()
-		if pl != null and is_instance_valid(pl):
+		if pl != null:
 			var to: Vector2 = (pl.global_position - global_position)
 			var k := clampf((tw - 0.45) / 0.55, 0.0, 1.0)
 			draw_dashed_line(Vector2.ZERO, to.normalized() * minf(to.length(), 260.0), Color(1.0, 0.45, 0.15, 0.18 + 0.3 * k), 2.0, 9.0)
