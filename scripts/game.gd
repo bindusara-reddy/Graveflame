@@ -25,6 +25,9 @@ var paused: bool = false
 var _pending_upgrades: Array = []
 var _seed: int = 0
 var _run_cells: int = 0
+## Cells earned but not yet written to the save. Kills land inside physics
+## steps, where file I/O must never run, so they wait for _bank_cells.
+var _unbanked_cells := 0
 ## Tithe relic: every cell award is scaled by this.
 var _cell_mul := 1.0
 ## Vows sworn for this descent, and the score multiplier they earn.
@@ -1125,12 +1128,23 @@ func _voice_enemy_shot(pos: Vector2) -> void:
 func _flask_per_room() -> int:
 	return 0 if Enemy.vows.has("v_thirst") else Content.FLASK_PER_ROOM
 
-## Bank cells (scaled by Tithe) and return how many actually landed.
+## Award cells (scaled by Tithe) and return how many actually landed. The HUD
+## counts them at once; the save gets them at the next _bank_cells.
 func _award_cells(base: int) -> int:
 	var n := maxi(1, roundi(float(base) * _cell_mul))
 	_run_cells += n
-	ui.set_cells(Save.add_cells(n))
+	_unbanked_cells += n
+	ui.set_cells(Save.get_cells() + _unbanked_cells)
 	return n
+
+## Write the cells earned since the last bank in one save. Runs at safe
+## moments: stepping into the next chamber, the run's end, quitting to the
+## title and closing the window.
+func _bank_cells() -> void:
+	if _unbanked_cells == 0:
+		return
+	ui.set_cells(Save.add_cells(_unbanked_cells))
+	_unbanked_cells = 0
 
 ## tier: 0 regular, 1 elite, 2 boss.
 func _on_enemy_died(sc: int, pos: Vector2, tier: int, color: Color) -> void:
@@ -1240,6 +1254,7 @@ func _on_upgrade_selected(idx: int) -> void:
 ## Step through the rift into the next chamber and return `flask_refill` flask
 ## charges there (-1 refills them all).
 func _enter_next_chamber(flask_refill: int) -> void:
+	_bank_cells()
 	_advance_room()
 	player.refill_flask(flask_refill)
 	state = GState.PLAYING
@@ -1269,6 +1284,7 @@ func _close_run(victory: bool) -> void:
 	state = GState.VICTORY if victory else GState.GAME_OVER
 	var panel := "victory" if victory else "gameover"
 	var vows_kept := _vows.size() if victory else 0
+	_bank_cells()
 	_finalize_summary()
 	ui.show_run_cells(_run_cells, panel, vows_kept)
 	ui.show_run_summary(_stats, panel)
@@ -1388,6 +1404,7 @@ func _on_resume() -> void:
 	ui.hide_panel("pause")
 
 func _on_quit_to_title() -> void:
+	_bank_cells()
 	get_tree().paused = false
 	paused = false
 	_teardown_run()
@@ -1505,6 +1522,11 @@ func _on_back_from_forge() -> void:
 	ui.show_panel("title")
 	ui.set_cells(Save.get_cells())
 	ui.set_best(Save.get_best_score())
+
+## Closing the window mid-run keeps the cells earned so far.
+func _notification(what: int) -> void:
+	if what == NOTIFICATION_WM_CLOSE_REQUEST:
+		_bank_cells()
 
 func _unhandled_input(event: InputEvent) -> void:
 	if event.is_action_pressed("pause") and state == GState.PLAYING:

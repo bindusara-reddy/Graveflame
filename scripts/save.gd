@@ -1,71 +1,104 @@
 class_name Save
 extends RefCounted
-## Persistent save: cells (meta currency), best score, purchased meta upgrades.
-## Stored as JSON at user://graveflame_save.json. Dead Cells-style meta progression.
+## Persistent save: cells (meta currency), best score, purchased meta upgrades,
+## options and bindings. Stored as JSON at user://graveflame_save.json. Dead Cells-style meta progression.
+## The parsed file is cached, so reads never touch the disk, and every write is
+## atomic, so a crash mid-write can never wipe progress.
 
 const SAVE_PATH := "user://graveflame_save.json"
 ## Active file. Tests and tooling point this at a scratch file so simulated runs
-## never touch the player's real progress.
-static var path := SAVE_PATH
+## never touch the player's real progress. Pointing it elsewhere drops the cache.
+static var path := SAVE_PATH:
+	set(value):
+		path = value
+		_cache = {}
+## The parsed save at `path`; empty until first read.
+static var _cache: Dictionary = {}
 
+## A private copy of the save, for callers that edit it and hand it to save_save.
 static func load_save() -> Dictionary:
-	var defaults := {"cells": 0, "best_score": 0, "meta": [], "learned": []}
+	return _data().duplicate(true)
+
+## The cached save, read from disk once. Getters only read it; mutators edit it
+## in place and then _write it.
+static func _data() -> Dictionary:
+	if _cache.is_empty():
+		_cache = _coerced(_read_with_fallback())
+	return _cache
+
+## The file at `path`, or the copy the last good write left beside it when the
+## file is torn. If both are unreadable the damaged file is kept aside, so the
+## defaults that take over never silently destroy it. A missing file is a fresh
+## start, not damage: a deleted save stays deleted.
+static func _read_with_fallback() -> Dictionary:
 	if not FileAccess.file_exists(path):
-		return defaults
-	var f := FileAccess.open(path, FileAccess.READ)
-	if f == null:
-		return defaults
-	var text := f.get_as_text()
-	f.close()
-	if text.strip_edges() == "":
-		return defaults
-	var res: Variant = JSON.parse_string(text)
-	if res == null or not (res is Dictionary):
-		return defaults
-	var d: Dictionary = res
-	# Validate / coerce
+		return {}
+	var d := _parse(path)
+	if d.is_empty():
+		d = _parse(path + ".bak")
+		if d.is_empty():
+			DirAccess.copy_absolute(path, "%s.corrupt-%d" % [path, int(Time.get_unix_time_from_system())])
+	return d
+
+## The JSON dictionary in `file`, or {} when it is missing, empty or not a dictionary.
+static func _parse(file: String) -> Dictionary:
+	var json := JSON.new()
+	if not FileAccess.file_exists(file) or json.parse(FileAccess.get_file_as_string(file)) != OK:
+		return {}
+	return json.data if json.data is Dictionary else {}
+
+## Hand-edited or older files must still carry the core keys with sane types.
+static func _coerced(d: Dictionary) -> Dictionary:
 	d["cells"] = int(d.get("cells", 0))
 	d["best_score"] = int(d.get("best_score", 0))
-	if not (d.get("meta") is Array):
-		d["meta"] = []
-	if not (d.get("learned") is Array):
-		d["learned"] = []
+	for key in ["meta", "learned"]:
+		if not (d.get(key) is Array):
+			d[key] = []
 	return d
 
 static func save_save(data: Dictionary) -> void:
-	var f := FileAccess.open(path, FileAccess.WRITE)
-	if f == null:
-		push_warning("Save: could not write to %s" % path)
+	_cache = _coerced(data.duplicate(true))
+	_write()
+
+## Writes the cache to a temporary file, keeps the current file as `.bak`, then
+## renames the new one over it. The rename is atomic, so the file on disk is
+## always either the old save or the new one, never half of each.
+static func _write() -> void:
+	var tmp := path + ".tmp"
+	var f := FileAccess.open(tmp, FileAccess.WRITE)
+	if f == null or not f.store_string(JSON.stringify(_cache, "  ")):
+		push_warning("Save: could not write to %s" % tmp)
 		return
-	f.store_string(JSON.stringify(data, "  "))
 	f.close()
+	if FileAccess.file_exists(path):
+		DirAccess.copy_absolute(path, path + ".bak")
+	if DirAccess.rename_absolute(tmp, path) != OK:
+		push_warning("Save: could not replace %s" % path)
+
+## The container stored under `key`, reset to `empty` when it is missing or
+## of the wrong type, so a mutator can edit it in place.
+static func _slot(key: String, empty: Variant) -> Variant:
+	var d := _data()
+	if typeof(d.get(key)) != typeof(empty):
+		d[key] = empty
+	return d[key]
 
 ## Bank `amount` cells and return the new total.
 static func add_cells(amount: int) -> int:
-	var d := load_save()
-	d["cells"] = int(d["cells"]) + amount
-	save_save(d)
-	return int(d["cells"])
-
-static func spend_cells(amount: int) -> bool:
-	var d := load_save()
-	if int(d["cells"]) < amount:
-		return false
-	d["cells"] = int(d["cells"]) - amount
-	save_save(d)
-	return true
+	_data()["cells"] = get_cells() + amount
+	_write()
+	return get_cells()
 
 static func get_cells() -> int:
-	return int(load_save().get("cells", 0))
+	return int(_data()["cells"])
 
 static func get_best_score() -> int:
-	return int(load_save().get("best_score", 0))
+	return int(_data()["best_score"])
 
 static func set_best_score(s: int) -> void:
-	var d := load_save()
-	if s > int(d.get("best_score", 0)):
-		d["best_score"] = s
-		save_save(d)
+	if s > get_best_score():
+		_data()["best_score"] = s
+		_write()
 
 ## Player options. Volumes are linear 0..1; everything else is a bool. These
 ## live in the same save file so accessibility choices survive a relaunch.
@@ -79,7 +112,7 @@ const DEFAULT_OPTIONS := {
 ## Content.CONTROLS_ROWS are honoured, so a hand-edited save cannot invent an
 ## action or clobber a menu binding.
 static func get_bindings() -> Dictionary:
-	var stored = load_save().get("bindings", {})
+	var stored = _data().get("bindings", {})
 	var out := {}
 	if not (stored is Dictionary):
 		return out
@@ -92,36 +125,25 @@ static func get_bindings() -> Dictionary:
 	return out
 
 static func set_binding(action: String, keycode: int) -> void:
-	var d := load_save()
-	var b = d.get("bindings", {})
-	if not (b is Dictionary):
-		b = {}
-	(b as Dictionary)[action] = keycode
-	d["bindings"] = b
-	save_save(d)
+	(_slot("bindings", {}) as Dictionary)[action] = keycode
+	_write()
 
 ## Hints the player has already been shown. Kept per-save so a new player is
 ## taught once, and a returning one is never interrupted again.
 static func get_learned_hints() -> Array:
-	var m = load_save().get("learned", [])
-	return m if m is Array else []
+	return (_data()["learned"] as Array).duplicate()
 
 static func has_learned(id: String) -> bool:
-	return get_learned_hints().has(id)
+	return (_data()["learned"] as Array).has(id)
 
 static func mark_learned(id: String) -> void:
 	if has_learned(id):
 		return
-	var d := load_save()
-	var arr: Array = d.get("learned", [])
-	if not (arr is Array):
-		arr = []
-	arr.append(id)
-	d["learned"] = arr
-	save_save(d)
+	(_data()["learned"] as Array).append(id)
+	_write()
 
 static func get_options() -> Dictionary:
-	var stored = load_save().get("options", {})
+	var stored = _data().get("options", {})
 	var out := DEFAULT_OPTIONS.duplicate()
 	if stored is Dictionary:
 		for key in out:
@@ -135,25 +157,16 @@ static func get_options() -> Dictionary:
 	return out
 
 static func set_option(key: String, value: Variant) -> void:
-	var d := load_save()
-	var opts = d.get("options", {})
-	if not (opts is Dictionary):
-		opts = {}
-	(opts as Dictionary)[key] = value
-	d["options"] = opts
-	save_save(d)
+	(_slot("options", {}) as Dictionary)[key] = value
+	_write()
 
 static func get_purchased_meta() -> Array:
-	var d := load_save()
-	var m = d.get("meta", [])
-	if m is Array:
-		return m
-	return []
+	return (_data()["meta"] as Array).duplicate()
 
 ## Ranks are stored as repeated ids, so a save from before ranks existed reads
 ## as rank 1 of everything it bought.
 static func get_meta_rank(id: String) -> int:
-	return get_purchased_meta().count(id)
+	return (_data()["meta"] as Array).count(id)
 
 static func purchase_meta(id: String) -> bool:
 	var def := Content.meta_def(id)
@@ -162,14 +175,11 @@ static func purchase_meta(id: String) -> bool:
 	var cost := Content.meta_next_cost(def, get_meta_rank(id))
 	if cost < 0:
 		return false
-	if not spend_cells(cost):
+	if get_cells() < cost:
 		return false
-	var d := load_save()
-	var arr: Array = d.get("meta", [])
-	if not (arr is Array): arr = []
-	arr.append(id)
-	d["meta"] = arr
-	save_save(d)
+	_data()["cells"] = get_cells() - cost
+	(_data()["meta"] as Array).append(id)
+	_write()
 	return true
 
 ## Returns a build-dict delta from all purchased meta upgrades, applied at run start.
@@ -193,7 +203,7 @@ static func get_meta_modifiers() -> Dictionary:
 
 ## Vows currently sworn (ids from Content.VOWS).
 static func get_vows() -> Array:
-	var v = load_save().get("vows", [])
+	var v = _data().get("vows", [])
 	var out: Array = []
 	if v is Array:
 		for id in v:
@@ -203,24 +213,24 @@ static func get_vows() -> Array:
 	return out
 
 static func set_vow(id: String, sworn: bool) -> void:
-	var d := load_save()
 	var arr: Array = get_vows()
 	if sworn and not arr.has(id):
 		arr.append(id)
 	elif not sworn:
 		arr.erase(id)
-	d["vows"] = arr
-	save_save(d)
+	_data()["vows"] = arr
+	_write()
 
 static func get_victories() -> int:
-	return int(load_save().get("victories", 0))
+	return int(_data().get("victories", 0))
 
 ## Record a won descent and the most vows it has been won under.
 static func add_victory(vows_kept: int) -> void:
-	var d := load_save()
+	var d := _data()
 	d["victories"] = int(d.get("victories", 0)) + 1
 	d["best_vows"] = maxi(int(d.get("best_vows", 0)), vows_kept)
-	save_save(d)
+	_write()
 
 static func vows_unlocked() -> bool:
 	return get_victories() > 0
+

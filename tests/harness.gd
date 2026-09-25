@@ -64,10 +64,13 @@ func use_scratch_save(name: String) -> void:
 	_remove_scratch_save()
 
 
-## Deletes the scratch save, if a suite chose one and it exists.
+## Deletes the scratch save and the backup its writes keep, if a suite chose one.
 func _remove_scratch_save() -> void:
-	if _scratch_save != "" and FileAccess.file_exists(_scratch_save):
-		DirAccess.remove_absolute(_scratch_save)
+	if _scratch_save == "":
+		return
+	for file in [_scratch_save, _scratch_save + ".bak"]:
+		if FileAccess.file_exists(file):
+			DirAccess.remove_absolute(file)
 
 
 ## Replaces any running game with a fresh main scene on the title screen, added
