@@ -599,13 +599,13 @@ static func _pin_seal(banner: Kit.Banner, emboss: String) -> Kit.Seal:
 	var pin := Control.new()
 	pin.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	banner.strip.add_child(pin)
-	var seal := Kit.seal(34.0, T.WAX, emboss)
+	var seal := Kit.seal(40.0, T.WAX, emboss)
 	pin.add_child(seal)
 	seal.set_anchors_preset(Control.PRESET_CENTER_LEFT)
-	seal.offset_left = -T.S6 - 17.0
-	seal.offset_right = -T.S6 + 17.0
-	seal.offset_top = -17.0
-	seal.offset_bottom = 17.0
+	seal.offset_left = -T.S6 - 20.0
+	seal.offset_right = -T.S6 + 20.0
+	seal.offset_top = -20.0
+	seal.offset_bottom = 20.0
 	seal.visible = false
 	return seal
 
