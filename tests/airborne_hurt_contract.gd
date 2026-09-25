@@ -5,6 +5,8 @@ extends "res://tests/harness.gd"
 func boot() -> void:
 	release(["jump", "move_left", "move_right"])
 	await load_main_scene()
+	# These fixtures count knockback frames; the hurt freeze would stretch them.
+	game.feedback.set_reduced_motion(true)
 	await start_run(0)
 	await hold_action("move_left", 30)
 	await ticks(60)
