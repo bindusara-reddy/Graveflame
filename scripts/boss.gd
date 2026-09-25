@@ -104,15 +104,13 @@ func _ignite() -> void:
 func _boss_seek(delta: float) -> void:
 	var player = _get_player()
 	velocity.y += Content.GRAVITY * delta
-	if player != null and is_instance_valid(player):
+	var target_speed := 0.0
+	if player != null:
 		var to_p: Vector2 = player.global_position - global_position
 		facing = signf(to_p.x) if absf(to_p.x) > 4.0 else facing
 		if absf(to_p.x) > 120.0:
-			velocity.x = move_toward(velocity.x, facing * Content.BOSS_SPEED, 1600.0 * delta)
-		else:
-			velocity.x = move_toward(velocity.x, 0.0, 1600.0 * delta)
-	else:
-		velocity.x = move_toward(velocity.x, 0.0, 1600.0 * delta)
+			target_speed = facing * Content.BOSS_SPEED
+	velocity.x = move_toward(velocity.x, target_speed, 1600.0 * delta)
 	move_and_slide()
 	action_t -= delta
 	if action_t <= 0.0:
@@ -120,7 +118,7 @@ func _boss_seek(delta: float) -> void:
 
 func _choose_action(player) -> void:
 	var dx := 0.0
-	if player != null and is_instance_valid(player):
+	if player != null:
 		dx = absf((player.global_position - global_position).x)
 	var options: Array = [Action.LUNGE, Action.FAN, Action.SLAM, Action.CHARGE]
 	if dx < 110.0:
@@ -135,43 +133,39 @@ func _choose_action(player) -> void:
 		Action.FAN: _begin_fan()
 		Action.SLAM: _begin_slam()
 		Action.CHARGE: _begin_charge()
-		_: _begin_lunge()
 	# Announce the chosen move at the decision point so every entry into a
 	# windup is voiced, and the player can answer the one that is coming.
 	emit_signal("telegraphed", _action_telegraph(), global_position, true)
 
-## Telegraph id for the move just chosen, resolved to a sound by the game.
+## Telegraph id for the move just chosen: the Action's own name, lower-cased
+## ("lunge", "slam"), resolved to a sound by the game. anticipation_contract
+## checks every Action has one.
 func _action_telegraph() -> String:
-	match action_idx:
-		Action.FAN: return "fan"
-		Action.SLAM: return "slam"
-		Action.CHARGE: return "charge"
-		_: return "lunge"
+	return str(Action.keys()[action_idx]).to_lower()
+
+## Start winding up `action` for `seconds`. data.windup carries the same length
+## because WardenArt reads it to pace the tell.
+func _wind_up(action: int, seconds: float) -> void:
+	action_idx = action
+	state = EState.WINDUP
+	st_timer = seconds
+	data.windup = seconds
 
 func _begin_lunge() -> void:
-	action_idx = Action.LUNGE
-	state = EState.WINDUP
-	st_timer = 0.4 if phase == BPhase.TWO else 0.55
-	data.windup = st_timer
+	var seconds := 0.4 if phase == BPhase.TWO else 0.55
+	_wind_up(Action.LUNGE, seconds)
 
 func _begin_fan() -> void:
-	action_idx = Action.FAN
-	state = EState.WINDUP
-	st_timer = 0.5 if phase == BPhase.TWO else 0.65
-	data.windup = st_timer
+	var seconds := 0.5 if phase == BPhase.TWO else 0.65
+	_wind_up(Action.FAN, seconds)
 
 func _begin_slam() -> void:
-	action_idx = Action.SLAM
-	state = EState.WINDUP
-	st_timer = 0.45
-	data.windup = st_timer
+	_wind_up(Action.SLAM, 0.45)
 	velocity.y = -700.0  # leap
 
 func _begin_charge() -> void:
-	action_idx = Action.CHARGE
-	state = EState.WINDUP
-	st_timer = 0.5 if phase == BPhase.TWO else 0.7
-	data.windup = st_timer
+	var seconds := 0.5 if phase == BPhase.TWO else 0.7
+	_wind_up(Action.CHARGE, seconds)
 	_charge_dir = facing
 
 func _boss_attack(delta: float) -> void:
@@ -236,7 +230,7 @@ func _do_fan() -> void:
 	var spread := 0.9
 	var player = _get_player()
 	var base_dir := Vector2(facing, 0.0)
-	if player != null and is_instance_valid(player):
+	if player != null:
 		base_dir = (player.global_position - global_position).normalized()
 	var base_ang := base_dir.angle()
 	for i in range(n):
@@ -257,12 +251,13 @@ func _do_slam() -> void:
 func _emit_slam_waves() -> void:
 	# Shockwaves happen on contact with the floor, not at the top of the leap.
 	var speed := Content.BOSS_SHOT_SPEED * 0.7
-	emit_signal("projectile_requested", "enemy", global_position + Vector2(-30.0, 0.0), Vector2(-speed, 0.0), Content.BOSS_SHOT_DAMAGE * 0.8 * Enemy.vow_damage(), 120.0, 0, 1.4, Content.BOSS_COLOR)
-	emit_signal("projectile_requested", "enemy", global_position + Vector2(30.0, 0.0), Vector2(speed, 0.0), Content.BOSS_SHOT_DAMAGE * 0.8 * Enemy.vow_damage(), 120.0, 0, 1.4, Content.BOSS_COLOR)
+	var damage := Content.BOSS_SHOT_DAMAGE * 0.8 * Enemy.vow_damage()
+	for side: float in [-1.0, 1.0]:
+		projectile_requested.emit("enemy", global_position + Vector2(side * 30.0, 0.0), Vector2(side * speed, 0.0), damage, 120.0, 0, 1.4, Content.BOSS_COLOR)
 	if phase == BPhase.TWO:
 		# Phase 2 adds a slower, higher pair so a single jump no longer clears everything.
-		emit_signal("projectile_requested", "enemy", global_position + Vector2(-30.0, -70.0), Vector2(-speed * 0.55, 0.0), Content.BOSS_SHOT_DAMAGE * 0.8 * Enemy.vow_damage(), 120.0, 0, 1.6, Content.BOSS_COLOR)
-		emit_signal("projectile_requested", "enemy", global_position + Vector2(30.0, -70.0), Vector2(speed * 0.55, 0.0), Content.BOSS_SHOT_DAMAGE * 0.8 * Enemy.vow_damage(), 120.0, 0, 1.6, Content.BOSS_COLOR)
+		for side: float in [-1.0, 1.0]:
+			projectile_requested.emit("enemy", global_position + Vector2(side * 30.0, -70.0), Vector2(side * speed * 0.55, 0.0), damage, 120.0, 0, 1.6, Content.BOSS_COLOR)
 	emit_signal("exploded", global_position + Vector2(0.0, Content.BOSS_H * 0.45), 120.0, 0.0)
 
 func _boss_recover(delta: float) -> void:
