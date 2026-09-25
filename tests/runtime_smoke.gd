@@ -1,29 +1,13 @@
-extends SceneTree
+extends "res://tests/harness.gd"
 ## SceneTree-backed smoke coverage for behavior that pure data tests cannot verify.
 ## Run: godot --headless --path . --script res://tests/runtime_smoke.gd
 
-var checks := 0
-var failures := 0
-
-
-func _init() -> void:
-	call_deferred("_run")
-
-
-func check(condition: bool, message: String) -> void:
-	checks += 1
-	if not condition:
-		failures += 1
-		printerr("FAIL: " + message)
-
-
 const MusicSynth := preload("res://scripts/music.gd")
-const TEST_SAVE := "user://graveflame_save_smoke.json"
 
 
-func _run() -> void:
+func run() -> void:
 	await process_frame
-	Save.path = TEST_SAVE
+	use_scratch_save("graveflame_save_smoke")
 	_test_physics_layers()
 	_test_chamber_spawn_separation()
 	await _test_project_boot()
@@ -43,11 +27,7 @@ func _run() -> void:
 	await _test_music_renders()
 	await _test_room_dressing()
 	await _test_full_run_simulation()
-	if FileAccess.file_exists(TEST_SAVE):
-		DirAccess.remove_absolute(TEST_SAVE)
-	var passed := failures == 0
-	print("RUNTIME_SMOKE_RESULT: %s (%d checks, %d failures)" % ["PASS" if passed else "FAIL", checks, failures])
-	quit(0 if passed else 1)
+	await finish("RUNTIME_SMOKE")
 
 
 func _test_physics_layers() -> void:

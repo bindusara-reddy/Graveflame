@@ -1,13 +1,10 @@
-extends SceneTree
+extends "res://tests/harness.gd"
 ## Staged gap + normal Dashmaster boon; NOT a full-run victory test.
 ## Walk/dash into the pit; never edit position, velocity, health, or i-frames.
-var game: Game
 var below_ticks := 0
 var deepest_y := 0.0
 var saw_dash := false
 var damage_events := 0
-var checks := 0
-var failures := 0
 var hp_events := 0
 var death_events := 0
 var second_wind_events := 0
@@ -16,16 +13,9 @@ var reentered := false
 
 func boot_component() -> void:
 	# Focused signal/boon fixture, not input-only whole-run evidence.
-	paused = false
-	if is_instance_valid(game):
-		game.queue_free()
-		await process_frame
-	game = load("res://main.tscn").instantiate()
-	root.add_child(game)
-	await ticks(3)
-	game.ui.start_requested.emit()
-	await ticks(4)
-	game.run.apply_upgrade(Content.UPGRADES.filter(func(u): return u.id == "secondwind")[0])
+	await load_main_scene()
+	await start_run()
+	game.run.apply_upgrade(upgrade("secondwind"))
 	damage_events = 0
 	hp_events = 0
 	death_events = 0
@@ -39,32 +29,13 @@ func boot_component() -> void:
 	game.player.action_feedback.connect(func(kind, _pos):
 		if kind == "second_wind": second_wind_events += 1)
 
-func _init() -> void:
-	call_deferred("run")
-
-func ticks(n: int) -> void:
-	for i in range(n):
-		await physics_frame
-		await process_frame
-
-func check(ok: bool, message: String) -> void:
-	checks += 1
-	if not ok:
-		failures += 1
-		printerr("FAIL: ", message)
-
 func run() -> void:
-	Save.path = "user://void_contract.json"
-	game = load("res://main.tscn").instantiate()
-	root.add_child(game)
-	await ticks(3)
-	game.ui.start_requested.emit()
-	var gap: Dictionary = Content.ROOM_TEMPLATES.filter(func(t): return t.tag == "gap")[0].duplicate(true)
-	gap.slots = []
-	game.run.route[1] = gap
-	game._advance_room()
-	game.run.apply_upgrade(Content.UPGRADES.filter(func(u): return u.id == "dashmaster")[0])
-	await ticks(85)
+	use_scratch_save("void_contract")
+	await load_main_scene()
+	await start_run(0)
+	# Dashmaster lands in the shared run build before the gap room is entered.
+	game.run.apply_upgrade(upgrade("dashmaster"))
+	await enter_empty_room("gap")
 	game.player.hurt_taken.connect(func(_amount, _pos): damage_events += 1)
 	var rescued := [false]
 	game.player.action_feedback.connect(func(kind, _pos): if kind == "rescued": rescued[0] = true)
@@ -81,7 +52,7 @@ func run() -> void:
 		deepest_y = maxf(deepest_y, game.player.position.y)
 		if game.player.position.y > Content.FLOOR_Y + 240.0: below_ticks += 1
 		if damage_events > 0 or game.state == Game.GState.GAME_OVER or below_ticks >= 180: break
-	for action in ["dash", "move_left", "move_right"]: Input.action_release(action)
+	release(["dash", "move_left", "move_right"])
 	await ticks(20)
 	# Spike pits cost health, not the run; only the world boundary is terminal.
 	check(saw_dash and damage_events == 1, "real dash inputs carry the knight onto the pit spikes")
@@ -126,8 +97,4 @@ func run() -> void:
 	game.player.fall_out_of_world()
 	check(reentered and hp_events == 1 and damage_events == 1 and death_events == 1, "reentrant terminal call from health notification emits each signal once")
 	check(is_equal_approx(terminal_stats, 100.0) and game.player.dead and game.run.build.hp == 0.0, "reentrant death summary includes the complete terminal loss")
-	paused = false
-	game.queue_free()
-	await process_frame
-	print("VOID_FALL_RESULT: %s (%d checks, %d failures)" % ["PASS" if failures == 0 else "FAIL", checks, failures])
-	quit(0 if failures == 0 else 1)
+	await finish("VOID_FALL")

@@ -1,23 +1,10 @@
-extends SceneTree
+extends "res://tests/harness.gd"
 ## Boss appearance contract. Real boss states; behavior tuning is not replaced.
-var checks := 0
-var failures := 0
 
-func _init() -> void:
-	call_deferred("_run")
-
-func check(ok: bool, message: String) -> void:
-	checks += 1
-	if not ok:
-		failures += 1
-		printerr("FAIL: " + message)
-
-func _run() -> void:
-	Save.path = "user://boss_art_contract.json"
-	var game: Game = load("res://main.tscn").instantiate()
-	root.add_child(game)
-	await process_frame
-	game.ui.start_requested.emit()
+func run() -> void:
+	use_scratch_save("boss_art_contract")
+	await load_main_scene(1)
+	await start_run(0)
 	game.run.room_index = game.run.rooms_total() - 2
 	game._advance_room()
 	await process_frame
@@ -45,7 +32,4 @@ func _run() -> void:
 			var points: PackedVector2Array = art.BODY[key]
 			check(points.size() >= 3 and not Geometry2D.triangulate_polygon(points).is_empty(), "authored " + key + " polygon triangulates")
 		check(boss.max_hp == Content.BOSS_HP and Content.BOSS_W == 84.0 and Content.BOSS_H == 118.0, "redesign preserves health and collision dimensions")
-	game.queue_free()
-	await process_frame
-	print("BOSS_ART_RESULT: %s (%d checks, %d failures)" % ["PASS" if failures == 0 else "FAIL", checks, failures])
-	quit(0 if failures == 0 else 1)
+	await finish("BOSS_ART")

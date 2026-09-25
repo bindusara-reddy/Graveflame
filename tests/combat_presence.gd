@@ -1,37 +1,11 @@
-extends SceneTree
+extends "res://tests/harness.gd"
 ## Runtime contracts: real scene, input actions and collision-based deflection.
 ## godot4 --headless --audio-driver Dummy --path . --script res://tests/combat_presence.gd
 
-var checks := 0
-var failures := 0
-var game: Game
-
-func _init() -> void:
-	call_deferred("_run")
-
-func check(ok: bool, message: String) -> void:
-	checks += 1
-	if not ok:
-		failures += 1
-		printerr("FAIL: " + message)
-
-func ticks(count: int) -> void:
-	for i in range(count):
-		await physics_frame
-		await process_frame
-
-func press(action: String) -> void:
-	Input.action_press(action)
-	await ticks(1)
-	Input.action_release(action)
-
-func _run() -> void:
-	Save.path = "user://combat_presence.json"
-	game = load("res://main.tscn").instantiate()
-	root.add_child(game)
-	await ticks(2)
-	game.ui.start_requested.emit()
-	await ticks(3)
+func run() -> void:
+	use_scratch_save("combat_presence")
+	await load_main_scene(2)
+	await start_run(3)
 	# Isolate focused combat contracts from the room's separate encounter tests.
 	for enemy in game.room.enemies:
 		enemy.queue_free()
@@ -42,22 +16,16 @@ func _run() -> void:
 	await test_dash_trail()
 	await test_riposte_feedback()
 	await test_breakable_crypt()
-	Input.action_release("attack")
-	Input.action_release("parry")
-	game.queue_free()
-	await ticks(2)
+	release(["attack", "parry"])
 	Feedback.motion_reduced = false
-	if FileAccess.file_exists(Save.path):
-		DirAccess.remove_absolute(Save.path)
-	print("COMBAT_PRESENCE_RESULT: %s (%d checks, %d failures)" % ["PASS" if failures == 0 else "FAIL", checks, failures])
-	quit(0 if failures == 0 else 1)
+	await finish("COMBAT_PRESENCE")
 
 func deflect() -> void:
 	var p := game.player
 	var shot := Projectile.new()
 	shot.setup("enemy", p.global_position + Vector2(p.facing * 52.0, -5.0), Vector2.ZERO, 10.0, 100.0, 0, 2.0, Content.PAL.special)
 	game.projectiles.add_child(shot)
-	await press("parry")
+	await hold_action("parry")
 	await ticks(3)
 	check(shot.team == "player", "real parry input reflects an overlapping hostile projectile")
 	shot.queue_free()
@@ -69,7 +37,7 @@ func test_riposte() -> void:
 	check(window != null and float(window) > 0.0, "confirmed deflection opens a timed riposte opportunity")
 	if window == null:
 		return
-	await press("attack")
+	await hold_action("attack")
 	await ticks(1)
 	check(p.state == Player.State.ATTACK, "attack input cancels a successful parry into a counterattack")
 	check(bool(p.get("_riposte_attack")), "the counterattack is the distinct riposte, not the normal combo")
@@ -87,13 +55,13 @@ func test_riposte() -> void:
 	check(is_equal_approx(hp_before - target.hp, float(attack.get("damage", 0.0))), "one riposte damages a target only once")
 	target.queue_free()
 	await ticks(35)
-	await press("attack")
+	await hold_action("attack")
 	check(not bool(p.get("_riposte_attack")) and p.attack_index == 0, "following attack returns to the normal combo")
 	await ticks(35)
 	await deflect()
 	await ticks(95)
 	check(is_zero_approx(float(p.get("riposte_time"))), "unused riposte expires instead of becoming a permanent buff")
-	await press("parry")
+	await hold_action("parry")
 	await ticks(12)
 	check(is_zero_approx(float(p.get("riposte_time"))), "whiffing a parry does not award a counterattack")
 	await ticks(32)
@@ -116,9 +84,7 @@ func test_dash_trail() -> void:
 	# A dash cancel may be requested opposite to the last attack facing.
 	p.facing = 1.0
 	Input.action_press("move_left")
-	Input.action_press("dash")
-	await ticks(1)
-	Input.action_release("dash")
+	await hold_action("dash")
 	Input.action_release("move_left")
 	check(p.state == Player.State.DASH and p.facing == -1.0, "dash silhouette faces its actual travel direction")
 	await ticks(5)
@@ -130,7 +96,7 @@ func test_dash_trail() -> void:
 	check(game.feedback._particles.filter(func(v): return v.kind == "afterimage").is_empty(), "dash silhouettes expire after movement ends")
 	game.feedback.set_reduced_motion(true)
 	game.feedback._particles.clear()
-	await press("dash")
+	await hold_action("dash")
 	await ticks(5)
 	check(game.feedback._particles.filter(func(v): return v.kind == "afterimage").is_empty(), "reduced motion suppresses dash echoes")
 	await ticks(40)
@@ -147,7 +113,7 @@ func test_riposte_feedback() -> void:
 	check(game.feedback._particles.filter(func(v): return v.kind == "hitspark").size() <= 16, "successful parry uses one restrained impact burst")
 	game.feedback.set_reduced_motion(true)
 	game.feedback._particles.clear()
-	await press("attack")
+	await hold_action("attack")
 	await ticks(5)
 	var cuts: Array = game.feedback._particles.filter(func(v): return v.kind == "riposte")
 	check(cuts.size() == 1, "a live counterattack emits its own directional cut effect")
@@ -174,7 +140,7 @@ func test_breakable_crypt() -> void:
 	p.respawn_at(urn.global_position + Vector2(-42.0, -27.0))
 	p.facing = 1.0
 	await ticks(5)
-	await press("attack")
+	await hold_action("attack")
 	await ticks(15)
 	check(urn.broken, "real blade input shatters a nearby crypt object")
 	check(events[0] == 1 and not urn.monitorable, "shattered object emits once and retires its hurtbox")
@@ -183,7 +149,7 @@ func test_breakable_crypt() -> void:
 	check(Save.get_cells() == cells_before and game.score == score_before, "scenery awards neither cells nor score")
 	check(not game.room.exit_open, "breaking scenery never counts as clearing the encounter")
 	await ticks(20)
-	await press("attack")
+	await hold_action("attack")
 	await ticks(20)
 	check(events[0] == 1, "rubble cannot shatter repeatedly")
 	p.build.lifesteal = 0.0
@@ -198,7 +164,7 @@ func test_breakable_crypt() -> void:
 	var third = props[2]
 	p.respawn_at(third.global_position + Vector2(0.0, -200.0))
 	await ticks(18)
-	await press("attack")
+	await hold_action("attack")
 	await ticks(20)
 	check(third.broken, "a falling blade input smashes nearby scenery on slam impact")
 	check(is_equal_approx(p.special, meter_before), "slam on scenery cannot farm meter")

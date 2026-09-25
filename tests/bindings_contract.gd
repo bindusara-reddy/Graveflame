@@ -1,27 +1,8 @@
-extends SceneTree
+extends "res://tests/harness.gd"
 ## Key-binding contracts. Three silent failure modes are pinned here:
 ## a rebind that saves but never reaches InputMap, one that also strips the
 ## gamepad binding for that action, and a controls screen that lies about the
 ## live bindings (it used to be a hardcoded table that could drift from reality).
-var game: Game
-var checks := 0
-var failures := 0
-
-const TMP_SAVE := "user://bindings_contract.json"
-
-func _init() -> void:
-	call_deferred("run")
-
-func ticks(n: int) -> void:
-	for i in range(n):
-		await physics_frame
-		await process_frame
-
-func check(ok: bool, message: String) -> void:
-	checks += 1
-	if not ok:
-		failures += 1
-		printerr("FAIL: ", message)
 
 func key_codes(action: String) -> Array:
 	var out: Array = []
@@ -45,25 +26,13 @@ func press(keycode: int) -> void:
 	Input.parse_input_event(event)
 	await ticks(2)
 
-func boot() -> void:
-	game = load("res://main.tscn").instantiate()
-	root.add_child(game)
-	await ticks(8)
-
-func teardown() -> void:
-	if is_instance_valid(game):
-		game.queue_free()
-	await ticks(3)
-
 func cell(action: String, column: String) -> String:
 	var cells = game.ui._title_controls.get_meta("control_cells")
 	return (cells[action][column] as Label).text
 
 func run() -> void:
-	Save.path = TMP_SAVE
-	if FileAccess.file_exists(TMP_SAVE):
-		DirAccess.remove_absolute(TMP_SAVE)
-	await boot()
+	use_scratch_save("bindings_contract")
+	await load_main_scene(8)
 
 	# --- The reference card must describe what the game actually does ---
 	for row in Content.CONTROLS_ROWS:
@@ -127,8 +96,9 @@ func run() -> void:
 	check(game.player.state == Player.State.ATTACK, "the rebound key performs the action in play")
 
 	# --- A relaunch honours it, and a hand-edited save cannot invent an action ---
-	await teardown()
-	await boot()
+	await free_game()
+	await ticks(3)
+	await load_main_scene(8)
 	check(key_codes("attack") == [KEY_H], "the rebind survives a relaunch")
 	var data := Save.load_save()
 	var bindings = data.get("bindings", {})
@@ -137,8 +107,4 @@ func run() -> void:
 	Save.save_save(data)
 	check(not Save.get_bindings().has("not_an_action"), "an unknown action in the save is ignored")
 
-	await teardown()
-	if FileAccess.file_exists(TMP_SAVE):
-		DirAccess.remove_absolute(TMP_SAVE)
-	print("BINDINGS_RESULT: %s (%d checks, %d failures)" % ["PASS" if failures == 0 else "FAIL", checks, failures])
-	quit(0 if failures == 0 else 1)
+	await finish("BINDINGS")

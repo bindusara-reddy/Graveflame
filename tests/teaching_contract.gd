@@ -1,63 +1,26 @@
-extends SceneTree
+extends "res://tests/harness.gd"
 ## Teaching contracts. The game cannot be judged fair if its least obvious
 ## mechanics are never explained, and the failure mode here is silent: a save
 ## flag that never gets set spams the same tip forever, and one that is always
 ## set teaches nothing. Both directions are pinned.
-var game: Game
-var checks := 0
-var failures := 0
-
-const TMP_SAVE := "user://teaching_contract.json"
-
-func _init() -> void:
-	call_deferred("run")
-
-func ticks(n: int) -> void:
-	for i in range(n):
-		await physics_frame
-		await process_frame
-
-func check(ok: bool, message: String) -> void:
-	checks += 1
-	if not ok:
-		failures += 1
-		printerr("FAIL: ", message)
-
-func boot() -> void:
-	game = load("res://main.tscn").instantiate()
-	root.add_child(game)
-	await ticks(6)
-	game.ui.start_requested.emit()
-	await ticks(20)
-
-func teardown() -> void:
-	if is_instance_valid(game):
-		game.queue_free()
-	await ticks(3)
-
-func first_live_enemy():
-	for e in game.room.enemies:
-		if is_instance_valid(e) and not e.dead:
-			return e
-	return null
 
 func windup_near_player() -> void:
-	var enemy = first_live_enemy()
-	if enemy == null:
+	var live := live_enemies()
+	if live.is_empty():
 		return
+	var enemy = live[0]
 	enemy.global_position = game.player.global_position + Vector2(60.0, 0.0)
 	enemy._begin_windup()
 
 func run() -> void:
-	Save.path = TMP_SAVE
-	if FileAccess.file_exists(TMP_SAVE):
-		DirAccess.remove_absolute(TMP_SAVE)
+	use_scratch_save("teaching_contract")
 
 	# The mechanics a player cannot infer from a bindings list must all be covered.
 	for id in ["parry", "riposte", "slam", "wall_jump"]:
 		check(Content.HINTS.has(id), "a lesson exists for %s" % id)
 
-	await boot()
+	await load_main_scene(6)
+	await start_run(20)
 	check(Save.get_learned_hints().is_empty(), "a fresh save has learned nothing")
 
 	# A windup in the player's face is when parry timing matters.
@@ -95,16 +58,14 @@ func run() -> void:
 
 	# A returning player is not re-taught.
 	var learned_before: Array = Save.get_learned_hints().duplicate()
-	await teardown()
-	await boot()
+	await free_game()
+	await ticks(3)
+	await load_main_scene(6)
+	await start_run(20)
 	check(Save.get_learned_hints() == learned_before, "learned lessons survive a relaunch")
 	game._hint_cooldown = 0.0
 	windup_near_player()
 	await ticks(3)
 	check(not game.ui._hint_panel.visible, "a returning player is not interrupted again")
 
-	await teardown()
-	if FileAccess.file_exists(TMP_SAVE):
-		DirAccess.remove_absolute(TMP_SAVE)
-	print("TEACHING_RESULT: %s (%d checks, %d failures)" % ["PASS" if failures == 0 else "FAIL", checks, failures])
-	quit(0 if failures == 0 else 1)
+	await finish("TEACHING")

@@ -1,37 +1,12 @@
-extends SceneTree
+extends "res://tests/harness.gd"
 ## Contracts for the descent's choices and payoffs: rift routes out of a cleared
 ## chamber, the ranked Forge, move-changing boons, paper-cut deaths, and the
 ## per-chamber flask charge. Headless; uses a scratch save.
 ##   godot4 --headless --path . --script res://tests/descent_contract.gd
-var game: Game
-var checks := 0
-var failures := 0
-const TMP_SAVE := "user://descent_contract.json"
-
-func _init() -> void:
-	call_deferred("run")
-
-func ticks(n: int) -> void:
-	for i in range(n):
-		await physics_frame
-		await process_frame
-
-func check(ok: bool, message: String) -> void:
-	checks += 1
-	if not ok:
-		failures += 1
-		printerr("FAIL: ", message)
 
 func boot() -> void:
-	if is_instance_valid(game):
-		game.queue_free()
-		await process_frame
-	paused = false
-	game = load("res://main.tscn").instantiate()
-	root.add_child(game)
-	await ticks(3)
-	game.ui.start_requested.emit()
-	await ticks(4)
+	await load_main_scene()
+	await start_run()
 	game.player.iframes = 99.0
 
 func clear_room() -> void:
@@ -43,9 +18,7 @@ func clear_room() -> void:
 	await ticks(2)
 
 func run() -> void:
-	Save.path = TMP_SAVE
-	if FileAccess.file_exists(TMP_SAVE):
-		DirAccess.remove_absolute(TMP_SAVE)
+	use_scratch_save("descent_contract")
 	await _test_rifts()
 	await _test_forge_ranks()
 	await _test_boons()
@@ -53,13 +26,7 @@ func run() -> void:
 	await _test_flask_charge()
 	await _test_crow()
 	await _test_vows()
-	if is_instance_valid(game):
-		game.queue_free()
-		await process_frame
-	if FileAccess.file_exists(TMP_SAVE):
-		DirAccess.remove_absolute(TMP_SAVE)
-	print("DESCENT_RESULT: %s (%d checks, %d failures)" % ["PASS" if failures == 0 else "FAIL", checks, failures])
-	quit(0 if failures == 0 else 1)
+	await finish("DESCENT")
 
 func _test_rifts() -> void:
 	await boot()
@@ -145,14 +112,11 @@ func _test_forge_ranks() -> void:
 	d["meta"] = []
 	Save.save_save(d)
 
-func _pick(id: String) -> Dictionary:
-	return Content.UPGRADES.filter(func(u): return u.id == id)[0]
-
 func _test_boons() -> void:
 	await boot()
 	var p: Player = game.player
 	for id in ["cindertrail", "flareparry", "twinlance", "phoenix", "brand", "skyfall"]:
-		game.run.apply_upgrade(_pick(id))
+		game.run.apply_upgrade(upgrade(id))
 	p.build = game.run.build
 	check(p.build.cinder_trail and p.build.twin_lance and p.build.skyfall and p.build.flare_parry > 0.0 and p.build.phoenix > 0.0 and p.build.brand > 0.0, "move-changing boons land in the build")
 	# Twin Lance: two bolts per cast.
@@ -177,11 +141,9 @@ func _test_boons() -> void:
 			all_hit = false
 	check(all_hit, "a flame nova hurts and ignites every enemy in reach")
 	# Ember Brand: burning targets take more.
-	var e0 = null
-	for e in game.room.enemies:
-		if is_instance_valid(e) and not e.dead:
-			e0 = e
-	if e0 != null:
+	var live := live_enemies()
+	if not live.is_empty():
+		var e0 = live[-1]
 		e0.burn_time = 2.0
 		var hot := p._damage_mul(e0)
 		e0.burn_time = 0.0
@@ -200,14 +162,11 @@ const GroundFire := preload("res://scripts/ground_fire.gd")
 
 func _test_paper_cut() -> void:
 	await boot()
-	var victim = null
-	for e in game.room.enemies:
-		if is_instance_valid(e) and not e.dead:
-			victim = e
-			break
-	check(victim != null, "the chamber has an enemy to cut down")
-	if victim == null:
+	var live := live_enemies()
+	check(not live.is_empty(), "the chamber has an enemy to cut down")
+	if live.is_empty():
 		return
+	var victim = live[0]
 	var before := game.room.get_children().size()
 	victim.take_damage(99999.0, Vector2(1.0, -0.2), 0.0)
 	await ticks(1)
@@ -292,11 +251,9 @@ func _test_vows() -> void:
 	Save.save_save(d)
 	await boot()
 	check(Enemy.vows.size() == 5 and game._vow_mult > 2.0, "after a victory every sworn vow binds and raises the score multiplier")
-	var e0 = null
-	for e in game.room.enemies:
-		if is_instance_valid(e) and not e.dead:
-			e0 = e
-	if e0 != null:
+	var live := live_enemies()
+	if not live.is_empty():
+		var e0 = live[-1]
 		var base: Dictionary = Content.ENEMY[e0.kind]
 		check(float(e0.data.speed) > float(base.speed) and float(e0.data.windup) < float(base.windup), "the Vow of Haste quickens enemies")
 		check(e0.damage_mul >= 1.35 - 0.001, "the Vow of Embers hardens every blow")

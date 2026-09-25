@@ -1,39 +1,17 @@
-extends SceneTree
+extends "res://tests/harness.gd"
 ## Anticipation contracts. Every windup that can damage the player has to be
 ## voiced, and the chamber has to report how many waves are left. Both are
 ## easy to break silently -- renaming a cue mutes it without any error, and a
 ## dropped connection makes the wave counter stale -- so both are pinned here.
-var game: Game
-var checks := 0
-var failures := 0
-
 const CUE_PREFIX := "tell_"
-const TMP_SAVE := "user://anticipation_contract.json"
-
-func _init() -> void:
-	call_deferred("run")
-
-func ticks(n: int) -> void:
-	for i in range(n):
-		await physics_frame
-		await process_frame
-
-func check(ok: bool, message: String) -> void:
-	checks += 1
-	if not ok:
-		failures += 1
-		printerr("FAIL: ", message)
 
 func _has_cue(name: String) -> bool:
 	return game.feedback._streams.has(name)
 
 func run() -> void:
-	Save.path = TMP_SAVE
-	game = load("res://main.tscn").instantiate()
-	root.add_child(game)
-	await ticks(3)
-	game.ui.start_requested.emit()
-	await ticks(20)
+	use_scratch_save("anticipation_contract")
+	await load_main_scene()
+	await start_run(20)
 
 	# --- Every archetype windup resolves to a real synthesized cue ---
 	for kind in [Enemy.Kind.STALKER, Enemy.Kind.HOPPER, Enemy.Kind.WISP, Enemy.Kind.BRUTE, Enemy.Kind.BOMBER, Enemy.Kind.CROW]:
@@ -56,10 +34,7 @@ func run() -> void:
 		check(_has_cue(id), "menu cue exists: %s" % id)
 
 	# --- A live windup reaches the game end to end: Enemy -> Room -> Game ---
-	var live: Array = []
-	for e in game.room.enemies:
-		if is_instance_valid(e) and not e.dead:
-			live.append(e)
+	var live := live_enemies()
 	check(not live.is_empty(), "the opening chamber spawns enemies to telegraph")
 	if not live.is_empty():
 		var enemy = live[0]
@@ -111,10 +86,4 @@ func run() -> void:
 	await ticks(20)
 	check(not game.ui._wave_label.visible, "the throne room carries no wave counter")
 
-	game.queue_free()
-	await process_frame
-	# Leave no scratch save in the player's userdata directory.
-	if FileAccess.file_exists(TMP_SAVE):
-		DirAccess.remove_absolute(TMP_SAVE)
-	print("ANTICIPATION_RESULT: %s (%d checks, %d failures)" % ["PASS" if failures == 0 else "FAIL", checks, failures])
-	quit(0 if failures == 0 else 1)
+	await finish("ANTICIPATION")

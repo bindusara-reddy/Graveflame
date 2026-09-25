@@ -1,42 +1,16 @@
-extends SceneTree
+extends "res://tests/harness.gd"
 ## Settings contracts. Two things here failed silently before and would do so
 ## again: a toggle whose icon reserved layout space but never painted (no error,
 ## just an invisible control), and a volume that was stored but never reached the
 ## audio bus. Both are pinned behaviourally rather than structurally.
-var game: Game
 var _vp: SubViewport
-var checks := 0
-var failures := 0
-
-const TMP_SAVE := "user://settings_contract.json"
-
-func _init() -> void:
-	call_deferred("run")
-
-func ticks(n: int) -> void:
-	for i in range(n):
-		await physics_frame
-		await process_frame
-
-func check(ok: bool, message: String) -> void:
-	checks += 1
-	if not ok:
-		failures += 1
-		printerr("FAIL: ", message)
 
 func boot() -> void:
-	_vp = SubViewport.new()
-	_vp.size = Vector2i(1280, 720)
-	_vp.render_target_update_mode = SubViewport.UPDATE_ALWAYS
-	_vp.disable_3d = true
-	root.add_child(_vp)
-	game = load("res://main.tscn").instantiate()
-	_vp.add_child(game)
-	await ticks(12)
+	_vp = make_capture_viewport()
+	await load_main_scene(12, _vp)
 
 func teardown() -> void:
-	if is_instance_valid(game):
-		game.queue_free()
+	await free_game()
 	if is_instance_valid(_vp):
 		_vp.queue_free()
 	await ticks(4)
@@ -59,9 +33,7 @@ func sample(x0: int, y0: int, w: int, h: int) -> float:
 	return total / float(samples)
 
 func run() -> void:
-	Save.path = TMP_SAVE
-	if FileAccess.file_exists(TMP_SAVE):
-		DirAccess.remove_absolute(TMP_SAVE)
+	use_scratch_save("settings_contract")
 	await boot()
 
 	check(AudioServer.get_bus_index("Music") >= 0, "a Music bus exists for the score")
@@ -118,7 +90,4 @@ func run() -> void:
 	check(AudioServer.get_bus_volume_db(AudioServer.get_bus_index("Music")) < 0.0, "a relaunch reapplies the mix to the bus")
 
 	await teardown()
-	if FileAccess.file_exists(TMP_SAVE):
-		DirAccess.remove_absolute(TMP_SAVE)
-	print("SETTINGS_RESULT: %s (%d checks, %d failures)" % ["PASS" if failures == 0 else "FAIL", checks, failures])
-	quit(0 if failures == 0 else 1)
+	await finish("SETTINGS")
