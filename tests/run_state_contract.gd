@@ -1,6 +1,7 @@
 extends "res://tests/harness.gd"
 ## Run-state contracts: the save survives a torn write and is never written from
-## a kill, and the ledger records each descent once.
+## a kill, the ledger records each descent once, and a dead knight cannot take a
+## rift.
 ## Headless; uses a scratch save.
 ##   godot4 --headless --path . --script res://tests/run_state_contract.gd
 
@@ -12,6 +13,7 @@ func run() -> void:
 	_test_ledger()
 	await _test_banking()
 	await _test_chamber_stats()
+	await _test_dead_knight()
 	await finish("RUN_STATE")
 
 func write_text(file: String, text: String) -> void:
@@ -100,3 +102,15 @@ func _test_chamber_stats() -> void:
 	game._on_room_completed()
 	await ticks(2)
 	check(int(game._stats.rooms) == 1 and int(game._stats.untouched_chambers) == 1, "a clear without a wound counts as cleared and untouched")
+
+func _test_dead_knight() -> void:
+	use_scratch_save(SCRATCH)
+	await boot()
+	await clear_room()
+	game.player.fall_out_of_world()
+	game.room.chosen_exit = "boon"
+	game._on_room_completed()
+	await ticks(2)
+	check(game.state == Game.GState.GAME_OVER and not (game.ui._panels["reward"] as Control).visible, "a dead knight cannot take a rift")
+	var d := Save.load_save()
+	check(int(d.stats.deaths) == 1 and int(d.history[0].room) == 0 and game._stats.has("broken"), "the death is recorded once, with no chamber cleared")

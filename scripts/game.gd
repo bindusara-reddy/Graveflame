@@ -1203,6 +1203,9 @@ func _on_room_cleared(room_name: String) -> void:
 	ui.show_room_clear(room_name)
 
 func _on_room_completed() -> void:
+	# A dead knight must not take a rift (or win) during the death beat.
+	if state != GState.PLAYING:
+		return
 	_stats.rooms = run.room_index + 1
 	if is_equal_approx(float(_stats.damage_taken), _chamber_damage_mark):
 		_stats.untouched_chambers += 1
