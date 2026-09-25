@@ -87,7 +87,7 @@ func run() -> void:
 	await _wait(0.9)
 	await _shot("08_boss_intro")
 	await _wait(1.2)
-	game.room.boss.take_damage(game.room.boss.max_hp * 0.55, Vector2.RIGHT, 0.0)
+	game.room.boss.take_damage(game.room.boss.hp_max * 0.55, Vector2.RIGHT, 0.0)
 	await _wait(0.5)
 	await _shot("09_boss_phase2")
 	# Low HP vignette, then death for the summary.

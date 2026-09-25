@@ -264,7 +264,7 @@ func _test_vows() -> void:
 	game._advance_room()
 	await ticks(100)
 	var boss: Boss = game.room.boss
-	check(is_equal_approx(boss.max_hp, Content.BOSS_HP * 1.2), "the Vow of the Pyre hardens the Warden")
+	check(is_equal_approx(boss.hp_max, Content.BOSS_HP * 1.2), "the Vow of the Pyre hardens the Warden")
 	check(boss.phase == Boss.BPhase.TWO, "the Vow of the Pyre wakes the Warden already ignited")
 	d = Save.load_save()
 	d["vows"] = []

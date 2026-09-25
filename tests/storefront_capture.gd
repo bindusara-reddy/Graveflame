@@ -104,7 +104,7 @@ func run() -> void:
 	if is_instance_valid(boss):
 		boss.global_position = Vector2(880.0, Content.FLOOR_Y - Content.BOSS_H * 0.5)
 		boss.facing = -1.0
-		boss.take_damage(boss.max_hp * 0.58, Vector2.RIGHT, 0.0)
+		boss.take_damage(boss.hp_max * 0.58, Vector2.RIGHT, 0.0)
 	game.player.respawn_at(Vector2(620.0, Content.FLOOR_Y - 27.0))
 	game.player.facing = 1.0
 	game.feedback.camera.position = game._camera_target_for(game.player.position)

@@ -17,7 +17,6 @@ var phase: int = BPhase.INTRO
 var intro_t := 1.2
 var action_t := 1.5
 var action_idx: int = Action.LUNGE
-var max_hp := Content.BOSS_HP
 var _phase2_triggered := false
 var _slam_wave_emitted := false
 var _charge_dir := 1.0
@@ -29,17 +28,17 @@ var _death_t := 0.0
 var _shattered := false
 
 func _ready() -> void:
+	hp_max = Content.BOSS_HP
 	if Enemy.vows.has("v_pyre"):
 		# Vow of the Pyre: a hardier Warden that is already burning.
-		max_hp = Content.BOSS_HP * 1.2
+		hp_max = Content.BOSS_HP * 1.2
 	kind = Kind.STALKER  # reuse melee shape
 	data = Content.ENEMY[Kind.STALKER].duplicate()
 	data.w = Content.BOSS_W
 	data.h = Content.BOSS_H
 	data.color = Content.BOSS_COLOR
 	data.damage = Content.BOSS_DAMAGE
-	hp = max_hp
-	hp_max = max_hp
+	hp = hp_max
 	_owner_id = get_instance_id()
 	_build_bodies(Vector2(Content.BOSS_W, Content.BOSS_H), Vector2(60.0, 20.0))
 	phase = BPhase.INTRO
@@ -84,7 +83,7 @@ func _physics_process(delta: float) -> void:
 		EState.DEAD: pass
 
 func _check_phase2() -> void:
-	if not _phase2_triggered and hp <= max_hp * Content.BOSS_PHASE2_AT:
+	if not _phase2_triggered and hp <= hp_max * Content.BOSS_PHASE2_AT:
 		_ignite()
 
 ## Phase two: faster, relentless, and two wisps called to the throne.

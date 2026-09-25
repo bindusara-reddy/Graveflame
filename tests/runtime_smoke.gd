@@ -439,7 +439,7 @@ func _test_boss_charge_and_summons() -> void:
 	check(not boss._atk_area.monitoring, "charge disarms its hitbox when it ends")
 	var summons: Array = []
 	boss.summon_requested.connect(func(kind: int, pos: Vector2): summons.append([kind, pos]))
-	boss.hp = boss.max_hp * 0.4
+	boss.hp = boss.hp_max * 0.4
 	boss._check_phase2()
 	check(boss.phase == Boss.BPhase.TWO, "boss enters phase two below half health")
 	check(summons.size() == 2 and int(summons[0][0]) == Content.BOSS_SUMMON_KIND, "phase two summons two wisps")
@@ -558,7 +558,7 @@ func _test_full_run_simulation() -> void:
 				if room.boss.phase == Boss.BPhase.INTRO:
 					await physics_frame
 					continue
-				room.boss.take_damage(room.boss.max_hp * 0.3, Vector2.RIGHT, 0.0)
+				room.boss.take_damage(room.boss.hp_max * 0.3, Vector2.RIGHT, 0.0)
 				for e in room.enemies.duplicate():
 					if is_instance_valid(e) and not e.dead:
 						e.take_damage(99999.0, Vector2.RIGHT, 0.0)

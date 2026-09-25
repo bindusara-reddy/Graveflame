@@ -1252,7 +1252,7 @@ func _on_player_died() -> void:
 
 func _on_boss_spawned() -> void:
 	if is_instance_valid(room) and room.boss != null:
-		ui.show_boss_bar(room.boss.max_hp)
+		ui.show_boss_bar(room.boss.hp_max)
 		ui.show_boss_intro("The Ember Warden", "Keeper of the Ember Throne")
 		feedback.shake(8.0, 0.3)
 		feedback.play("boss")

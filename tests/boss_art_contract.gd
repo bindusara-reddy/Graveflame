@@ -29,5 +29,5 @@ func run() -> void:
 	for key in art.BODY:
 		var points: PackedVector2Array = art.BODY[key]
 		check(points.size() >= 3 and not Geometry2D.triangulate_polygon(points).is_empty(), "authored " + key + " polygon triangulates")
-	check(boss.max_hp == Content.BOSS_HP and Content.BOSS_W == 84.0 and Content.BOSS_H == 118.0, "redesign preserves health and collision dimensions")
+	check(boss.hp_max == Content.BOSS_HP and Content.BOSS_W == 84.0 and Content.BOSS_H == 118.0, "redesign preserves health and collision dimensions")
 	await finish("BOSS_ART")
