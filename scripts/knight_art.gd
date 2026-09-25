@@ -51,8 +51,13 @@ const REST := {
 	"ground": 1.0, "flask": 0.0, "reach": 1.0,
 }
 
+## The straight-arm thrust shared by the riposte and the dash strike.
+const THRUST_WIND := { "arm_f": 2.75, "sword": -2.65, "torso": -0.14, "head": -0.05, "hip_f": 0.1, "knee_f": 0.5, "hip_b": -0.35, "knee_b": 0.4, "arm_b": 2.8 }
+const THRUST_STRIKE := { "arm_f": 0.02, "sword": 0.0, "torso": 0.3, "head": 0.1, "hip_f": 0.8, "knee_f": 0.9, "hip_b": -0.8, "knee_b": 0.05, "arm_b": 2.9 }
+
 ## Attack keyframes: the wind (end of startup) and strike (end of active).
-## `smear` is the blade sweep in body angles around the shoulder, from -> to.
+## `smear` is the blade sweep in body angles around the shoulder, from -> to;
+## a thrust sweeps nothing, so its zero-width smear draws no arc.
 const SWINGS := {
 	"cut": {
 		"wind": { "arm_f": -2.2, "sword": -0.4, "torso": -0.1, "head": -0.06, "hip_f": 0.2, "knee_f": 0.2, "hip_b": -0.25, "knee_b": 0.15, "arm_b": 2.4 },
@@ -69,11 +74,8 @@ const SWINGS := {
 		"strike": { "arm_f": 1.3, "sword": 0.35, "torso": 0.4, "head": 0.18, "hip_f": 0.75, "knee_f": 1.0, "hip_b": -0.7, "knee_b": 0.15, "arm_b": 2.2, "sy": 1.0, "sx": 1.0 },
 		"smear": [-1.7, 1.3],
 	},
-	"riposte": {
-		"wind": { "arm_f": 2.75, "sword": -2.65, "torso": -0.14, "head": -0.05, "hip_f": 0.1, "knee_f": 0.5, "hip_b": -0.35, "knee_b": 0.4, "arm_b": 2.8 },
-		"strike": { "arm_f": 0.02, "sword": 0.0, "torso": 0.3, "head": 0.1, "hip_f": 0.8, "knee_f": 0.9, "hip_b": -0.8, "knee_b": 0.05, "arm_b": 2.9 },
-		"smear": [],
-	},
+	"riposte": { "wind": THRUST_WIND, "strike": THRUST_STRIKE, "smear": [] },
+	"dash_strike": { "wind": THRUST_WIND, "strike": THRUST_STRIKE, "smear": [0.0, 0.0] },
 }
 
 ## Held poses: fixed keys laid over the idle pose for as long as the state lasts.
@@ -117,6 +119,8 @@ const HURT_POSE := {
 static func swing_name(p) -> String:
 	if p._riposte_attack:
 		return "riposte"
+	if p._dash_strike:
+		return "dash_strike"
 	match int(p.attack_index):
 		1: return "cleave"
 		2: return "finish"

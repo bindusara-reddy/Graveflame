@@ -566,10 +566,11 @@ func slash_arc(origin: Vector2, facing: float, radius: float, a0: float, a1: flo
 	})
 
 ## Thin counterthrust silhouette, readable even with motion reduction enabled.
-func riposte_cut(origin: Vector2, facing: float, reach: float) -> void:
+## The dash strike draws the same silhouette in its own `color`.
+func riposte_cut(origin: Vector2, facing: float, reach: float, color := VFX.TEAL) -> void:
 	_push_particle({
 		"kind": "riposte", "pos": origin, "vel": Vector2.ZERO, "life": 0.22, "max": 0.22,
-		"color": _accessible_color(VFX.TEAL), "radius": reach, "facing": facing, "size": 1.0,
+		"color": _accessible_color(color), "radius": reach, "facing": facing, "size": 1.0,
 	})
 
 ## A paper-cut sliver through the point of contact, slanted along the swing

@@ -25,6 +25,7 @@ func run() -> void:
 	test_number_tally()
 	await test_ignition_and_clear_beat()
 	await test_soft_separation()
+	await test_dash_strike()
 	release(["attack", "parry", "move_left"])
 	Feedback.motion_reduced = false
 	await finish("COMBAT_PRESENCE")
@@ -379,6 +380,23 @@ func test_soft_separation() -> void:
 	foe.queue_free()
 	p.iframes = 0.0
 	await ticks(30)
+
+## Attacking out of a dash thrusts on with its momentum, and the next press
+## chains on into the cleave.
+func test_dash_strike() -> void:
+	var p := game.player
+	p.respawn_at(Vector2(480.0, Content.FLOOR_Y - Content.P_BODY_H * 0.5))
+	p.facing = 1.0
+	await ticks(60)
+	await hold_action("dash")
+	await ticks(3)
+	await hold_action("attack")
+	var def: Dictionary = p.get_meta("atk_def", {})
+	check(p.state == Player.State.ATTACK and def.get("name", "") == "dash_strike", "attacking out of a dash makes a dash strike")
+	check(p.velocity.x >= float(Player.DASH_STRIKE.lunge) * 0.9, "the dash strike keeps the dash's momentum")
+	await hold_action("attack")
+	check(await ticks_until(func(): return p.attack_index == 1, 30), "a dash strike chains on into the cleave")
+	await ticks(40)
 
 func test_breakable_crypt() -> void:
 	var props := game.room.props

@@ -23,7 +23,16 @@ const BLOWS := {
 	"cleave": { "stop": 0.05, "slant": -0.55, "kick": 3.0, "poise": 1.0 },
 	"finish": { "stop": 0.075, "slant": 1.0, "kick": 6.0, "poise": 2.0 },
 	"riposte": { "stop": 0.10, "slant": 0.0, "kick": 6.0, "poise": GUARD_BREAK },
+	"dash_strike": { "stop": 0.06, "slant": 0.0, "kick": 4.0, "poise": 1.0 },
 }
+## Attacking out of a dash, or within DASH_STRIKE_GRACE of its end, thrusts
+## with the dash's momentum instead of throwing it away; the next press
+## chains on into the cleave.
+const DASH_STRIKE := {
+	"name": "dash_strike", "startup": 0.03, "active": 0.10, "recover": 0.22,
+	"damage": 16.0, "knock": 380.0, "range": 96.0, "window": 0.30, "lunge": 520.0,
+}
+const DASH_STRIKE_GRACE := 0.08
 ## A killing blow holds the freeze this much longer.
 const KILL_STOP_BONUS := 0.03
 ## Being struck freezes the world longest of all: it is the hit that must read.
@@ -89,6 +98,9 @@ var _queued_attack := false
 var dash_cd := 0.0
 var _dash_buffer := 0.0
 var dash_time := 0.0
+## Seconds since the last dash ended, and whether this swing is a dash strike.
+var _since_dash := INF
+var _dash_strike := false
 var _dash_echo_pos := Vector2.ZERO
 var iframes := 0.0
 var _hurt_started_airborne := false
@@ -237,6 +249,7 @@ func _physics_process(delta: float) -> void:
 			_momentum_stacks = 0
 	if iframes > 0.0: iframes -= delta
 	if dash_cd > 0.0: dash_cd -= delta
+	_since_dash += delta
 	if _hurt_flash > 0.0: _hurt_flash -= delta
 	if _flask_heal_flash > 0.0: _flask_heal_flash -= delta
 	if parry_cd > 0.0: parry_cd -= delta
@@ -500,14 +513,19 @@ func is_finisher() -> bool:
 # --- Attack combo ---
 func _begin_attack(force_chain: bool = false) -> void:
 	_riposte_attack = riposte_time > 0.0 and not force_chain
+	_dash_strike = not _riposte_attack and not force_chain and (state == State.DASH or _since_dash <= DASH_STRIKE_GRACE)
 	if _riposte_attack:
 		riposte_time = 0.0
 		attack_index = Content.COMBO.size() - 1
-	elif (force_chain or combo_timer > 0.0) and attack_index >= 0 and not is_finisher():
+	elif (force_chain or combo_timer > 0.0) and attack_index >= 0 and not is_finisher() and not _dash_strike:
 		attack_index += 1
 	else:
 		attack_index = 0
 	var def: Dictionary = Content.RIPOSTE if _riposte_attack else Content.COMBO[attack_index]
+	if _dash_strike:
+		def = DASH_STRIKE
+		# The dash's immunity carries the thrust through its startup.
+		iframes = maxf(iframes, float(def.startup))
 	attack_buffer = 0.0
 	_queued_attack = false
 	# A chained swing turns to the held direction; the riposte keeps its mark.
@@ -592,6 +610,8 @@ func _activate_hitbox(def: Dictionary) -> void:
 	_attack_range = def.range
 	atk_hit.clear()
 	emit_signal("action_feedback", "swing_active", global_position)
+	if _dash_strike and feedback != null:
+		feedback.riposte_cut(global_position + Vector2(facing * 8.0, -8.0), facing, def.range, Content.PAL.attack)
 	if is_finisher() and (_flame_time > 0.0 or bool(build.get("finisher_wave", false))):
 		var wave_pos := global_position + Vector2(facing * 34.0, -8.0)
 		var wave_life := 0.32 if _flame_time > 0.0 else 0.26
@@ -817,11 +837,12 @@ func _begin_dash() -> void:
 func _step_dash(delta: float) -> void:
 	dash_time -= delta
 	velocity.y = 0.0
-	if dash_time <= DASH_CANCEL_TAIL and _cancel_dash_tail():
+	if _cancel_dash():
 		return
 	if dash_time <= 0.0:
 		state = State.LOCOMOTION
 		velocity.x *= 0.5
+		_since_dash = 0.0
 	move_and_slide()
 	if global_position.distance_to(_dash_echo_pos) >= 24.0:
 		_dash_echo_pos = global_position
@@ -829,14 +850,14 @@ func _step_dash(delta: float) -> void:
 		if bool(build.get("cinder_trail", false)) and is_on_floor():
 			emit_signal("action_feedback", "cinder", global_position + Vector2(0.0, Content.P_BODY_H * 0.5))
 
-## The dash's tail flows straight into a buffered parry or blade press.
-func _cancel_dash_tail() -> bool:
-	if parry_cd <= 0.0 and _take_press("parry"):
+## A blade press cuts a dash short into a dash strike (or a slam, Down held
+## in the air); in the dash's tail a buffered parry flows out of it too.
+func _cancel_dash() -> bool:
+	if attack_buffer > 0.0:
+		_use_attack_press()
+	elif dash_time <= DASH_CANCEL_TAIL and parry_cd <= 0.0 and _take_press("parry"):
 		velocity.x *= 0.5
 		_begin_parry()
-	elif attack_buffer > 0.0:
-		velocity.x *= 0.5
-		_use_attack_press()
 	else:
 		return false
 	return true
@@ -1232,11 +1253,12 @@ func _draw() -> void:
 	if state == State.HEAL:
 		var heal_progress := clampf(1.0 - _heal_time / Content.P_HEAL_TIME, 0.0, 1.0)
 		draw_arc(Vector2.ZERO, 33.0, -PI * 0.5, -PI * 0.5 + TAU * heal_progress, 32, VFX.TEAL, 4.0)
-	# The blade smear is part of the puppet; the counterthrust keeps its own line.
-	if _draw_attack and _riposte_attack:
-		# Counterthrust: a narrow forward blade, not the normal circular sweep.
+	# The blade smear is part of the puppet; a thrust keeps its own line.
+	if _draw_attack and (_riposte_attack or _dash_strike):
+		# A narrow forward blade, not the normal circular sweep: teal for the
+		# counterthrust, gold for the dash strike.
 		var tip := Vector2(facing * (_attack_range + 8.0), -8.0)
-		draw_line(Vector2(facing * 16.0, -4.0), tip, Color(VFX.TEAL, 0.7), 5.0, true)
+		draw_line(Vector2(facing * 16.0, -4.0), tip, Color(VFX.TEAL if _riposte_attack else Content.PAL.attack, 0.7), 5.0, true)
 		draw_line(Vector2(facing * 22.0, -4.0), tip, Color(VFX.HOT, 0.9), 1.5, true)
 	if riposte_time > 0.0:
 		# Diegetic cue stays with the fighter instead of adding another HUD panel;
