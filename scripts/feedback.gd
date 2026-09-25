@@ -102,7 +102,6 @@ func _init_audio() -> void:
 	# (about a second of synthesis), and play() stays silent for a cue until then.
 	for name in SfxSynth.cue_names():
 		_streams[name] = null
-	_streams["attack"] = null  # backwards-compatible alias of "swing"
 	for i in range(VOICES):
 		var p := AudioStreamPlayer.new()
 		# One bus for every gameplay and menu cue, so a single slider mixes them.
@@ -145,11 +144,6 @@ func _install_sfx(book: Dictionary) -> void:
 		var takes: Array = book[name]
 		_takes[name] = takes
 		_streams[name] = takes[0]
-	_takes["attack"] = _takes.get("swing", [])
-	_streams["attack"] = _streams.get("swing")
-
-func sfx_ready() -> bool:
-	return _sfx_thread == null and not _takes.is_empty()
 
 func play(name: String, pitch: float = 1.0, volume_db: float = 0.0) -> void:
 	if _streams.get(name) == null:
@@ -274,9 +268,6 @@ func burst(pos: Vector2, count: int, color: Color, speed: float = 220.0) -> void
 			"max": 0.6, "color": effect_color, "size": randf_range(2.0, 5.0)
 		})
 
-func flash_hit(pos: Vector2) -> void:
-	impact(pos, Content.PAL.attack, false)
-
 ## Ceramic/brass fragments follow the blow, with no loot or explosion flash.
 func shatter(pos: Vector2, force: Vector2, color: Color) -> void:
 	play("shatter")
@@ -398,8 +389,9 @@ func slash(pos: Vector2, facing: float, color: Color = Color("ffd23f"), heavy: b
 		})
 
 ## A flat echo of the knight in the pose it held, left behind while dashing.
+## No pose, no echo.
 func afterimage(pos: Vector2, facing: float, color: Color = Color("e8e0d0"), pose: Dictionary = {}) -> void:
-	if reduced_motion:
+	if reduced_motion or pose.is_empty():
 		return
 	var effect_color := _accessible_color(color)
 	effect_color.a = minf(effect_color.a, 0.38 if not reduced_flash else 0.16)
@@ -560,29 +552,7 @@ func _draw() -> void:
 					draw_polyline(outline, c, 1.5, true)
 					draw_set_transform(Vector2.ZERO, 0.0, Vector2.ONE)
 			"afterimage":
-				var facing := float(p.get("facing", 1.0))
-				var ghost_pose: Dictionary = p.get("pose", {})
-				if not ghost_pose.is_empty():
-					KnightArt.paint(self, pos, ghost_pose, facing, {"flat": c})
-					continue
-				# Echo the actual compact coat, scarf and crown, never a collision box.
-				var coat := PackedVector2Array([
-					pos + Vector2(-12.5, -15.0), pos + Vector2(11.0, -17.0),
-					pos + Vector2(13.5, 13.0), pos + Vector2(0.0, 19.0), pos + Vector2(-14.5, 11.0),
-				])
-				draw_colored_polygon(coat, c)
-				draw_colored_polygon(PackedVector2Array([
-					pos + Vector2(-facing * 7.0, -16.0), pos + Vector2(-facing * 34.0, -4.0), pos + Vector2(-facing * 12.0, 13.0),
-				]), Color(c, c.a * 0.6))
-				draw_circle(pos + Vector2(0.0, -28.0), 10.0, c)
-				for j in range(3):
-					var x := -6.0 + float(j) * 6.0
-					draw_colored_polygon(PackedVector2Array([
-						pos + Vector2(x - 4.0, -34.0), pos + Vector2(x, -47.0), pos + Vector2(x + 4.0, -33.0),
-					]), c)
-				draw_rect(Rect2(pos + Vector2(-13.0 - facing * 4.0, -27.0), Vector2(6.0, 32.0)), c)
-			"dust":
-				draw_circle(pos, maxf(0.8, size * a), c)
+				KnightArt.paint(self, pos, p.pose, float(p.facing), {"flat": c})
 			"number":
 				var font := ThemeDB.fallback_font
 				var txt := str(p.get("text", ""))
@@ -655,6 +625,3 @@ func set_reduced_flash(v: bool) -> void:
 	queue_redraw()
 	if _glow != null:
 		_glow.queue_redraw()
-
-func randf_range(lo: float, hi: float) -> float:
-	return lo + randf() * (hi - lo)
