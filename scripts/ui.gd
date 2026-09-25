@@ -117,6 +117,8 @@ var _boss_value_label: Label
 var _flask_container: HBoxContainer
 var _flask_dots: Array = []
 var _flask_count_label: Label
+## Charges and belt size last shown, kept so the key prompt can be repainted.
+var _flask_shown := Vector2i(Content.FLASK_MAX, Content.FLASK_MAX)
 var _cells_label: Label
 var _best_label: Label
 
@@ -135,6 +137,8 @@ var _boss_intro: Dictionary = {}
 ## One-time contextual lesson, shown low and out of the play space.
 var _hint_panel: Control
 var _hint_label: Label
+## The lesson as written, with {action} tokens, so a device switch can re-fill it.
+var _hint_template := ""
 var _hint_tween: Tween
 var _boss_phase_tag: Label
 var _boss_phase_tween: Tween
@@ -200,6 +204,7 @@ func _ready() -> void:
 	_build_forge()
 	_build_options()
 	_build_keys()
+	_refresh_prompts()
 
 	hide_all_panels()
 	show_panel("title")
@@ -371,7 +376,7 @@ func _build_player_status() -> void:
 	_flask_container.add_theme_constant_override("separation", 5)
 	_flask_container.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	supplies.add_child(_flask_container)
-	_flask_count_label = _make_label("3 / 3  [F]", 10, C_MINT, HORIZONTAL_ALIGNMENT_RIGHT)
+	_flask_count_label = _make_label("", 10, C_MINT, HORIZONTAL_ALIGNMENT_RIGHT)
 	_flask_count_label.size_flags_horizontal = Control.SIZE_SHRINK_END
 	supplies.add_child(_flask_count_label)
 	_rebuild_flask_dots(Content.FLASK_MAX)
@@ -640,6 +645,50 @@ static func _binding_text(action: String) -> Dictionary:
 	return { "key": " / ".join(keys), "pad": " / ".join(pads) }
 
 
+## The device the player last touched, "key" (keyboard or mouse) or "pad".
+## Every prompt names that device's binding.
+static var last_device := "key"
+
+
+## Key cap for `action` on the device last used, such as "[F]" or "[X]", so a
+## prompt names the key the player actually presses, even after a rebind.
+static func prompt(action: String) -> String:
+	var text := _binding_text(action)
+	var names := str(text[last_device])
+	if names.is_empty():
+		names = str(text["pad" if last_device == "key" else "key"])
+	return "[%s]" % names.get_slice(" / ", 0).to_upper()
+
+
+## Fill each {action} token in `template` with that action's live prompt.
+static func fill_prompts(template: String) -> String:
+	var caps := {}
+	for row in Content.CONTROLS_ROWS:
+		caps[str(row.action)] = prompt(str(row.action))
+	return template.format(caps)
+
+
+## Follow the player between keyboard and pad; the prompts on screen follow.
+func _track_device(event: InputEvent) -> void:
+	var device := last_device
+	if (event is InputEventJoypadButton and event.is_pressed()) or (event is InputEventJoypadMotion and absf((event as InputEventJoypadMotion).axis_value) > 0.5):
+		device = "pad"
+	elif (event is InputEventKey and event.is_pressed()) or event is InputEventMouseButton:
+		device = "key"
+	if device != last_device:
+		last_device = device
+		_refresh_prompts()
+
+
+## Repaint every visible key prompt after a device switch or a rebind.
+func _refresh_prompts() -> void:
+	_paint_flask_label()
+	_paint_reward_footer()
+	(_panels["pause"].get_meta("footer_label") as Label).text = "%s  resume" % prompt("pause")
+	if _hint_panel.visible:
+		_hint_label.text = fill_prompts(_hint_template)
+
+
 ## Repaint the controls card from the live input map. Called whenever a binding
 ## changes, so the reference screen is never stale.
 func sync_controls() -> void:
@@ -697,6 +746,7 @@ static func _boon_index_for_key(keycode: int) -> int:
 ## Runs before GUI navigation, so a pending rebind can take the arrow keys and
 ## Enter, and so a navigation press is known before focus moves.
 func _input(event: InputEvent) -> void:
+	_track_device(event)
 	if not _listening_action.is_empty():
 		if event is InputEventKey and event.pressed and not event.is_echo():
 			_capture_rebind(_event_keycode(event as InputEventKey))
@@ -853,7 +903,9 @@ func _build_pause() -> void:
 	options.add_child(_make_label("SOUND", 12, C_EMBER_HI, HORIZONTAL_ALIGNMENT_LEFT))
 	_option_check(options, "music_on", "Music", "Procedural ambient score and boss theme.")
 
-	content.add_child(_make_label("ESC  resume", 12, C_MUTED))
+	var footer := _make_label("", 12, C_MUTED)
+	content.add_child(footer)
+	panel.set_meta("footer_label", footer)
 
 
 func _build_reward() -> void:
@@ -1134,10 +1186,12 @@ func _build_keys() -> void:
 	panel.set_meta("back_button", back)
 
 
-## Rebuild the rebinding rows against the live input map.
+## Rebuild the rebinding rows, and every prompt that names a key, against the
+## live input map.
 func sync_keys() -> void:
 	if _key_rows == null:
 		return
+	_refresh_prompts()
 	_cancel_rebind()
 	var kept := _focused_name_in(_key_rows)
 	_clear_children(_key_rows)
@@ -1793,11 +1847,13 @@ func _lift_input_lock() -> void:
 
 
 ## Show a one-time lesson. Re-showing replaces the current one rather than
-## stacking, so two triggers in the same second cannot queue up noise.
+## stacking, so two triggers in the same second cannot queue up noise. The
+## lesson's {action} tokens become the player's live keys.
 func show_hint(text: String, hold: float = 4.5) -> void:
 	if _hint_panel == null:
 		return
-	_hint_label.text = text
+	_hint_template = text
+	_hint_label.text = fill_prompts(text)
 	_hint_tween = _flash_card(_hint_panel, _hint_tween, 0.25, hold, 0.5)
 
 
@@ -2026,16 +2082,26 @@ func setup_upgrades(upgrades: Array) -> void:
 		button.pressed.connect(upgrade_selected.emit.bind(i))
 		_upgrade_row.add_child(button)
 		buttons.append(button)
-	var panel: Control = _panels["reward"]
-	panel.set_meta("buttons", buttons)
-	var keys: Array = range(1, count + 1).map(func(n: int): return str(n))
-	(panel.get_meta("footer_label") as Label).text = "%s  or  click to take a boon" % " · ".join(keys)
+	(_panels["reward"] as Control).set_meta("buttons", buttons)
+	_paint_reward_footer()
 	_deal_cards(buttons)
 	# The cards arm once the deal has landed, so a jump pressed on the way
 	# through the rift cannot take a boon unread.
 	var deal := 0.35 if Feedback.motion_reduced else 0.36 + 0.08 * float(count - 1)
 	if not buttons.is_empty():
 		_arm_buttons(buttons, deal, buttons[0])
+
+
+## Keyboard players pick a card by its number or a click; a pad player
+## confirms the focused card.
+func _paint_reward_footer() -> void:
+	var panel: Control = _panels["reward"]
+	var text := "%s  to take the chosen boon" % prompt("ui_accept")
+	if last_device == "key":
+		var count: int = (panel.get_meta("buttons", []) as Array).size()
+		var keys: Array = range(1, count + 1).map(func(n: int): return str(n))
+		text = "%s  or  click to take a boon" % " · ".join(keys)
+	(panel.get_meta("footer_label") as Label).text = text
 
 
 func set_flask(charges: int, max_charges: int) -> void:
@@ -2045,7 +2111,12 @@ func set_flask(charges: int, max_charges: int) -> void:
 		_rebuild_flask_dots(safe_max)
 	for i in range(_flask_dots.size()):
 		_style_flask_dot(_flask_dots[i] as PanelContainer, i < safe_charges)
-	_flask_count_label.text = "%d / %d  [F]" % [safe_charges, safe_max]
+	_flask_shown = Vector2i(safe_charges, safe_max)
+	_paint_flask_label()
+
+
+func _paint_flask_label() -> void:
+	_flask_count_label.text = "%d / %d  %s" % [_flask_shown.x, _flask_shown.y, prompt("heal")]
 
 
 func set_cells(value: int) -> void:

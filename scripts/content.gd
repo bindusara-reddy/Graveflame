@@ -534,6 +534,7 @@ static func room_name(template: Dictionary) -> String:
 const CONTROLS_ROWS := [
 	{ "label": "MOVE LEFT",  "action": "move_left" },
 	{ "label": "MOVE RIGHT", "action": "move_right" },
+	{ "label": "DROP / SLAM", "action": "move_down" },
 	{ "label": "JUMP",       "action": "jump" },
 	{ "label": "BLADE",      "action": "attack" },
 	{ "label": "DASH",       "action": "dash" },
@@ -545,18 +546,19 @@ const CONTROLS_ROWS := [
 	{ "label": "PAUSE",      "action": "pause" },
 ]
 ## Composites that are not actions of their own, shown as a hint under the table.
-const CONTROLS_HINTS := "AIR SLAM:  DOWN + BLADE      ·      GAMEPAD IS ALWAYS LIVE"
+const CONTROLS_HINTS := "AIR SLAM:  DROP + BLADE IN THE AIR      ·      GAMEPAD IS ALWAYS LIVE"
 
 # --- First-run teaching ---
 ## One-time contextual lessons. Each is shown the first time the situation that
 ## makes the mechanic useful actually arises, so the player learns by playing
 ## rather than by reading a bindings list and guessing what matters.
+## {action} tokens become the player's live key or pad button (UI.fill_prompts).
 const HINTS := {
-	"parry": "S — PARRY.  Time it against a winding strike to deflect it.",
-	"riposte": "Deflected!  A counter is banked — press J to riposte.",
-	"slam": "DOWN + J in the air — down-slam onto a crowd.",
-	"wall_jump": "Against a wall, jump again to kick away.",
-	"flask": "F — FLASK.  One charge returns with every chamber cleared.",
+	"parry": "{parry} — PARRY.  Time it against a winding strike to deflect it.",
+	"riposte": "Deflected!  A counter is banked — press {attack} to riposte.",
+	"slam": "{move_down} + {attack} in the air — down-slam onto a crowd.",
+	"wall_jump": "Against a wall, press {jump} again to kick away.",
+	"flask": "{heal} — FLASK.  One charge returns with every chamber cleared.",
 	# Each archetype, named the first time the descent shows it (DEBUTS).
 	"debut_hopper": "HOPPER.  It leaps at you from afar: step back, then cut it as it lands.",
 	"debut_wisp": "WISP.  It shoots from above: parry the bolt back, or climb to reach it.",

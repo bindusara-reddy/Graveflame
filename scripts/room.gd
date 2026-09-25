@@ -714,7 +714,7 @@ func _draw_rift(c: Vector2, kind: String, m: Dictionary, near: bool, salt: int) 
 		BoonArt.draw(self, str(style.sigil), mc, 12.0, ec)
 		if near:
 			var font := ThemeDB.fallback_font
-			var label := "[E]  " + str(style.label)
+			var label := UI.prompt("interact") + "  " + str(style.label)
 			var w := font.get_string_size(label, HORIZONTAL_ALIGNMENT_LEFT, -1, 22).x
 			draw_string_outline(font, mc + Vector2(-w * 0.5, -30.0), label, HORIZONTAL_ALIGNMENT_LEFT, -1, 22, 5, Color("100c1b"))
 			draw_string(font, mc + Vector2(-w * 0.5, -30.0), label, HORIZONTAL_ALIGNMENT_LEFT, -1, 22, ec)

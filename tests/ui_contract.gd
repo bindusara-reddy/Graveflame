@@ -34,7 +34,32 @@ func run() -> void:
 	await _test_rebind_capture()
 	await _test_reward_cards()
 	await _test_gameover_arming()
+	await _test_prompts()
 	await finish("UI_CONTRACT")
+
+
+func _stick(axis: JoyAxis, value: float) -> void:
+	for axis_value in [value, 0.0]:
+		var event := InputEventJoypadMotion.new()
+		event.axis = axis
+		event.axis_value = axis_value
+		Input.parse_input_event(event)
+		await ticks(2)
+
+
+## Prompts name the live binding on the device last touched.
+func _test_prompts() -> void:
+	game.ui.binding_changed.emit("heal", KEY_H)
+	await ticks(2)
+	var flask: Label = game.ui._flask_count_label
+	check(flask.text.ends_with("[H]"), "the flask counter follows a rebind (got %s)" % flask.text)
+	await _stick(JOY_AXIS_RIGHT_Y, 0.9)
+	var pad_cap := str(UI._binding_text("heal")["pad"]).get_slice(" / ", 0)
+	check(flask.text.ends_with("[%s]" % pad_cap), "touching the pad switches prompts to pad buttons (got %s)" % flask.text)
+	var pause_footer: Label = _panel("pause").get_meta("footer_label")
+	check(pause_footer.text.begins_with("[START]"), "the pause footer names the pad's pause button (got %s)" % pause_footer.text)
+	await tap_key(KEY_SHIFT)
+	check(flask.text.ends_with("[H]"), "a keypress switches prompts back to keys")
 
 
 func _wait_real(seconds: float) -> void:

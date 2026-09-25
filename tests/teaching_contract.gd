@@ -30,7 +30,8 @@ func run() -> void:
 	await ticks(3)
 	check(Save.has_learned("parry"), "a close windup teaches parry")
 	check(game.ui._hint_panel.visible, "the lesson is actually shown")
-	check(game.ui._hint_label.text == str(Content.HINTS["parry"]), "the lesson shows its own text")
+	check(game.ui._hint_label.text == UI.fill_prompts(Content.HINTS["parry"]), "the lesson shows its own text")
+	check(game.ui._hint_label.text.begins_with(UI.prompt("parry")), "the lesson names the live parry key (got %s)" % game.ui._hint_label.text)
 
 	# ...and never again.
 	game._hint_cooldown = 0.0
