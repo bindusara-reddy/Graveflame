@@ -1,6 +1,7 @@
 extends "res://tests/harness.gd"
 ## The Warden's fight contract: poise and hyper-armour, the throne entrance,
-## the deeper moveset and the Last Ember. Real Boss nodes on a bare floor.
+## the deeper moveset, the Last Ember, and its shots and waves. Real Boss
+## nodes on a bare floor.
 
 var _floor: StaticBody2D
 
@@ -16,6 +17,7 @@ func run() -> void:
 	await _test_throne()
 	await _test_moveset()
 	await _test_phases()
+	await _test_shots()
 	_floor.queue_free()
 	await finish("WARDEN")
 
@@ -181,3 +183,52 @@ func _test_phases() -> void:
 	check(boss._timing(0.55, 0.4) < hot_lunge, "the Last Ember fights faster")
 	boss.queue_free()
 	await process_frame
+
+
+## Fans never bury a shot short of the knight yet still reach it; slam waves
+## run along the floor with a high pair above a standing knight's head.
+func _test_shots() -> void:
+	var knight := _knight(0.0)
+	root.add_child(knight)
+	var boss := await _fighting_warden()
+	boss.phase = Boss.BPhase.TWO
+	var shots: Array = []
+	boss.projectile_requested.connect(func(_team, pos, vel, _dmg, _kb, _pierce, _life, color): shots.append([pos, vel, color]))
+	var buried := 0
+	var reached := 0
+	for dx: float in [100.0, 260.0, 600.0, -260.0]:
+		knight.position.x = boss.global_position.x + dx
+		shots.clear()
+		boss._do_fan()
+		var hits := false
+		for shot in shots:
+			var pos: Vector2 = shot[0]
+			var vel: Vector2 = shot[1]
+			var y_at_knight := pos.y + vel.y * absf(dx) / absf(vel.x)
+			buried += 1 if y_at_knight > Content.FLOOR_Y else 0
+			hits = hits or (y_at_knight > Content.FLOOR_Y - Content.P_BODY_H - 9.0 and y_at_knight <= Content.FLOOR_Y)
+		reached += 1 if hits else 0
+	check(buried == 0 and reached == 4, "no fan shot buries itself short of the knight, and one still reaches a grounded knight")
+	check(shots[0][2] == Boss.SHOT_COLOR, "the Warden's shots burn ember-bright")
+	var waves: Array = []
+	boss.wave_requested.connect(func(pos, _vel, _dmg, _life): waves.append(pos))
+	shots.clear()
+	boss._emit_slam_waves()
+	check(waves.size() == 2 and is_equal_approx(waves[0].y, Content.FLOOR_Y - Boss.WAVE_LOW), "the slam's shockwaves run along the floor")
+	check(shots.size() == 2 and shots[0][0].y + 9.0 < Content.FLOOR_Y - Content.P_BODY_H, "the ignited high pair flies over a standing knight's head")
+	var wave := Projectile.new()
+	wave.style = "wave"
+	wave.setup("enemy", waves[0], Vector2(-266.0, 0.0), 10.0, 120.0, 0, 1.0, Boss.SHOT_COLOR)
+	root.add_child(wave)
+	await ticks(3)
+	check(wave.rotation == 0.0 and wave.get_node_or_null("Trail") == null, "a slam wave runs upright, without a comet trail")
+	var shoulder: Vector2 = boss.visual_pose().shoulder
+	var within := true
+	for staged: Dictionary in [Boss.WardenArt.SEATED, Boss.WardenArt.KNEEL, Boss.WardenArt.ROAR, Boss.WardenArt.SLUMP]:
+		within = within and staged.hand.distance_to(staged.elbow) <= 85.0 and staged.elbow.distance_to(shoulder) <= 85.0 and absf(staged.lean) <= 0.35
+	check(within, "every staged pose keeps boss_art_contract's arm and lean limits")
+	wave.queue_free()
+	boss.queue_free()
+	knight.queue_free()
+	await process_frame
+

@@ -963,6 +963,7 @@ func _advance_room() -> void:
 	room.lesson_requested.connect(_teach)
 	room.prop_shattered.connect(feedback.shatter)
 	room.boss_shattered.connect(_on_boss_shattered)
+	room.boss_wave_requested.connect(_spawn_boss_wave)
 	Enemy.pyre_damage = float(run.build.get("pyre_dmg", 0.0))
 	world.add_child(room)
 	# position player at entry
@@ -1195,6 +1196,13 @@ func _voice_enemy_shot(pos: Vector2) -> void:
 	var falloff := clampf(1.0 - player.global_position.distance_to(pos) / TELEGRAPH_RANGE, 0.06, 1.0)
 	feedback.play("spit", 1.0, linear_to_db(falloff))
 
+## The Warden's slam shockwave: a hostile shot drawn as a fire ridge on the floor.
+func _spawn_boss_wave(pos: Vector2, vel: Vector2, dmg: float, life: float) -> void:
+	var wave := Projectile.new()
+	wave.style = "wave"
+	wave.setup("enemy", pos, vel, dmg, 120.0, 0, life, Boss.SHOT_COLOR)
+	projectiles.add_child(wave)
+
 ## Flask charges a cleared chamber returns (none under the Vow of Thirst).
 func _flask_per_room() -> int:
 	return 0 if Enemy.vows.has("v_thirst") else Content.FLASK_PER_ROOM
@@ -1422,6 +1430,8 @@ func _on_last_ember() -> void:
 	ui.flash_boss_phase("THE LAST EMBER")
 	music.set_intensity(1.0)
 	feedback.play("last_ember")
+	feedback.play("roar", 0.8)
+	feedback.shake(14.0, 0.5)
 	feedback.hit_stop(0.1)
 	if is_instance_valid(room) and room.boss != null:
 		feedback.blast(room.boss.global_position, 260.0)

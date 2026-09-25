@@ -21,6 +21,7 @@ signal telegraphed(kind: String, pos: Vector2, elite: bool)
 signal enemy_spawned(pos: Vector2, color: Color)
 signal prop_shattered(pos: Vector2, force: Vector2, color: Color)
 signal boss_shattered(pos: Vector2)
+signal boss_wave_requested(pos: Vector2, vel: Vector2, dmg: float, life: float)
 ## A creature's named or voiced beat (see Enemy.announced).
 signal enemy_announced(text: String, cue: String, pos: Vector2)
 ## A first-time lesson worth showing now: a HINTS id the game teaches once.
@@ -312,6 +313,7 @@ func _spawn_boss() -> void:
 	boss.set("trial", trial)
 	add_child(boss)
 	_relay(boss)
+	boss.wave_requested.connect(boss_wave_requested.emit)
 	boss.phase_changed.connect(boss_phase_changed.emit)
 	boss.summon_requested.connect(_on_boss_summon)
 	boss.shattered.connect(boss_shattered.emit)

@@ -12,6 +12,10 @@ var pierce := 0
 var life := 2.0
 var radius := 9.0
 var color := Color("7fd4ff")
+## "" is a shot. "wave" is the Warden's slam shockwave, a fire ridge running
+## along the floor: it stays upright and leaves no comet trail. Set before
+## the projectile enters the tree.
+var style := ""
 var _hit: Dictionary = {}
 var _shape: CollisionShape2D
 var _age := 0.0
@@ -49,6 +53,8 @@ func _update_layers() -> void:
 func _ready() -> void:
 	# Build collision shape
 	_shape = CollisionShape2D.new()
+	if style == "wave":
+		radius = 12.0  # as tall as its flames, down to the floor
 	var circ := CircleShape2D.new()
 	circ.radius = radius
 	_shape.shape = circ
@@ -57,7 +63,8 @@ func _ready() -> void:
 	# Parry areas need to be able to detect the projectile itself.
 	monitorable = true
 	_update_layers()
-	_build_trail()
+	if style == "":
+		_build_trail()
 	material = VFX.unshaded_material()
 
 ## Comet ribbon: world-space points appended every physics tick and aged out.
@@ -104,7 +111,8 @@ func _step_trail() -> void:
 func _physics_process(delta: float) -> void:
 	_age += delta
 	global_position += vel * delta
-	rotation = vel.angle()
+	if style == "":
+		rotation = vel.angle()
 	_step_trail()
 	queue_redraw()
 	life -= delta
@@ -163,6 +171,9 @@ func _die() -> void:
 	queue_free()
 
 func _draw() -> void:
+	if style == "wave":
+		_draw_wave()
+		return
 	var pulse := 0.85 + sin(_age * 22.0) * 0.15
 	var glow := Color(color.r, color.g, color.b, 0.16)
 	draw_circle(Vector2.ZERO, radius * 2.2 * pulse, glow)
@@ -174,3 +185,16 @@ func _draw() -> void:
 	]), color)
 	draw_circle(Vector2(radius * 0.2, 0.0), radius * 0.42, color.lightened(0.45))
 	draw_circle(Vector2(radius * 0.35, -1.0), 2.0, Color.WHITE)
+
+## The slam wave: three flame tongues over a scorch on the floor, leaning back
+## from the way the wave runs.
+func _draw_wave() -> void:
+	var t := 0.0 if Feedback.motion_reduced else _age
+	var ground := Vector2(0.0, Content.FLOOR_Y - global_position.y)
+	VFX.draw_ellipse(self, ground, 28.0, 8.0, Color(color, 0.18))
+	VFX.draw_ellipse(self, ground, 18.0, 4.0, Color(VFX.JOINT, 0.6))
+	draw_set_transform_matrix(Transform2D(0.0, Vector2.ONE, -signf(vel.x) * 0.35, ground))
+	for i in range(3):
+		var side := float(i) - 1.0
+		VFX.draw_flame(self, Vector2(side * 9.0, 0.0), 30.0 - absf(side) * 8.0, 12.0, t, float(i) * 2.1, color, VFX.HOT)
+	draw_set_transform_matrix(Transform2D.IDENTITY)

@@ -14,6 +14,9 @@ signal phase_changed(phase: int)
 signal summon_requested(kind: int, pos: Vector2)
 ## The felled Warden breaking apart, a beat after the killing blow.
 signal shattered(pos: Vector2)
+## A slam shockwave running along the floor from pos: the game spawns it as a
+## Projectile drawn as a fire ridge (style "wave").
+signal wave_requested(pos: Vector2, vel: Vector2, dmg: float, life: float)
 
 enum BPhase { INTRO, ONE, TWO, THREE }
 enum Action { LUNGE, FAN, SLAM, CHARGE }
@@ -53,6 +56,19 @@ const LINK_WINDUP := 0.55
 ## baited near a wall crashes into it and reels for WALL_STUN seconds.
 const CHARGE_OVERRUN := 260.0
 const WALL_STUN := 1.4
+## The Warden's shots burn ember-bright: its fire is the brightest thing in a
+## red room, never a wine-dark dart lost against it.
+const SHOT_COLOR := Color("ff9a3c")
+## A fan never buries a shot in the floor short of the knight: it is lifted until
+## its lowest shot would meet the floor SKIM_PAST px beyond the knight's feet,
+## SKIM_HEIGHT px up, so that shot skims the floor through the knight.
+const SKIM_PAST := 160.0
+const SKIM_HEIGHT := 12.0
+## Slam shockwaves: a fire ridge this high along the floor, to be jumped, and
+## once ignited a slower pair at WAVE_HIGH, over a standing knight's head, that
+## catches a jump timed too early or too late.
+const WAVE_LOW := 14.0
+const WAVE_HIGH := 84.0
 
 # --- Phase beats ---
 ## Health fraction where the Last Ember begins.
@@ -498,18 +514,26 @@ func _do_charge() -> void:
 	_arm(Content.BOSS_W * 0.5 + 24.0)
 	velocity = Vector2(_charge_dir * Content.BOSS_CHARGE_SPEED, 0.0)
 
+## A fan of shots centred on the knight, lifted where needed so its lowest
+## shot skims the floor instead of burying itself short of the knight.
 func _do_fan() -> void:
 	var n: int = [3, 3, 5, 7][phase]
 	var spread := 1.1 if phase == BPhase.THREE else 0.9
+	var origin := global_position + Vector2(0.0, -20.0)
+	# Angles here are tilts below the horizontal on the side the shots fly to.
+	var side := facing
+	var tilt := 0.0
 	var player = _get_player()
-	var base_dir := Vector2(facing, 0.0)
 	if player != null:
-		base_dir = (player.global_position - global_position).normalized()
-	var base_ang := base_dir.angle()
+		var to_knight: Vector2 = player.global_position - origin
+		side = signf(to_knight.x) if absf(to_knight.x) > 1.0 else facing
+		tilt = atan2(to_knight.y, absf(to_knight.x))
+		var skim := atan2(Content.FLOOR_Y - SKIM_HEIGHT - origin.y, absf(to_knight.x) + SKIM_PAST)
+		tilt = minf(tilt, skim - spread * 0.5)
 	for i in range(n):
-		var a := base_ang + lerpf(-spread * 0.5, spread * 0.5, float(i) / maxf(1.0, float(n - 1)))
-		var v := Vector2(cos(a), sin(a)) * Content.BOSS_SHOT_SPEED
-		emit_signal("projectile_requested", "enemy", global_position + Vector2(0.0, -20.0), v, Content.BOSS_SHOT_DAMAGE * Enemy.vow_damage(), 180.0, 0, 2.6, Content.BOSS_COLOR)
+		var a := tilt + lerpf(-spread * 0.5, spread * 0.5, float(i) / maxf(1.0, float(n - 1)))
+		var v := Vector2(side * cos(a), sin(a)) * Content.BOSS_SHOT_SPEED
+		projectile_requested.emit("enemy", origin, v, Content.BOSS_SHOT_DAMAGE * Enemy.vow_damage(), 180.0, 0, 2.6, SHOT_COLOR)
 	_finish_move(_timing(0.85, 0.6))
 
 func _do_slam() -> void:
@@ -520,18 +544,18 @@ func _do_slam() -> void:
 	velocity = Vector2(0.0, 900.0)
 	_slam_wave_emitted = false
 
+## Shockwaves run out both ways when the slam meets the floor, not at the top
+## of the leap: a fire ridge along the floor, once ignited a slower high pair
+## above it, and in the Last Ember fire left burning either side.
 func _emit_slam_waves() -> void:
-	# Shockwaves happen on contact with the floor, not at the top of the leap.
 	var speed := Content.BOSS_SHOT_SPEED * 0.7
 	var damage := Content.BOSS_SHOT_DAMAGE * 0.8 * Enemy.vow_damage()
 	for side: float in [-1.0, 1.0]:
-		projectile_requested.emit("enemy", global_position + Vector2(side * 30.0, 0.0), Vector2(side * speed, 0.0), damage, 120.0, 0, 1.4, Content.BOSS_COLOR)
-	if phase >= BPhase.TWO:
-		# Phase 2 adds a slower, higher pair so a single jump no longer clears everything.
-		for side: float in [-1.0, 1.0]:
-			projectile_requested.emit("enemy", global_position + Vector2(side * 30.0, -70.0), Vector2(side * speed * 0.55, 0.0), damage, 120.0, 0, 1.6, Content.BOSS_COLOR)
-	if phase == BPhase.THREE:
-		for side: float in [-1.0, 1.0]:
+		var x := global_position.x + side * 40.0
+		wave_requested.emit(Vector2(x, Content.FLOOR_Y - WAVE_LOW), Vector2(side * speed, 0.0), damage, 1.4)
+		if phase >= BPhase.TWO:
+			projectile_requested.emit("enemy", Vector2(x, Content.FLOOR_Y - WAVE_HIGH), Vector2(side * speed * 0.55, 0.0), damage, 120.0, 0, 1.6, SHOT_COLOR)
+		if phase == BPhase.THREE:
 			_kindle(global_position.x + side * 60.0)
 	emit_signal("exploded", global_position + Vector2(0.0, Content.BOSS_H * 0.45), 120.0, 0.0)
 
@@ -548,8 +572,11 @@ func _boss_recover(delta: float) -> void:
 func take_damage(amount: float, from_dir: Vector2, _kb: float, poise_dmg := 1.0) -> void:
 	if dead: return
 	var at := global_position + Vector2(0.0, -Content.BOSS_H * 0.5)
-	if _beat == Beat.EMBER:
-		# The Last Ember, kneeling and rising, turns every blow.
+	# The Last Ember, kneeling and rising, turns every blow. Enemy's
+	# last_hit_blocked (set by name, as Enemy owns it) tells the blade it glanced.
+	var turned := _beat == Beat.EMBER
+	set("last_hit_blocked", turned)
+	if turned:
 		emit_signal("damaged", 0.0, at, true)
 		return
 	if is_broken():
