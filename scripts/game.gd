@@ -43,6 +43,9 @@ var _hint_cooldown := 0.0
 ## to the save file, and file I/O must never sit inside a physics callback where
 ## it can hitch a frame and shift combat timing.
 var _queued_lesson := ""
+## Lessons already taught on this save, read once per run so per-frame checks
+## never touch the save file.
+var _learned_lessons: Array = []
 # Run statistics shown on the end screens.
 var _stats: Dictionary = {}
 var _vignette_rect: ColorRect
@@ -365,12 +368,13 @@ func _reset_camera() -> void:
 ## player cannot discover parry timing or the riposte follow-up from a bindings
 ## list, so these are taught where they matter.
 func _teach(id: String) -> void:
-	if _hint_cooldown > 0.0 or Save.has_learned(id):
+	if _hint_cooldown > 0.0 or _learned_lessons.has(id):
 		return
 	var text: String = Content.HINTS.get(id, "")
 	if text.is_empty():
 		return
 	Save.mark_learned(id)
+	_learned_lessons.append(id)
 	ui.show_hint(text)
 	_hint_cooldown = 6.0
 
@@ -832,6 +836,7 @@ func _begin_run() -> void:
 	score = 0
 	_run_cells = 0
 	_reset_stats()
+	_learned_lessons = Save.get_learned_hints()
 	_seed = randi()
 	run = RunModel.new(_seed)
 	_stats.rooms_total = run.rooms_total()
