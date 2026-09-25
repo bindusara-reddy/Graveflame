@@ -529,8 +529,6 @@ func _paint_backdrop(ci: CanvasItem) -> void:
 	# Sky: void above, crypt navy through the arches, warm at the floor line.
 	VFX.draw_vgradient(ci, Rect2(left, top, span, (horizon - top) * 0.6), m.bg_top, m.bg_mid)
 	VFX.draw_vgradient(ci, Rect2(left, top + (horizon - top) * 0.6, span, (horizon - top) * 0.4), m.bg_mid, m.bg_bot)
-	_draw_stars(ci, horizon)
-	_draw_moon(ci, horizon)
 	# Under-floor pit: the floor line falls away into absolute void.
 	VFX.draw_vgradient(ci, Rect2(left, horizon, span, 320.0), m.bg_bot, m.pit)
 	ci.draw_rect(Rect2(left, horizon + 320.0, span, 520.0), m.pit)
@@ -541,13 +539,19 @@ func _paint_backdrop(ci: CanvasItem) -> void:
 	if seep > 0.0:
 		# Magma light seeping up from the depths as the keep warms.
 		VFX.draw_vgradient(ci, Rect2(left, horizon + 120.0, span, 420.0), Color(ember, 0.0), Color(ember, 0.2 * seep))
+	# From here each plane lifts itself for vertical parallax (see _lift).
+	_draw_stars(ci, horizon)
+	_draw_moon(ci, horizon)
 	# Distant furnace bloom low on the horizon, behind the spires.
+	_lift(ci, 0.1)
 	var bloom := Vector2(_plane_x(0.1, 184.0), horizon - 60.0)
 	for i in range(4, 0, -1):
 		ci.draw_circle(bloom, 90.0 + float(i) * 72.0, Color(ember, (0.016 + float(5 - i) * 0.012) * (1.0 + seep)))
 	# The middle planes are the zone's own architecture; the sky, undercroft and
-	# fog are shared. The throne's apse stands in for all of them.
+	# fog are shared. The throne's apse stands in for all of them, unlifted: the
+	# throne room has no climbing, so its apse never needs vertical parallax.
 	if _in_throne_room():
+		ci.draw_set_transform(Vector2.ZERO)
 		_paint_throne_apse(ci, horizon)
 	else:
 		match zone:
@@ -567,6 +571,7 @@ func _paint_backdrop(ci: CanvasItem) -> void:
 		_draw_buttresses(ci, horizon)
 		_draw_rubble(ci, horizon)
 	_draw_undercroft(ci, horizon)
+	ci.draw_set_transform(Vector2.ZERO)
 	_draw_fog(ci, horizon)
 
 ## The backdrop's per-bay dice. Salted per chamber, so every chamber deals its
@@ -581,6 +586,20 @@ func _plane_range(depth: float, period: float, margin: float) -> Vector2i:
 
 func _plane_x(depth: float, layer_x: float) -> float:
 	return layer_x + _view_center.x * (1.0 - depth)
+
+## The camera's height standing on the floor, where every plane was composed.
+const REST_Y := Content.FLOOR_Y - 140.0
+
+## Vertical parallax: how far a plane at `depth` rides up with the camera as it
+## climbs above its floor rest, so far planes lag the platforms instead of the
+## moon sinking behind them. Halved so every plane's base stays under the deck
+## for as long as the deck is on screen.
+func _plane_dy(depth: float) -> float:
+	return (_view_center.y - REST_Y) * (1.0 - depth) * 0.5
+
+## Offset the canvas for a plane at `depth`; the painter resets it before the fog.
+func _lift(ci: CanvasItem, depth: float) -> void:
+	ci.draw_set_transform(Vector2(0.0, _plane_dy(depth)))
 
 ## How strongly the farthest plane is pulled toward the mood's atmosphere.
 const DEPTH_HAZE := 0.6
@@ -610,7 +629,7 @@ func torch_positions() -> PackedVector2Array:
 	else:
 		var r := _plane_range(0.65, 320.0, 160.0)
 		for k in range(r.x, r.y + 1):
-			out.append(Vector2(_plane_x(0.65, float(k) * 320.0), TORCH_Y - 12.0))
+			out.append(Vector2(_plane_x(0.65, float(k) * 320.0), TORCH_Y - 12.0 + _plane_dy(0.65)))
 	_torch_cache = out
 	_torch_frame = frame
 	return out
@@ -620,6 +639,7 @@ func _draw_stars(ci: CanvasItem, horizon: float) -> void:
 	if vis <= 0.01:
 		return
 	var depth := 0.04
+	_lift(ci, depth)
 	var period := 90.0
 	var r := _plane_range(depth, period, 60.0)
 	var moving := not Feedback.motion_reduced
@@ -640,6 +660,7 @@ func _draw_moon(ci: CanvasItem, horizon: float) -> void:
 	var a := float(mood.moon_alpha)
 	if a <= 0.01:
 		return
+	_lift(ci, 0.06)
 	var c := Vector2(_plane_x(0.06, 195.0), horizon - 362.0)
 	for i in range(5, 0, -1):
 		ci.draw_circle(c, 64.0 + float(i) * 30.0, Color(col, 0.016 * a * float(6 - i)))
@@ -671,6 +692,7 @@ func _draw_shaft(ci: CanvasItem, x: float, w: float, top: float, bottom: float, 
 
 func _draw_spires(ci: CanvasItem, horizon: float) -> void:
 	var depth := 0.15
+	_lift(ci, depth)
 	var period := 150.0
 	var col: Color = _haze(mood.spire, depth)
 	# Fenestration is emissive, but a light this far back is seen through air:
@@ -710,6 +732,7 @@ func _draw_spires(ci: CanvasItem, horizon: float) -> void:
 
 func _draw_arches(ci: CanvasItem, horizon: float) -> void:
 	var depth := 0.35
+	_lift(ci, depth)
 	var period := 200.0
 	var wall: Color = _haze(mood.wall, depth)
 	var edge: Color = _haze(mood.edge, depth)
@@ -791,6 +814,7 @@ func _draw_spandrel(ci: CanvasItem, cx: float, arch_top: float, wall: Color, edg
 ## The stumps of its pillars still stand proud of the wall.
 func _draw_curtain_wall(ci: CanvasItem, horizon: float) -> void:
 	var depth := 0.35
+	_lift(ci, depth)
 	var period := 200.0
 	var wall: Color = _haze(mood.wall, depth)
 	var edge: Color = _haze(mood.edge, depth)
@@ -817,6 +841,7 @@ func _draw_curtain_wall(ci: CanvasItem, horizon: float) -> void:
 ## the foundry reads as its own skyline rather than the crypt recoloured.
 func _draw_stacks(ci: CanvasItem, horizon: float) -> void:
 	var depth := 0.15
+	_lift(ci, depth)
 	var period := 150.0
 	var col: Color = _haze(mood.spire, depth)
 	var mouth: Color = _haze(mood.torch, depth)
@@ -854,6 +879,7 @@ func _draw_stacks(ci: CanvasItem, horizon: float) -> void:
 ## ports glow in some bays and a crucible hangs on a chain in every third.
 func _draw_trusses(ci: CanvasItem, horizon: float) -> void:
 	var depth := 0.35
+	_lift(ci, depth)
 	var period := 240.0
 	var wall: Color = _haze(mood.wall, depth)
 	var iron: Color = _haze((mood.edge as Color).darkened(0.35), depth)
@@ -902,6 +928,7 @@ func _draw_trusses(ci: CanvasItem, horizon: float) -> void:
 ## crags. The ashpit lies under the keep, so stone closes its sky.
 func _draw_crags(ci: CanvasItem, horizon: float) -> void:
 	var depth := 0.15
+	_lift(ci, depth)
 	var period := 150.0
 	var col: Color = _haze(mood.spire, depth)
 	var lit := col.lightened(0.08)
@@ -938,6 +965,7 @@ func _draw_crags(ci: CanvasItem, horizon: float) -> void:
 ## spill from the broken end of each surviving stretch of entablature.
 func _draw_ruin_arches(ci: CanvasItem, horizon: float) -> void:
 	var depth := 0.35
+	_lift(ci, depth)
 	var period := 200.0
 	var wall: Color = _haze(mood.wall, depth)
 	var edge: Color = _haze(mood.edge, depth)
@@ -978,6 +1006,7 @@ func _draw_light_shafts(ci: CanvasItem, top: float, horizon: float) -> void:
 	var col: Color = mood.moon
 	var strength := 0.03 * (0.5 + 0.5 * float(mood.stars)) + 0.025 * float(mood.ember_seep)
 	var depth := 0.3
+	_lift(ci, depth)
 	var period := 420.0
 	var r := _plane_range(depth, period, 260.0)
 	var moving := not Feedback.motion_reduced
@@ -995,6 +1024,7 @@ func _draw_light_shafts(ci: CanvasItem, top: float, horizon: float) -> void:
 
 func _draw_buttresses(ci: CanvasItem, horizon: float) -> void:
 	var depth := 0.65
+	_lift(ci, depth)
 	var period := 320.0
 	var stone: Color = _haze(mood.stone, depth)
 	var frame := Color(VFX.MORTAR, 0.55)
@@ -1044,6 +1074,7 @@ func _draw_buttresses(ci: CanvasItem, horizon: float) -> void:
 ## with bones scattered through it.
 func _draw_rubble(ci: CanvasItem, horizon: float) -> void:
 	var depth := 0.85
+	_lift(ci, depth)
 	var ashpit := zone == "ashpit"
 	var period := 130.0 if ashpit else 260.0
 	var r := _plane_range(depth, period, 120.0)
@@ -1054,11 +1085,11 @@ func _draw_rubble(ci: CanvasItem, horizon: float) -> void:
 		var x := _plane_x(depth, float(k) * period + _plane_hash(k, 82) * 160.0)
 		var w := 40.0 + _plane_hash(k, 83) * 70.0
 		var h := 14.0 + _plane_hash(k, 84) * 26.0
-		var pts := PackedVector2Array([Vector2(x - w * 0.5, horizon)])
+		var pts := PackedVector2Array([Vector2(x - w * 0.5, horizon + 40.0)])
 		for i in range(1, 6):
 			var u := float(i) / 6.0
 			pts.append(Vector2(x - w * 0.5 + u * w, horizon - h * (0.5 + 0.5 * sin(u * PI)) * (0.7 + _plane_hash(k + i, 85) * 0.5)))
-		pts.append(Vector2(x + w * 0.5, horizon))
+		pts.append(Vector2(x + w * 0.5, horizon + 40.0))
 		ci.draw_colored_polygon(pts, stone.darkened(0.35))
 		ci.draw_polyline(pts, Color(VFX.RIM, 0.2), 1.0)
 		var bone := Color("8f877a")
@@ -1076,6 +1107,7 @@ func _draw_rubble(ci: CanvasItem, horizon: float) -> void:
 ## A drowned lower colonnade under the floor line, fading into the pit.
 func _draw_undercroft(ci: CanvasItem, horizon: float) -> void:
 	var depth := 0.5
+	_lift(ci, depth)
 	var period := 260.0
 	var r := _plane_range(depth, period, 160.0)
 	var wall: Color = _haze(mood.wall, depth)
