@@ -950,6 +950,8 @@ func _advance_room() -> void:
 	# The page burns open from where the knight arrives.
 	var arrive := (entry - feedback.camera.global_position) * feedback.camera.zoom + Vector2(Content.VIEW_W, Content.VIEW_H) * 0.5
 	ui.fade_from_black(0.45, arrive / Vector2(Content.VIEW_W, Content.VIEW_H))
+	# The rift that swallowed the last chamber sets the knight down in this one.
+	feedback.play("rift", 0.8, -6.0)
 	if not is_boss:
 		ui.show_room_intro(run.room_index, run.rooms_total(), Content.room_name(tmpl), room.trial)
 	else:
