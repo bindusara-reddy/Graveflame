@@ -27,6 +27,7 @@ func run() -> void:
 	await test_soft_separation()
 	await test_dash_strike()
 	await test_rising_cut_and_hover()
+	await test_flourishes()
 	release(["attack", "parry", "move_left", "jump"])
 	Feedback.motion_reduced = false
 	await finish("COMBAT_PRESENCE")
@@ -430,6 +431,36 @@ func test_rising_cut_and_hover() -> void:
 	check(p.velocity.y < 0.0, "a blade that connects in the air holds the knight up")
 	level.queue_free()
 	await ticks(60)
+
+## Dashing through a live blow is a ghost step that pays meter, and a kill by
+## riposte announces itself; each names itself over the knight.
+func test_flourishes() -> void:
+	var p := game.player
+	p.respawn_at(Vector2(480.0, Content.FLOOR_Y - Content.P_BODY_H * 0.5))
+	p.facing = 1.0
+	await ticks(80)
+	var kinds := []
+	var probe := func(kind, _pos): kinds.append(kind)
+	p.action_feedback.connect(probe)
+	var swinger := dummy_ahead(60.0)
+	swinger.cd = 99.0
+	swinger._arm(20.0)
+	var meter := p.special
+	await hold_action("dash")
+	await ticks(8)
+	check("ghost_step" in kinds and p.special >= meter + Player.GHOST_STEP_METER - 0.01, "dashing through a live blow is a ghost step that pays meter")
+	check(p._flourish_t > 0.0 and p._flourish_name == "GHOST STEP", "a flourish names itself over the knight")
+	swinger.queue_free()
+	await ticks(60)
+	p.facing = 1.0
+	await deflect()
+	var doomed := dummy_ahead(78.0)
+	doomed.hp = 1.0
+	await hold_action("attack")
+	await ticks_until(func(): return "riposte_kill" in kinds, 20)
+	check("riposte_kill" in kinds, "a kill by riposte announces itself")
+	p.action_feedback.disconnect(probe)
+	await ticks(40)
 
 func test_breakable_crypt() -> void:
 	var props := game.room.props

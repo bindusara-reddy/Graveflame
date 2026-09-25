@@ -77,6 +77,16 @@ const PARRY_WHIFF_LAG := 0.10
 const PRESS_BUFFER := { "parry": 0.10, "special": 0.12, "heal": 0.10, "ignite": 0.12 }
 ## The last stretch of a dash (seconds) that can flow straight into a parry or swing.
 const DASH_CANCEL_TAIL := 0.05
+## Style flourishes: a move made with skill announces itself through
+## action_feedback (so the streak can count it) and flashes its name over the
+## knight for FLOURISH_TIME. A ghost step (a dash slipping through a live
+## blow) also pays GHOST_STEP_METER and slows the world for a breath.
+const FLOURISHES := {
+	"riposte_kill": "RIPOSTE KILL", "aerial_kill": "AERIAL KILL",
+	"multi_slam": "CRATER", "ghost_step": "GHOST STEP",
+}
+const FLOURISH_TIME := 0.6
+const GHOST_STEP_METER := 10.0
 ## Soft separation: how fast (px/s) the knight is eased out of a grounded foe
 ## it overlaps, and how far around the knight to look for one.
 const SEPARATION_SPEED := 240.0
@@ -123,6 +133,11 @@ var _since_dash := INF
 var _opener := ""
 ## Air hover swings spent since the knight last stood on the ground.
 var _air_hits := 0
+## This dash has already slipped through a blow (one ghost step per dash).
+var _ghosted := false
+## The flourish named over the knight and how long it still shows (visual only).
+var _flourish_name := ""
+var _flourish_t := 0.0
 var _dash_echo_pos := Vector2.ZERO
 var iframes := 0.0
 var _hurt_started_airborne := false
@@ -326,6 +341,7 @@ func _step_animation(delta: float) -> void:
 	_cast_t = maxf(0.0, _cast_t - delta)
 	_ignite_t = maxf(0.0, _ignite_t - delta)
 	_turn_t = maxf(0.0, _turn_t - delta)
+	_flourish_t = maxf(0.0, _flourish_t - delta)
 	if _flip_t > 0.0:
 		_flip_t = maxf(0.0, _flip_t - delta)
 		if is_on_floor() or state != State.LOCOMOTION or wall_sliding:
@@ -649,15 +665,16 @@ func _activate_hitbox(def: Dictionary) -> void:
 		var wave_pos := global_position + Vector2(facing * 34.0, -8.0)
 		var wave_life := 0.32 if _flame_time > 0.0 else 0.26
 		emit_signal("projectile_requested", "player", wave_pos, Vector2(facing * 560.0, 0.0), 18.0 * _damage_mul(), 320.0, 2, wave_life, Content.PAL.player_accent)
-	_scan_attack_hits(def, _blade_touching())
+	_scan_attack_hits(def, _areas_under(_atk_rect, _atk_shape.global_transform, _attack_area.collision_mask))
 
-## Hurtboxes under the blade right now. The sensor's own overlap list fills
-## only on the next physics step, which would cost the swing its first frame.
-func _blade_touching() -> Array:
+## Areas on `mask` inside `shape` placed at `xform`, right now. A sensor's own
+## overlap list fills only on the next physics step, which would cost a swing
+## its first frame.
+func _areas_under(shape: Shape2D, xform: Transform2D, mask: int) -> Array:
 	var query := PhysicsShapeQueryParameters2D.new()
-	query.shape = _atk_rect
-	query.transform = _atk_shape.global_transform
-	query.collision_mask = _attack_area.collision_mask
+	query.shape = shape
+	query.transform = xform
+	query.collision_mask = mask
 	query.collide_with_areas = true
 	query.collide_with_bodies = false
 	return get_world_2d().direct_space_state.intersect_shape(query).map(func(hit): return hit.collider)
@@ -704,9 +721,17 @@ func _scan_attack_hits(def: Dictionary, areas: Array) -> void:
 			_feel_blow(tgt, contact, blow, finisher)
 			if atk_hit.size() == 1:
 				_answer_first_contact(finisher)
+			if tgt.get("dead") == true and (_riposte_attack or not is_on_floor()):
+				_flourish("riposte_kill" if _riposte_attack else "aerial_kill")
 			_gain_special(Content.P_SPECIAL_GAIN * float(build.get("special_mul", 1.0)))
 			if float(build.get("lifesteal", 0.0)) > 0.0:
 				_heal(float(build.lifesteal))
+
+## Announce the flourish `kind` (a FLOURISHES key) and name it over the knight.
+func _flourish(kind: String) -> void:
+	_flourish_name = FLOURISHES[kind]
+	_flourish_t = FLOURISH_TIME
+	emit_signal("action_feedback", kind, global_position)
 
 ## The knight's body answers a swing's first contact: a heavy blow on the
 ## ground rocks it back, and in the air the first AIR_HOVER_HITS connecting
@@ -819,6 +844,8 @@ func _do_slam_impact() -> void:
 			VFX.jolt(tgt, stop)
 		if feedback != null:
 			feedback.hit_stop(stop)
+		if struck.size() >= 3:
+			_flourish("multi_slam")
 	_draw_slam_impact = 0.3
 	emit_signal("slam_landed", center, radius)
 	if bool(build.get("skyfall", false)):
@@ -877,11 +904,14 @@ func _begin_dash() -> void:
 	_dash_echo_pos = global_position
 	velocity = Vector2(dir * Content.P_DASH_SPEED, 0.0)
 	wall_sliding = false
+	_ghosted = false
 	emit_signal("action_feedback", "dash", global_position)
 
 func _step_dash(delta: float) -> void:
 	dash_time -= delta
 	velocity.y = 0.0
+	if not _ghosted and _brushing_a_blow():
+		_ghost_step()
 	if _cancel_dash():
 		return
 	if dash_time <= 0.0:
@@ -894,6 +924,23 @@ func _step_dash(delta: float) -> void:
 		emit_signal("action_feedback", "dash_trail", global_position)
 		if bool(build.get("cinder_trail", false)) and is_on_floor():
 			emit_signal("action_feedback", "cinder", global_position + Vector2(0.0, Content.P_BODY_H * 0.5))
+
+## True when the dashing knight is slipping through a live enemy swing.
+func _brushing_a_blow() -> bool:
+	var body: Shape2D = (_hurtbox.get_child(0) as CollisionShape2D).shape
+	for area in _areas_under(body, _hurtbox.global_transform, Content.L_ENEMY_ATK):
+		if area.get_meta("team", "") == "enemy" and bool(area.get_meta("attack_active", false)):
+			return true
+	return false
+
+## Slipping through a blow mid-dash is a flourish: the flame pays out and the
+## world slows for a breath.
+func _ghost_step() -> void:
+	_ghosted = true
+	_gain_special(GHOST_STEP_METER)
+	_flourish("ghost_step")
+	if feedback != null:
+		feedback.slow_motion(0.5, 0.2)
 
 ## A blade press cuts a dash short into a dash strike (or a slam, Down held
 ## in the air); in the dash's tail a buffered parry flows out of it too.
@@ -1314,6 +1361,13 @@ func _draw() -> void:
 		draw_string_outline(ThemeDB.fallback_font, Vector2(-31.0, -72.0), word, HORIZONTAL_ALIGNMENT_LEFT, -1, 12, 3, Color("100c1b"))
 		draw_string(ThemeDB.fallback_font, Vector2(-31.0, -72.0), word, HORIZONTAL_ALIGNMENT_LEFT, -1, 12, cue)
 		draw_line(Vector2(-25.0, -65.0), Vector2(-25.0 + 50.0 * riposte_time / Content.RIPOSTE_WINDOW, -65.0), cue, 2.0, true)
+	if _flourish_t > 0.0:
+		# A flourish names itself above any riposte cue, fading in its last 0.2 s.
+		var fade := clampf(_flourish_t / 0.2, 0.0, 1.0)
+		var font := ThemeDB.fallback_font
+		var at := Vector2(-font.get_string_size(_flourish_name, HORIZONTAL_ALIGNMENT_LEFT, -1, 12).x * 0.5, -86.0)
+		draw_string_outline(font, at, _flourish_name, HORIZONTAL_ALIGNMENT_LEFT, -1, 12, 3, Color(Color("100c1b"), fade))
+		draw_string(font, at, _flourish_name, HORIZONTAL_ALIGNMENT_LEFT, -1, 12, Color(VFX.GOLD, fade * (0.65 if Feedback.flash_reduced else 0.95)))
 	# slam impact ring
 	if _draw_slam_impact > 0.0:
 		var rad: float = Content.P_SLAM_RADIUS + float(build.get("slam_radius_bonus", 0.0))
