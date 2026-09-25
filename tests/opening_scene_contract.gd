@@ -147,7 +147,7 @@ func run() -> void:
 		check(game.state == Game.GState.TITLE and tableau.is_visible_in_tree(), "return %d: title shows the tableau again" % i)
 		ui.forge_requested.emit()
 		await ticks(2)
-		check(not tableau.is_visible_in_tree(), "return %d: forge hides the tableau" % i)
+		check(tableau.is_visible_in_tree() and not ui._title_holder.visible, "return %d: the forge lies on the tableau, the title menu hidden" % i)
 		ui.back_from_forge_requested.emit()
 		await ticks(2)
 	check(_count(title) == count_before, "repeated title return leaks no nodes (%d -> %d)" % [count_before, _count(title)])
