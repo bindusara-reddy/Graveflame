@@ -9,7 +9,7 @@ extends RefCounted
 
 const RATE := 22050
 ## Bump whenever a cue's design changes, so cached renders are rebuilt.
-const VERSION := 2
+const VERSION := 3
 const CACHE_DIR := "user://audio_cache"
 
 # --- Buffers and primitives ------------------------------------------------------
@@ -138,6 +138,10 @@ const LEVELS := {
 	"victory": 0.6, "defeat": 0.65,
 	"tell_stalker": 0.42, "tell_hopper": 0.36, "tell_wisp": 0.36, "tell_brute": 0.55,
 	"tell_bomber": 0.45, "tell_crow": 0.42, "tell_lunge": 0.55, "tell_fan": 0.5, "tell_slam": 0.58, "tell_charge": 0.6,
+	"tell_sexton": 0.5, "sexton_wave": 0.55, "roar": 0.8, "last_ember": 0.75, "ring_out": 0.45,
+	"clang": 0.55, "whiff": 0.3, "perfect_parry": 0.75, "spit": 0.35, "bolt_hit": 0.45, "uncork": 0.35,
+	"heartbeat": 0.55, "card_deal": 0.26, "grave_light": 0.4,
+	"fold": 0.4, "grave_bell": 0.5, "kindle": 0.7, "burn": 0.55, "curtain": 0.5, "snuff": 0.3, "footlight": 0.25,
 }
 
 ## Number of distinct takes per cue. Repeated cues rotate takes so a flurry of
@@ -276,11 +280,11 @@ static func build_pcm(name: String, take: int = 0) -> PackedByteArray:
 			add_tone(b, 0.0, 0.25, 520.0, 1450.0, 0.12, 0.6, 0.004, 0.06, 0.4)
 			add_noise(b, 0.0, 0.25, 900.0, 4200.0, 1.8, 0.8, 0.01, 0.06, 1, sd, 150.0)
 		"heal":
-			# A sip and a glassy rising shimmer.
+			# A sip and a glassy rising shimmer on F major, the key's warm relative.
 			b = buf(0.7)
 			add_noise(b, 0.0, 0.12, 600.0, 900.0, 2.0, 0.4, 0.01, 0.04, 1, sd)
 			for k in range(4):
-				add_metal(b, 0.08 + float(k) * 0.07, 0.5, [659.25, 783.99, 987.77, 1318.5][k], 0.35, 0.25, [1.0, 2.0, 3.01], 0.35)
+				add_metal(b, 0.08 + float(k) * 0.07, 0.5, [698.46, 880.0, 1046.5, 1396.91][k], 0.35, 0.25, [1.0, 2.0, 3.01], 0.35)
 		"die", "boom":
 			# Explosions and heavy deaths: a deep boom with crackling debris.
 			b = buf(0.8)
@@ -293,8 +297,9 @@ static func build_pcm(name: String, take: int = 0) -> PackedByteArray:
 			add_metal(b, 0.0, 0.5, 1046.5, 0.6, 0.18, [1.0, 2.0, 3.01], 0.35)
 			add_metal(b, 0.07, 0.43, 1568.0, 0.5, 0.2, [1.0, 2.0, 3.01], 0.35)
 		"streak":
+			# On D6, so the rising tiers climb the home triad.
 			b = buf(0.4)
-			add_metal(b, 0.0, 0.4, 1318.5, 0.5, 0.14, [1.0, 2.0, 2.76], 0.4)
+			add_metal(b, 0.0, 0.4, 1174.66, 0.5, 0.14, [1.0, 2.0, 2.76], 0.4)
 			add_noise(b, 0.0, 0.1, 3000.0, 5000.0, 1.0, 0.2, 0.004, 0.02, 2, sd)
 		"elite":
 			# A gong for the gilded: low bronze with a slow bloom.
@@ -414,6 +419,134 @@ static func build_pcm(name: String, take: int = 0) -> PackedByteArray:
 			b = buf(0.65)
 			add_tone(b, 0.0, 0.6, 65.0, 160.0, 0.55, 1.0, 0.3, 0.12, 1.0)
 			add_noise(b, 0.0, 0.6, 180.0, 700.0, 1.2, 0.8, 0.3, 0.12, 0, sd, 14.0)
+		"tell_sexton":
+			# The hand-bell raised: two quick strikes on A and a sleeve's rustle.
+			b = buf(1.2)
+			for k in range(2):
+				add_click(b, float(k) * 0.16, 0.4, sd + k, 3500.0)
+				add_metal(b, float(k) * 0.16, 1.0, 440.0, 0.8 - 0.25 * float(k), 0.5, [1.0, 2.76, 5.4], 0.6)
+			add_noise(b, 0.0, 0.4, 600.0, 1400.0, 2.0, 0.3, 0.15, 0.1, 1, sd + 5, 60.0)
+		"sexton_wave":
+			# The ring sent along the floor: a bronze boom rolling out over rubble.
+			b = buf(1.1)
+			add_click(b, 0.0, 0.7, sd, 2200.0)
+			add_metal(b, 0.0, 1.1, 220.0, 0.6, 0.45, [1.0, 2.76, 5.4], 0.55)
+			add_tone(b, 0.0, 0.6, 85.0, 50.0, 0.4, 0.8, 0.003, 0.18)
+			add_noise(b, 0.0, 1.0, 600.0, 150.0, 0.9, 0.9, 0.01, 0.3, 0, sd + 1, 45.0)
+		"roar":
+			# Two throats beating against each other, falling, over crackling fire.
+			b = buf(1.3)
+			add_tone(b, 0.0, 1.2, 90.0, 60.0, 1.0, 1.0, 0.12, 0.45, 0.9)
+			add_tone(b, 0.0, 1.2, 93.0, 58.0, 1.0, 0.6, 0.15, 0.45, 0.9)
+			add_noise(b, 0.0, 1.2, 500.0, 900.0, 1.6, 0.8, 0.15, 0.4, 1, sd, 35.0)
+			add_noise(b, 0.05, 1.0, 2500.0, 1500.0, 1.2, 0.3, 0.2, 0.3, 1, sd + 1, 110.0)
+		"last_ember":
+			# The crown gutters to a choke, then catches again hotter, over a low D toll.
+			b = buf(1.8)
+			add_noise(b, 0.0, 0.5, 2400.0, 400.0, 1.0, 0.7, 0.01, 0.2, 0, sd, 25.0)
+			add_noise(b, 0.5, 1.2, 200.0, 3200.0, 0.9, 1.0, 0.55, 0.3, 0, sd + 1, 60.0)
+			add_metal(b, 0.0, 1.8, 146.83, 0.6, 0.8, [1.0, 1.52, 2.44, 2.76], 0.7)
+			add_tone(b, 0.5, 1.2, 55.0, 110.0, 0.8, 0.6, 0.4, 0.35, 0.6)
+		"ring_out":
+			# A cut-out falling away into the pit: a sinking flutter, a far-off thud.
+			b = buf(0.9)
+			add_tone(b, 0.0, 0.7, 900.0, 180.0, 0.65, 0.4, 0.02, 0.35, 0.3)
+			add_noise(b, 0.0, 0.7, 2400.0, 700.0, 1.6, 0.6, 0.03, 0.3, 1, sd, 40.0)
+			add_tone(b, 0.62, 0.25, 80.0, 45.0, 0.12, 0.5, 0.003, 0.07)
+		"clang":
+			# A blade turned by a shield: steel on steel, no flesh in it.
+			b = buf(0.5)
+			add_click(b, 0.0, 1.0, sd, 6000.0)
+			add_metal(b, 0.0, 0.5, 740.0, 0.9, 0.22, [1.0, 2.76, 5.4], 0.6)
+			add_noise(b, 0.0, 0.06, 3500.0, 2000.0, 1.2, 0.4, 0.001, 0.015, 1, sd + 1)
+		"whiff":
+			# The guard closes on nothing: a thin swish and a hollow tick.
+			b = buf(0.18)
+			add_noise(b, 0.0, 0.16, 1800.0, 900.0, 2.0, 0.8, 0.01, 0.04, 1, sd)
+			add_tone(b, 0.0, 0.08, 330.0, 250.0, 0.06, 0.3, 0.002, 0.02)
+		"perfect_parry":
+			# A razor-timed deflect: the parry's steel, a bright D-major ring above
+			# it, and a spray of sparks.
+			b = buf(1.0)
+			add_click(b, 0.0, 1.0, sd, 7000.0)
+			add_metal(b, 0.0, 0.8, 880.0, 0.6, 0.28, [1.0, 2.76, 5.40], 0.6)
+			add_metal(b, 0.0, 1.0, 1174.66, 0.8, 0.4, [1.0, 2.0, 3.01, 4.2], 0.5)
+			add_metal(b, 0.03, 0.97, 1760.0, 0.5, 0.35, [1.0, 2.0, 3.01], 0.45)
+			add_noise(b, 0.0, 0.3, 6000.0, 8000.0, 1.0, 0.25, 0.002, 0.12, 2, sd + 1, 300.0)
+		"spit":
+			# An enemy shot loosed: a hissing spit of fire with a short throat.
+			b = buf(0.2)
+			add_noise(b, 0.0, 0.18, 800.0, 3000.0, 1.2, 0.8, 0.005, 0.05, 1, sd, 120.0)
+			add_tone(b, 0.0, 0.15, 300.0, 180.0, 0.1, 0.4, 0.003, 0.04, 0.5)
+		"bolt_hit":
+			# A thrown bolt striking home: a hard tick, a small ring, torn paper.
+			b = buf(0.26)
+			add_click(b, 0.0, 0.8, sd, 5500.0)
+			add_metal(b, 0.0, 0.25, 1760.0, 0.3, 0.06, [1.0, 2.76], 0.5)
+			add_noise(b, 0.0, 0.1, 3000.0, 1500.0, 1.4, 0.5, 0.001, 0.03, 1, sd + 1, 200.0)
+		"uncork":
+			# The flask: a cork's squeak and pop, then the glug of a first swallow.
+			b = buf(0.32)
+			add_noise(b, 0.0, 0.05, 1800.0, 900.0, 2.0, 0.8, 0.001, 0.012, 1, sd)
+			add_tone(b, 0.06, 0.25, 180.0, 320.0, 0.2, 0.35, 0.02, 0.06)
+		"heartbeat":
+			# Lub-dub, low and close: the flame's own pulse when it gutters.
+			b = buf(0.4)
+			add_tone(b, 0.0, 0.2, 68.0, 42.0, 0.08, 1.0, 0.004, 0.07)
+			add_noise(b, 0.0, 0.12, 220.0, 120.0, 0.8, 0.4, 0.004, 0.04, 0, sd)
+			add_tone(b, 0.17, 0.2, 60.0, 38.0, 0.08, 0.75, 0.004, 0.06)
+		"card_deal":
+			# A card flicked onto the table: a papery slap and a soft landing.
+			b = buf(0.1)
+			add_noise(b, 0.0, 0.09, 2200.0, 4200.0, 1.1, 0.8, 0.004, 0.025, 1, sd, 260.0)
+			add_tone(b, 0.0, 0.06, 240.0, 160.0, 0.05, 0.25, 0.002, 0.02)
+		"grave_light":
+			# A candle lit in a grave niche: the strike, the wick taking, a small bell.
+			b = buf(1.6)
+			add_noise(b, 0.0, 0.12, 2500.0, 4200.0, 1.2, 0.7, 0.002, 0.04, 1, sd, 200.0)
+			add_noise(b, 0.05, 0.6, 300.0, 1400.0, 0.9, 0.5, 0.1, 0.2, 0, sd + 1, 50.0)
+			add_metal(b, 0.08, 1.5, 880.0, 0.5, 0.6, [1.0, 2.0, 3.01], 0.35)
+		"fold":
+			# A paper knight folding up out of the floor: a crease's crackle, a thump,
+			# and a plucked D5 that the finale pitches into a melody.
+			b = buf(0.9)
+			add_noise(b, 0.0, 0.05, 1800.0, 900.0, 1.2, 0.8, 0.001, 0.02, 1, sd, 60.0)
+			add_tone(b, 0.0, 0.1, 90.0, 70.0, 0.06, 0.6, 0.002, 0.03)
+			add_tone(b, 0.0, 0.9, 587.33, 587.33, 0.01, 0.7, 0.003, 0.35, 0.5)
+		"grave_bell":
+			# The gathered notes of the title's question: a D5 bell over a soft D4.
+			b = buf(2.4)
+			add_click(b, 0.0, 0.25, sd, 4000.0)
+			add_metal(b, 0.0, 2.4, 587.33, 1.0, 1.6, [1.0, 2.0, 3.01, 4.2], 0.35)
+			add_tone(b, 0.0, 2.4, 293.66, 293.66, 0.01, 0.15, 0.004, 2.0)
+		"kindle":
+			# The fallen lending their fire: a rising rush of flame with paper
+			# catching in it, then a ping.
+			b = buf(1.6)
+			add_noise(b, 0.0, 0.9, 300.0, 5000.0, 0.9, 1.0, 0.75, 0.12, 0, sd)
+			add_noise(b, 0.1, 0.8, 2500.0, 4500.0, 1.2, 0.25, 0.6, 0.12, 1, sd + 1, 90.0)
+			add_metal(b, 0.85, 0.75, 880.0, 0.6, 0.3, [1.0, 2.0, 3.01], 0.4)
+		"burn":
+			# The keep burning off its frame: paper crackle over a low rumble.
+			b = buf(2.8)
+			add_noise(b, 0.0, 2.8, 900.0, 2200.0, 1.0, 1.0, 0.4, 1.0, 1, sd, 30.0)
+			add_noise(b, 0.1, 2.6, 3000.0, 4500.0, 1.2, 0.3, 0.3, 0.9, 1, sd + 1, 120.0)
+			add_tone(b, 0.0, 2.8, 120.0, 90.0, 2.0, 0.5, 0.3, 1.0)
+		"curtain":
+			# The main drop: a long cloth swish and the hem landing on the boards.
+			b = buf(1.8)
+			add_noise(b, 0.0, 1.5, 400.0, 1600.0, 1.4, 1.0, 1.0, 0.3, 1, sd)
+			add_click(b, 1.35, 0.3, sd + 1, 1500.0)
+			add_tone(b, 1.35, 0.4, 70.0, 45.0, 0.2, 0.9, 0.003, 0.12)
+		"snuff":
+			# A footlight pinched out.
+			b = buf(0.14)
+			add_noise(b, 0.0, 0.12, 5000.0, 900.0, 0.8, 1.0, 0.004, 0.04, 2, sd)
+		"footlight":
+			# A footlight catching: a tiny flare and the tick of its tin reflector.
+			b = buf(0.18)
+			add_noise(b, 0.0, 0.15, 1500.0, 3500.0, 1.0, 0.8, 0.01, 0.05, 1, sd, 150.0)
+			add_metal(b, 0.0, 0.1, 1200.0, 0.5, 0.02, [1.0, 2.76], 0.4)
 		_:
 			b = buf(0.1)
 			add_click(b, 0.0, 0.5, sd)
