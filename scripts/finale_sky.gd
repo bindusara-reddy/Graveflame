@@ -115,6 +115,24 @@ void fragment() {
 }
 """
 
+## VFX's radial glow, breathing: the fallen's stars twinkle on the GPU, so the
+## sky never repaints for it. Each glow's UVs are offset by a whole number,
+## its seed, which sets its own beat. `still` (reduced motion) holds them steady.
+const TWINKLE := """
+shader_type canvas_item;
+render_mode blend_add, unshaded;
+
+uniform float still = 0.0;
+
+void fragment() {
+	float d = distance(fract(UV), vec2(0.5)) * 2.0;
+	float glow = 1.0 - smoothstep(0.0, 1.0, d);
+	float seed = floor(UV.x);
+	float beat = mix(0.7 + 0.3 * sin(TIME * (1.1 + fract(seed * 0.37)) + seed * 2.3), 1.0, still);
+	COLOR = vec4(COLOR.rgb, COLOR.a * glow * glow * beat);
+}
+"""
+
 # --- The well, in world units -----------------------------------------------------
 ## The shaft's axis is the throne's, so the knight stands under the mouth.
 const CX := 640.0
@@ -245,7 +263,10 @@ func _init() -> void:
 		_stars.append(painter(self, _draw_stars.bind(b)))
 	_halo = painter(self, _draw_halo)
 	_moon = painter(self, _draw_moon)
-	_new_glow = painter(self, _draw_new_glow, VFX.radial_material())
+	var twinkle := ShaderMaterial.new()
+	twinkle.shader = Shader.new()
+	twinkle.shader.code = TWINKLE
+	_new_glow = painter(self, _draw_new_glow, twinkle)
 	_new_body = painter(self, _draw_new_stars)
 	_well = painter(self, _draw_well)
 	_embers = painter(self, _draw_embers)
@@ -411,6 +432,7 @@ func _light() -> void:
 	_halo.modulate.a = moon * 0.5 * moon_glow * (1.0 - 0.7 * dawn)
 	for piece: Node2D in [_new_body, _new_glow]:
 		piece.modulate.a = out
+	(_new_glow.material as ShaderMaterial).set_shader_parameter("still", 1.0 if Feedback.motion_reduced else 0.0)
 	var lit := DARK.lerp(Color.WHITE, night).lerp(DAWN_TINT, dawn * (1.0 - night))
 	_well.modulate = Color(lit, 1.0)
 	_embers.modulate.a = minf(1.0, reveal * 4.0) * out
@@ -904,7 +926,7 @@ func _draw_new_glow(ci: CanvasItem) -> void:
 	for s in _new_stars:
 		var p: Vector2 = s.p
 		var age := float(s.age) / SETTLE_TIME
-		m.glow(p, 26.0, Color(VFX.GOLD, 0.3))
+		m.glow(p, 26.0, Color(VFX.GOLD, 0.34), 1 + int(s.seed))
 		if age < 1.0:
 			m.glow(p, lerpf(16.0, 90.0, age), Color(VFX.HOT, 0.6 * (1.0 - age) * k))
 	m.commit(ci)
@@ -1059,18 +1081,19 @@ class PaperMesh extends RefCounted:
 				pts.append(c + Vector2(0.0, -reach).rotated(PI * 0.25 * float(i)))
 			fill(pts, layer[2])
 
-	## A soft round light: one quad whose UVs drive the radial falloff.
-	func glow(c: Vector2, r: float, color: Color) -> void:
-		glow_ellipse(c, Vector2(r, r), color)
+	## A soft round light: one quad whose UVs drive the radial falloff. A
+	## `seed` shifts the UVs by whole units for a shader that reads it (TWINKLE).
+	func glow(c: Vector2, r: float, color: Color, seed := 0) -> void:
+		glow_ellipse(c, Vector2(r, r), color, seed)
 
-	func glow_ellipse(c: Vector2, radii: Vector2, color: Color) -> void:
+	func glow_ellipse(c: Vector2, radii: Vector2, color: Color, seed := 0) -> void:
 		if radii.x <= 0.0 or color.a <= 0.0:
 			return
 		var base := _points.size()
 		for uv: Vector2 in QUAD_UV:
 			_points.append(c + (uv * 2.0 - Vector2.ONE) * radii)
 			_colors.append(color)
-			_uvs.append(uv)
+			_uvs.append(uv + Vector2(seed, 0.0))
 		_indices.append_array(PackedInt32Array([base, base + 1, base + 2, base, base + 2, base + 3]))
 
 	## A shaft of light, soft at both sides: three columns, the outer ones on
