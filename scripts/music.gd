@@ -1,4 +1,3 @@
-class_name Music
 extends Node
 ## Procedural score. Three original pieces in D minor, written as notes and
 ## synthesized at boot from nothing but oscillators and noise:
@@ -26,7 +25,6 @@ var _players: Dictionary = {}
 var _threads: Dictionary = {}
 var _tracks_ready := false
 var _current := ""
-var _pending := ""
 var _tweens: Dictionary = {}
 var _intensity := 0.0
 
@@ -167,8 +165,6 @@ static func hz(m: float) -> float:
 	return 440.0 * pow(2.0, (m - 69.0) / 12.0)
 
 # Note names used by the score (MIDI numbers).
-const D2 := 38
-const E2 := 40
 const F2 := 41
 const G2 := 43
 const A2 := 45
@@ -179,10 +175,7 @@ const E3 := 52
 const F3 := 53
 const G3 := 55
 const A3 := 57
-const Bb3 := 58
-const C4 := 60
 const Cs4 := 61
-const D4 := 62
 const E4 := 64
 const F4 := 65
 const G4 := 67
@@ -197,7 +190,6 @@ const G5 := 79
 const A5 := 81
 const Bb5 := 82
 const Eb3 := 51
-const Eb4 := 63
 
 # --- Mixing --------------------------------------------------------------------
 
