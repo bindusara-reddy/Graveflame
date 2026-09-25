@@ -28,7 +28,6 @@ signal vow_toggled(id: String)
 
 const C_VOID := Color("09070f")
 const C_INK := Color("100d18")
-const C_SURFACE := Color("1b1624")
 const C_SURFACE_HI := Color("282033")
 const C_EDGE := Color("4b3e5b")
 const C_TEXT := Color("eee8df")
@@ -156,7 +155,6 @@ var _listening_action := ""
 var _listening_button: Button
 
 var _title_top_label: Label
-var _title_embers: CPUParticles2D
 var _title_tableau: Control
 var _title_holder: Control
 var _title_t := 0.0
@@ -566,7 +564,7 @@ func _build_title() -> void:
 	_title_controls_button.pressed.connect(_toggle_title_controls)
 	_title_quiet_button(_title_controls_button)
 	nav.add_child(_title_controls_button)
-	# Appended after CONTROLS so the existing pad focus chain is untouched.
+	# OPTIONS goes after CONTROLS so the tested BEGIN > FORGE > CONTROLS pad focus chain holds.
 	var options_button := _button("OPTIONS", "options", false, Vector2(300, 46))
 	options_button.size_flags_horizontal = Control.SIZE_SHRINK_CENTER
 	options_button.pressed.connect(func(): emit_signal("options_requested"))
@@ -674,8 +672,7 @@ func _build_title_controls_overlay(panel: Control) -> void:
 
 
 ## Godot 4 exposes no joypad-to-string API (only OS.get_keycode_string for keys),
-## so pad names are mapped explicitly. These match the vocabulary the controls
-## screen has always shown.
+## so pad names are mapped explicitly.
 static func _pad_button_name(index: int) -> String:
 	match index:
 		JOY_BUTTON_A: return "A"
@@ -878,8 +875,6 @@ func _build_reward() -> void:
 	_upgrade_row.alignment = BoxContainer.ALIGNMENT_CENTER
 	_upgrade_row.add_theme_constant_override("separation", 26)
 	content.add_child(_upgrade_row)
-	panel.set_meta("buttons", [])
-	panel.set_meta("upgrade_row", _upgrade_row)
 
 	var gap := Control.new()
 	gap.custom_minimum_size = Vector2(0, 6)
@@ -1045,7 +1040,6 @@ func _build_forge() -> void:
 	_forge_rows.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	_forge_rows.add_theme_constant_override("separation", 8)
 	scroll.add_child(_forge_rows)
-	panel.set_meta("rows", _forge_rows)
 
 	var footer := HBoxContainer.new()
 	footer.alignment = BoxContainer.ALIGNMENT_CENTER
@@ -1130,7 +1124,6 @@ func _build_options() -> void:
 	var back := _button("BACK", "options_back", false, Vector2(200, 50), "ui_back")
 	back.pressed.connect(func(): emit_signal("back_from_options_requested"))
 	footer.add_child(back)
-	panel.set_meta("back_button", back)
 
 
 ## Reflect the persisted options onto the controls without re-emitting signals,
@@ -1194,7 +1187,6 @@ func _build_keys() -> void:
 		emit_signal("back_from_keys_requested")
 	)
 	footer.add_child(back)
-	panel.set_meta("back_button", back)
 
 
 ## Rebuild the rebinding rows against the live input map.
@@ -1237,7 +1229,6 @@ func _build_title_scene(panel: Control) -> void:
 	# Original menu art: the Threshold of the Descent tableau (scripts/title_tableau.gd).
 	_title_tableau = TitleTableau.new()
 	panel.add_child(_title_tableau)
-	_title_embers = _title_tableau.get_node("Embers") as CPUParticles2D
 
 
 ## Bundled title face: Noto Serif Display Bold (SIL OFL 1.1, fonts/), loaded
@@ -1527,24 +1518,6 @@ func _separator(color: Color) -> ColorRect:
 	line.custom_minimum_size.y = 1.0
 	line.color = Color(color.r, color.g, color.b, 0.55)
 	return line
-
-
-func _add_key_card(parent: GridContainer, title: String, key: String) -> void:
-	var card := PanelContainer.new()
-	card.custom_minimum_size = Vector2(0, 54)
-	card.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	card.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	card.add_theme_stylebox_override("panel", _panel_box(C_INK, C_EDGE, 8, 1, 0))
-	parent.add_child(card)
-	var margin := _margin_container(10, 10, 5, 5)
-	margin.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	card.add_child(margin)
-	var stack := VBoxContainer.new()
-	stack.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	stack.add_theme_constant_override("separation", 0)
-	margin.add_child(stack)
-	stack.add_child(_make_label(title, 10, C_MUTED, HorizontalAlignment.HORIZONTAL_ALIGNMENT_CENTER))
-	stack.add_child(_make_label(key, 13, C_TEXT, HorizontalAlignment.HORIZONTAL_ALIGNMENT_CENTER))
 
 
 func _button(text: String, node_name: String, primary: bool, minimum: Vector2, cue_kind: String = "ui_confirm") -> Button:
@@ -2287,15 +2260,6 @@ func _card_box(background: Color, border: Color, border_width: int) -> StyleBoxF
 	box.content_margin_right = 0.0
 	box.content_margin_top = 0.0
 	box.content_margin_bottom = 0.0
-	return box
-
-
-func _upgrade_box(background: Color, border: Color, border_width: int) -> StyleBoxFlat:
-	var box := _panel_box(background, border, 12, border_width, 5)
-	box.content_margin_left = 22.0
-	box.content_margin_right = 22.0
-	box.content_margin_top = 18.0
-	box.content_margin_bottom = 18.0
 	return box
 
 
