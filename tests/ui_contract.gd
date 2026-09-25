@@ -31,6 +31,8 @@ func run() -> void:
 	await load_main_scene(6)
 	await _test_back_routing()
 	await _test_forge_focus()
+	await _test_page_turns()
+	await _test_still_pages()
 	await _test_rebind_capture()
 	await _test_rebind_conflicts()
 	await _test_reward_cards()
@@ -344,6 +346,36 @@ func _test_forge_focus() -> void:
 	await ticks(3)
 	check(focus_name() == "Vow3", "swearing a vow keeps focus on that vow (got %s)" % focus_name())
 	game.ui.back_from_forge_requested.emit()
+	await ticks(2)
+
+
+## Tabbed pages turn with PageDown (LB/RB on a pad) and bring focus onto the
+## new page; the Forms' Back prompt takes a click like Esc does.
+func _test_page_turns() -> void:
+	game.ui.options_requested.emit()
+	await ticks(3)
+	check(focus_name() == "Opt_master", "SENSES opens on its first level (got %s)" % focus_name())
+	await tap_key(KEY_PAGEDOWN)
+	check(focus_name() == "Opt_fullscreen", "PageDown turns to SIGHT and its first switch (got %s)" % focus_name())
+	await tap_key(KEY_PAGEUP)
+	game.ui.keys_requested.emit()
+	await ticks(3)
+	(_panel("keys").get_meta("back_button") as Button).pressed.emit()
+	await ticks(2)
+	check(game.ui.is_panel_visible("options"), "the Forms' Back prompt returns to SENSES")
+	game.ui.back_from_options_requested.emit()
+	await ticks(2)
+
+
+## Under reduced motion a page is simply there: it neither rises nor turns.
+func _test_still_pages() -> void:
+	game.ui._reduced_motion_check.button_pressed = true
+	game.ui.forge_requested.emit()
+	await ticks(1)
+	var frame: Control = _panel("forge").get("frame")
+	check(frame.rotation == 0.0 and is_equal_approx(frame.offset_top, (frame.get_meta("rest") as Vector2).x), "reduced motion lays the Forge down without a rise or a turn")
+	game.ui.back_from_forge_requested.emit()
+	game.ui._reduced_motion_check.button_pressed = false
 	await ticks(2)
 
 
