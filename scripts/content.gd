@@ -616,7 +616,8 @@ static func vow_score_multiplier(sworn: Array) -> float:
 
 # --- Epitaphs ---
 ## The line under the verdict. A run that ends differently reads differently;
-## the pick is seeded by the run so a replayed seed says the same thing.
+## the pick is seeded by the run so a replayed seed says the same thing. The
+## last three circle the truth the ending tells (see LITANY).
 const EPITAPHS := [
 	"Ash remembers every knight.",
 	"The keep keeps what it takes.",
@@ -626,14 +627,68 @@ const EPITAPHS := [
 	"Even embers remember the shape of the fire.",
 	"The descent is patient.",
 	"Somewhere below, the throne grows warmer.",
+	"The throne wears whoever wins it.",
+	"Every Warden was a knight once.",
+	"The dead down here still burn.",
 ]
 const EPITAPH_THRONE := "The Warden stokes its throne with your flame."
+## Picked at the killing blow, before the knight chooses what to do with the
+## throne, so each must hold true after any ending.
 const VICTORY_LINES := [
-	"The keep falls silent, but the descent is never the same twice.",
-	"The throne is cold. For now.",
+	"No throne stays empty long.",
+	"What the keep takes, it takes again.",
 	"Your flame burns where the Warden's did.",
-	"The Ember Throne answers to no one tonight.",
+	"The keep is quiet. It is listening.",
 ]
+
+# --- The story told on the way down ---
+## The keep's own voice, never a word from outside it: test_runner scans every
+## line here for attempt, run, player, game and score. The truth it circles
+## and the ending tells: a flame is lit on every knight's grave, and this
+## knight's got up; the throne at the bottom eats flames, and crowns whoever
+## beats its Warden until the winner becomes the next one.
+
+## Carved over the first chamber, read before the knight has ever fallen or won.
+const INSCRIPTION := ["They light a flame on every knight's grave.", "Yours got up."]
+## One line under each chamber's clear banner, always in order of depth, so a
+## descent that reaches the throne has heard all seven (see litany_line).
+const LITANY := [
+	"Here the keep cages the flames it takes.",
+	"A flame is lit on every knight's grave.",
+	"Some of them get up.",
+	"All of them go down.",
+	"At the bottom, a throne that eats flames.",
+	"It has a Warden. The Warden wears a crown.",
+	"You have seen that crown before.",
+]
+## After an ending (Save's last_ending) the litany knows what the knight did at
+## the bottom: these replace its lines from LITANY_TURN on.
+const LITANY_TURN := 5
+const LITANY_AFTER := {
+	"crown": ["The throne is warm. It remembers you.", "Its Warden wears your crown.", "You are going home."],
+	"given": ["The throne is warm again.", "It found another knight.", "It always does."],
+	"ended": ["The keep relit itself.", "Something sits in the dark.", "It knows your step."],
+}
+## The Warden's second-phase tag by its bar. Only a knight who has fallen
+## before has dead for it to burn; one who never has sees it simply ignite.
+const WARDEN_BURNS := "IT BURNS WITH YOUR DEAD"
+const WARDEN_IGNITES := "THE WARDEN IGNITES"
+
+## The litany's line for the `index`th chamber cleared this descent (1-based),
+## or "" past the last. `last_ending` is "", "crown", "given" or "ended".
+static func litany_line(index: int, last_ending: String) -> String:
+	if index < 1 or index > LITANY.size():
+		return ""
+	var after: Array = LITANY_AFTER.get(last_ending, [])
+	return str(after[index - LITANY_TURN]) if index >= LITANY_TURN and not after.is_empty() else str(LITANY[index - 1])
+
+static func warden_phase_tag(has_dead: bool) -> String:
+	return WARDEN_BURNS if has_dead else WARDEN_IGNITES
+
+## The death screen's count of every knight the Warden has taken, spelled out
+## to twenty like the rest of the keep's print.
+static func hoard_line(flames: int) -> String:
+	return "The Warden holds %s %s." % [number_word(flames), "flame" if flames == 1 else "flames"]
 
 # --- The finale ("The Warden's Crown") ---
 ## Every string the ending shows. Each card is one line; nothing here speaks

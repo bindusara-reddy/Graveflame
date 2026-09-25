@@ -32,6 +32,7 @@ func _run_tests() -> void:
 	_test_synergy_boons()
 	_test_moods()
 	_test_finale_text()
+	_test_story()
 
 func _test_script_loading() -> void:
 	# A script whose globals failed to resolve (e.g. because `.godot/` carries no
@@ -369,3 +370,55 @@ func _test_finale_text() -> void:
 	check(Content.finale_answer("The descent is patient.", 3, false, "crown").answer == "So is the throne.", "each ending answers in its own words")
 	check(Content.finale_answer("", 0, false, "ended").answer == Content.FINALE_TEXT.took_nothing, "a deathless knight lost nothing")
 	check(Content.finale_answer("", 0, true, "ended").answer == Content.UNANSWERED.ended, "with nothing to answer, the ending speaks for itself")
+
+
+## The story told on the way down: the litany keeps its order and its ending
+## variants, every epitaph is answered, and nothing the keep says speaks from
+## outside it (the owner's rule: never a meta word in story text).
+func _test_story() -> void:
+	var epitaphs: Array = Content.EPITAPHS + [Content.EPITAPH_THRONE]
+	for e in epitaphs:
+		var answers: Dictionary = Content.EPITAPH_ANSWERS.get(e, {})
+		check(Content.CHOICES.keys().all(func(ending): return str(answers.get(ending, "")) != ""), "epitaph '%s' has an answer for every ending" % e)
+	check(Content.LITANY.size() == Content.ROOMS_BEFORE_BOSS + 1, "one litany line per chamber before the throne")
+	check(Content.litany_line(0, "") == "" and Content.litany_line(Content.LITANY.size() + 1, "") == "", "no litany line outside the descent")
+	for i in range(1, Content.LITANY.size() + 1):
+		check(Content.litany_line(i, "") == Content.LITANY[i - 1], "litany line %d is said in order" % i)
+		check(Content.litany_line(i, "unknown") == Content.LITANY[i - 1], "an unknown ending leaves litany line %d alone" % i)
+	for ending in ["crown", "given", "ended"]:
+		var said: Array = range(1, Content.LITANY.size() + 1).map(func(i): return Content.litany_line(i, ending))
+		var turn: int = Content.LITANY_TURN - 1
+		check(said.slice(0, turn) == Content.LITANY.slice(0, turn), "the '%s' litany keeps its opening lines" % ending)
+		check(said.slice(turn) == Content.LITANY_AFTER[ending], "the '%s' litany ends in its own words" % ending)
+	check(Content.hoard_line(1) == "The Warden holds one flame.", "one flame is singular")
+	check(Content.hoard_line(12) == "The Warden holds twelve flames.", "the hoard is spelled out to twenty")
+	check(Content.hoard_line(47) == "The Warden holds 47 flames.", "a larger hoard is printed")
+	check(Content.warden_phase_tag(true) == "IT BURNS WITH YOUR DEAD" and Content.warden_phase_tag(false) == "THE WARDEN IGNITES", "the Warden burns with the knight's dead, if any")
+	var headings: Array = [Content.WARDEN_BURNS, Content.WARDEN_IGNITES]
+	for t in Content.ROOM_TEMPLATES + [Content.BOSS_TEMPLATE]:
+		headings.append(Content.room_name(t))
+	for h in headings:
+		check(str(h).length() <= 34, "heading '%s' fits 34 characters" % h)
+	var meta := RegEx.create_from_string("(?i)\\b(attempts?|runs?|players?|games?|scores?)\\b")
+	for line in _story_text():
+		check(meta.search(str(line)) == null, "story text stays in the keep: '%s'" % line)
+
+## Every line the keep speaks aloud: epitaphs and answers, the litany and its
+## endings, the inscription, the victory and finale words, and the names and
+## glosses on rooms, creatures' lessons, boons, vows and relics.
+func _story_text() -> Array:
+	var out: Array = Content.EPITAPHS + [Content.EPITAPH_THRONE]
+	for answers in Content.EPITAPH_ANSWERS.values():
+		out += (answers as Dictionary).values()
+	out += Content.INSCRIPTION + Content.LITANY + Content.VICTORY_LINES + Content.FINALE_TEXT.values()
+	for lines in Content.LITANY_AFTER.values():
+		out += lines
+	out += [Content.WARDEN_BURNS, Content.WARDEN_IGNITES, Content.hoard_line(3)]
+	out += Content.CHOICES.values() + Content.WARDEN_WORDS.values() + Content.WARDEN_TITLES.values() + Content.UNANSWERED.values()
+	out += Content.HINTS.values()
+	for t in Content.ROOM_TEMPLATES + [Content.BOSS_TEMPLATE]:
+		out.append(Content.room_name(t))
+	for defs in [Content.UPGRADES, Content.VOWS, Content.META_UPGRADES]:
+		for d in defs:
+			out += [d.title, d.desc]
+	return out
