@@ -409,15 +409,17 @@ func on_enemy_killed() -> void:
 func momentum_stacks() -> int:
 	return _momentum_stacks
 
+## True on the combo's last, heaviest swing (a riposte reuses that slot).
+func is_finisher() -> bool:
+	return attack_index == Content.COMBO.size() - 1
+
 # --- Attack combo ---
 func _begin_attack(force_chain: bool = false) -> void:
 	_riposte_attack = riposte_time > 0.0 and not force_chain
 	if _riposte_attack:
 		riposte_time = 0.0
 		attack_index = Content.COMBO.size() - 1
-	elif force_chain and attack_index >= 0 and attack_index < Content.COMBO.size() - 1:
-		attack_index += 1
-	elif combo_timer > 0.0 and attack_index >= 0 and attack_index < Content.COMBO.size() - 1:
+	elif (force_chain or combo_timer > 0.0) and attack_index >= 0 and not is_finisher():
 		attack_index += 1
 	else:
 		attack_index = 0
@@ -432,7 +434,7 @@ func _begin_attack(force_chain: bool = false) -> void:
 	emit_signal("action_feedback", "swing", global_position)
 
 func _step_attack(delta: float) -> void:
-	if attack_buffer > 0.0 and attack_index < Content.COMBO.size() - 1:
+	if attack_buffer > 0.0 and not is_finisher():
 		_queued_attack = true
 		attack_buffer = 0.0
 	# Recovery can be cancelled into a dash, keeping combat responsive without
@@ -468,7 +470,7 @@ func _step_attack(delta: float) -> void:
 			_deactivate_hitbox()
 	elif atk_phase == "recover" and atk_time <= 0.0:
 		atk_phase = "none"
-		if _queued_attack and attack_index < Content.COMBO.size() - 1:
+		if _queued_attack and not is_finisher():
 			_begin_attack(true)
 			return
 		combo_timer = def.window
@@ -487,7 +489,7 @@ func _activate_hitbox(def: Dictionary) -> void:
 	_attack_range = def.range
 	atk_hit.clear()
 	emit_signal("action_feedback", "swing_active", global_position)
-	if attack_index == Content.COMBO.size() - 1 and (_flame_time > 0.0 or bool(build.get("finisher_wave", false))):
+	if is_finisher() and (_flame_time > 0.0 or bool(build.get("finisher_wave", false))):
 		var wave_pos := global_position + Vector2(facing * 34.0, -8.0)
 		var wave_life := 0.32 if _flame_time > 0.0 else 0.26
 		emit_signal("projectile_requested", "player", wave_pos, Vector2(facing * 560.0, 0.0), 18.0 * _damage_mul(), 320.0, 2, wave_life, Content.PAL.player_accent)
@@ -510,18 +512,18 @@ func _scan_attack_hits(def: Dictionary) -> void:
 			if ateam == "scenery":
 				tgt.take_damage(float(def.damage), Vector2(facing, -0.3), float(def.knock))
 				continue # no meter, lifesteal, damage stats or hit-stop from props
-			var is_finisher := attack_index == Content.COMBO.size() - 1
+			var finisher := is_finisher()
 			var dmg: float = def.damage * _damage_mul(tgt)
-			if is_finisher:
+			if finisher:
 				dmg *= float(build.get("finish_mul", 1.0))
 			if _flame_time > 0.0:
 				dmg *= Content.P_FLAME_DAMAGE_MUL
 			tgt.take_damage(dmg, Vector2(facing, -0.2), def.knock)
 			# Graveflame ignites every hit; Kindling makes finishers ignite too.
 			var kindling := float(build.get("burn_bonus_dps", 0.0)) > 0.0
-			if (_flame_time > 0.0 or (is_finisher and kindling)) and tgt.has_method("apply_burn"):
+			if (_flame_time > 0.0 or (finisher and kindling)) and tgt.has_method("apply_burn"):
 				tgt.apply_burn(Content.P_FLAME_BURN_DPS + float(build.get("burn_bonus_dps", 0.0)), Content.P_FLAME_BURN_TIME + float(build.get("burn_bonus_time", 0.0)))
-			emit_signal("hit_landed", dmg, tgt.global_position, is_finisher)
+			emit_signal("hit_landed", dmg, tgt.global_position, finisher)
 			_gain_special(Content.P_SPECIAL_GAIN * float(build.get("special_mul", 1.0)))
 			if float(build.get("lifesteal", 0.0)) > 0.0:
 				_heal(float(build.lifesteal))

@@ -1021,10 +1021,10 @@ func _on_pyre_burst(pos: Vector2, radius: float) -> void:
 func _on_player_action(kind: String, pos: Vector2) -> void:
 	match kind:
 		"swing":
-			var heavy_swing := player.attack_index == Content.COMBO.size() - 1
+			var heavy_swing := player.is_finisher()
 			feedback.play("riposte" if player._riposte_attack else ("swing_heavy" if heavy_swing else "swing"))
 			if not player._riposte_attack:
-				feedback.slash(pos + Vector2(player.facing * 28.0, -8.0), player.facing, Content.PAL.player_accent if player._flame_time > 0.0 else Content.PAL.attack, player.attack_index == Content.COMBO.size() - 1)
+				feedback.slash(pos + Vector2(player.facing * 28.0, -8.0), player.facing, Content.PAL.player_accent if player._flame_time > 0.0 else Content.PAL.attack, heavy_swing)
 		"swing_active":
 			# Additive afterglow along the sweep the blade is about to travel.
 			var def: Dictionary = player.get_meta("atk_def")
@@ -1032,7 +1032,7 @@ func _on_player_action(kind: String, pos: Vector2) -> void:
 				feedback.riposte_cut(pos + Vector2(player.facing * 8.0, -8.0), player.facing, float(def.range))
 			else:
 				var sweep: Array = KnightArt.SWINGS[KnightArt.swing_name(player)].smear
-				feedback.slash_arc(pos + Vector2(player.facing * 7.0, -9.0), player.facing, float(def.range), float(sweep[0]), float(sweep[1]), player.attack_index == Content.COMBO.size() - 1)
+				feedback.slash_arc(pos + Vector2(player.facing * 7.0, -9.0), player.facing, float(def.range), float(sweep[0]), float(sweep[1]), player.is_finisher())
 		"jump": feedback.play("jump")
 		"dash":
 			feedback.play("dash")

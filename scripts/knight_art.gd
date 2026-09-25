@@ -222,7 +222,7 @@ static func target(p) -> Dictionary:
 					var arc: Array = sw.smear
 					if arc.size() == 2:
 						smear = { "from": float(arc[0]), "to": lerpf(float(arc[0]), float(arc[1]), _ease_out(u)),
-							"radius": float(def.range), "heavy": int(p.attack_index) == Content.COMBO.size() - 1 }
+							"radius": float(def.range), "heavy": p.is_finisher() }
 				_:
 					var u := 1.0 - float(p.atk_time) / maxf(0.001, float(def.recover))
 					pose = strike if u < 0.55 else _lerp_pose(strike, REST, (u - 0.55) / 0.45)
