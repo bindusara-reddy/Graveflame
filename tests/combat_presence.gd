@@ -17,6 +17,7 @@ func run() -> void:
 	await test_riposte_feedback()
 	await test_breakable_crypt()
 	await test_impact_grammar()
+	await test_parry_tiers()
 	release(["attack", "parry"])
 	Feedback.motion_reduced = false
 	await finish("COMBAT_PRESENCE")
@@ -50,7 +51,7 @@ func test_riposte() -> void:
 	var hp_before := target.hp
 	await ticks(10)
 	check(target.hp < hp_before, "riposte deals damage through the live attack Area2D")
-	check(is_equal_approx(hp_before - target.hp, float(attack.get("damage", 0.0))), "one riposte damages a target only once")
+	check(is_equal_approx(hp_before - target.hp, float(attack.get("damage", 0.0)) * p._riposte_mul), "one riposte damages a target only once")
 	target.queue_free()
 	await ticks(35)
 	await hold_action("attack")
@@ -158,6 +159,32 @@ func test_impact_grammar() -> void:
 	check(game.feedback.vignette_edge(Game.VIGNETTE_EDGE) != Game.VIGNETTE_EDGE, "being struck flushes the vignette edge")
 	await ticks(40)
 	game.feedback.set_reduced_motion(true)
+
+## A deflect in the window's first frames is perfect, a late one is plain, and
+## a whiff holds the stance a beat past the window.
+func test_parry_tiers() -> void:
+	var p := game.player
+	p.respawn_at(Vector2(480.0, Content.FLOOR_Y - Content.P_BODY_H * 0.5))
+	await ticks(40)
+	p.special = 0.0
+	await deflect()
+	check(is_equal_approx(p._riposte_mul, Player.PERFECT_RIPOSTE_MUL), "a deflect in the window's first frames is perfect")
+	check(p.special >= Player.PERFECT_PARRY_METER, "a perfect parry pays the larger meter")
+	await ticks(100)
+	await hold_action("parry")
+	await ticks(5)
+	var shot := Projectile.new()
+	shot.setup("enemy", p.global_position + Vector2(p.facing * 52.0, -5.0), Vector2.ZERO, 10.0, 100.0, 0, 2.0, Content.PAL.special)
+	game.projectiles.add_child(shot)
+	await ticks(3)
+	check(shot.team == "player" and is_equal_approx(p._riposte_mul, 1.0), "a late deflect is an ordinary parry")
+	shot.queue_free()
+	await ticks(100)
+	await hold_action("parry")
+	await ticks(12)
+	check(p.state == Player.State.PARRY and not p._parry_area.monitoring, "a whiffed parry holds its stance past the window")
+	await ticks(8)
+	check(p.state == Player.State.LOCOMOTION, "a whiffed parry lets go after its short lag")
 
 func test_breakable_crypt() -> void:
 	var props := game.room.props

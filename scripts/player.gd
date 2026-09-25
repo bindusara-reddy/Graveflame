@@ -28,6 +28,15 @@ const SLAM_POISE := 2.0
 const PARRY_POISE := 99.0
 ## A finisher or riposte that lands on the ground rocks the knight back (px/s).
 const HEAVY_RECOIL := 90.0
+## A deflect inside the first PERFECT_PARRY seconds of the window is perfect:
+## the foe reels longer, the meter pays more and the riposte it banks hits
+## harder. A whiff holds the stance PARRY_WHIFF_LAG longer, so spam costs.
+const PERFECT_PARRY := 0.06
+const PARRY_STAGGER := 0.6
+const PERFECT_PARRY_STAGGER := 0.9
+const PERFECT_PARRY_METER := 35.0
+const PERFECT_RIPOSTE_MUL := 1.5
+const PARRY_WHIFF_LAG := 0.10
 
 signal hp_changed(hp: float, max_hp: float)
 signal special_changed(value: float, maximum: float)
@@ -96,6 +105,8 @@ var _parry_hit: Dictionary = {}
 var _parry_succeeded := false
 var riposte_time := 0.0
 var _riposte_attack := false
+## Damage multiplier of the banked riposte: PERFECT_RIPOSTE_MUL after a perfect parry.
+var _riposte_mul := 1.0
 # --- Flask heal visual ---
 var _flask_heal_flash := 0.0
 var _heal_time := 0.0
@@ -531,6 +542,8 @@ func _scan_attack_hits(def: Dictionary) -> void:
 			var dmg: float = def.damage * _damage_mul(tgt)
 			if finisher:
 				dmg *= float(build.get("finish_mul", 1.0))
+			if _riposte_attack:
+				dmg *= _riposte_mul
 			if _flame_time > 0.0:
 				dmg *= Content.P_FLAME_DAMAGE_MUL
 			deal(tgt, dmg, Vector2(facing, -0.2), def.knock, blow.poise)
@@ -696,9 +709,13 @@ func _step_dash(delta: float) -> void:
 			emit_signal("action_feedback", "cinder", global_position + Vector2(0.0, Content.P_BODY_H * 0.5))
 
 # --- Parry ---
+## The deflect window's full length, with any boon that widens it.
+func _parry_window() -> float:
+	return Content.PARRY_WINDOW * float(build.get("parry_window_mul", 1.0))
+
 func _begin_parry() -> void:
 	state = State.PARRY
-	parry_time = Content.PARRY_WINDOW * float(build.get("parry_window_mul", 1.0))
+	parry_time = _parry_window()
 	parry_cd = Content.PARRY_COOLDOWN
 	# Position the parry rectangle in front
 	var w := Content.PARRY_RANGE
@@ -715,16 +732,22 @@ func _step_parry(delta: float) -> void:
 	velocity.y += Content.GRAVITY * delta
 	velocity.x = move_toward(velocity.x, 0.0, Content.P_FRICTION * delta)
 	parry_time -= delta
-	_scan_parry()
+	var window_open := _parry_area.monitoring
+	if window_open:
+		_scan_parry()
 	if _parry_succeeded and attack_buffer > 0.0:
 		_close_parry()
 		_draw_parry = 0.0
 		_begin_attack()
 		return
-	if parry_time <= 0.0:
+	if parry_time <= 0.0 and window_open:
 		_close_parry()
 		if not _parry_succeeded:
 			emit_signal("parried", global_position + Vector2(facing * 40.0, 0.0), false)
+			if feedback != null:
+				feedback.play("whiff")
+	# A whiffed parry holds the stance a beat longer with the sensor shut.
+	if parry_time <= (0.0 if _parry_succeeded else -PARRY_WHIFF_LAG):
 		state = State.LOCOMOTION
 	move_and_slide()
 	_floor_and_wall_tracking()
@@ -739,6 +762,7 @@ func _scan_parry() -> void:
 		if _parry_hit.has(oid):
 			continue
 		var attack_kind := str(area.get_meta("attack_kind", ""))
+		var perfect := parry_time >= _parry_window() - PERFECT_PARRY
 		if attack_kind == "projectile":
 			area.reflect(Vector2(facing, -0.05), Content.PARRY_PROJECTILE_BOOST)
 		elif attack_kind == "melee" and bool(area.get_meta("attack_active", false)):
@@ -746,16 +770,40 @@ func _scan_parry() -> void:
 			var attacker = area.get_meta("owner")
 			if not is_instance_valid(attacker):
 				continue
-			attacker.take_damage(Content.PARRY_DAMAGE + float(build.get("parry_bonus_dmg", 0.0)), Vector2(-facing, 0.0), 420.0)
+			deal(attacker, Content.PARRY_DAMAGE + float(build.get("parry_bonus_dmg", 0.0)), Vector2(-facing, 0.0), 420.0, PARRY_POISE)
 			attacker.on_parried(Vector2(facing, -0.2))
+			# The riposte must land while the foe still reels, longest after a perfect parry.
+			if attacker.state == Enemy.EState.STAGGER:
+				attacker.stagger_t = maxf(attacker.stagger_t, PERFECT_PARRY_STAGGER if perfect else PARRY_STAGGER)
 		else:
 			continue
 		# A deflect landed: it opens the riposte window and pays meter.
+		var at := global_position + Vector2(facing * 40.0, 0.0)
 		_parry_hit[oid] = true
 		_parry_succeeded = true
 		riposte_time = Content.RIPOSTE_WINDOW
-		emit_signal("parried", global_position + Vector2(facing * 40.0, 0.0), true)
-		_gain_special(Content.P_SPECIAL_GAIN * 2.5 + float(build.get("parry_special", 0.0)))
+		_riposte_mul = PERFECT_RIPOSTE_MUL if perfect else 1.0
+		emit_signal("parried", at, true)
+		if perfect:
+			emit_signal("action_feedback", "perfect_parry", at)
+		_feel_parry(perfect)
+		var meter := PERFECT_PARRY_METER if perfect else Content.P_SPECIAL_GAIN * 2.5
+		_gain_special(meter + float(build.get("parry_special", 0.0)))
+
+## A deflect's weight beyond the game's ring and chime: a longer freeze and a
+## shove along the blade; a perfect one also leans the camera in, blanches the
+## vignette's edge and sounds its own cue.
+func _feel_parry(perfect: bool) -> void:
+	if feedback == null:
+		return
+	feedback.kick(Vector2(facing, 0.0), 6.0)
+	if not perfect:
+		feedback.hit_stop(0.09)
+		return
+	feedback.hit_stop(0.14)
+	feedback.punch_zoom(1.06, 0.05, 0.25)
+	feedback.flash_edge(Color(1.0, 1.0, 1.0, 0.3), 0.08)
+	feedback.play("perfect_parry")
 
 ## Shut the parry's sensor. The shield visual (_draw_parry) is left to fade.
 func _close_parry() -> void:
@@ -1049,10 +1097,13 @@ func _draw() -> void:
 		draw_line(Vector2(facing * 16.0, -4.0), tip, Color(VFX.TEAL, 0.7), 5.0, true)
 		draw_line(Vector2(facing * 22.0, -4.0), tip, Color(VFX.HOT, 0.9), 1.5, true)
 	if riposte_time > 0.0:
-		# Diegetic cue stays with the fighter instead of adding another HUD panel.
-		var cue := Color(VFX.TEAL, 0.65 if Feedback.flash_reduced else 0.95)
-		draw_string_outline(ThemeDB.fallback_font, Vector2(-31.0, -72.0), "RIPOSTE", HORIZONTAL_ALIGNMENT_LEFT, -1, 12, 3, Color("100c1b"))
-		draw_string(ThemeDB.fallback_font, Vector2(-31.0, -72.0), "RIPOSTE", HORIZONTAL_ALIGNMENT_LEFT, -1, 12, cue)
+		# Diegetic cue stays with the fighter instead of adding another HUD panel;
+		# a perfect parry's harder riposte reads in gold.
+		var perfect := _riposte_mul > 1.0
+		var word := "PERFECT" if perfect else "RIPOSTE"
+		var cue := Color(VFX.GOLD if perfect else VFX.TEAL, 0.65 if Feedback.flash_reduced else 0.95)
+		draw_string_outline(ThemeDB.fallback_font, Vector2(-31.0, -72.0), word, HORIZONTAL_ALIGNMENT_LEFT, -1, 12, 3, Color("100c1b"))
+		draw_string(ThemeDB.fallback_font, Vector2(-31.0, -72.0), word, HORIZONTAL_ALIGNMENT_LEFT, -1, 12, cue)
 		draw_line(Vector2(-25.0, -65.0), Vector2(-25.0 + 50.0 * riposte_time / Content.RIPOSTE_WINDOW, -65.0), cue, 2.0, true)
 	# slam impact ring
 	if _draw_slam_impact > 0.0:
