@@ -809,7 +809,7 @@ static func finale_tier(seen_before: int, milestone: String) -> String:
 ## Ranked relics. `costs[r]` buys rank r+1; `value` applies once per rank owned.
 ## Costs climb so cells keep meaning something long after the first few runs.
 const META_UPGRADES: Array = [
-	{ "id": "m_max_hp",  "title": "Ember Soul",    "desc": "+10 starting HP per rank.",       "costs": [5, 12, 22, 36, 55], "kind": "max_hp",        "value": 10.0 },
+	{ "id": "m_max_hp",  "title": "Ember Soul",    "desc": "+10 starting vitality per rank.", "costs": [5, 12, 22, 36, 55], "kind": "max_hp",        "value": 10.0 },
 	{ "id": "m_dmg",     "title": "Sharpened",     "desc": "+6% melee damage per rank.",          "costs": [7, 16, 28, 44, 64], "kind": "dmg_mul",       "value": 0.06 },
 	{ "id": "m_flask",   "title": "Witch's Belt",  "desc": "+1 flask charge per rank.",           "costs": [8, 30],             "kind": "flask",         "value": 1.0 },
 	{ "id": "m_speed",   "title": "Quickened",     "desc": "+4% move speed per rank.",            "costs": [6, 14, 26],         "kind": "speed_mul",     "value": 0.04 },

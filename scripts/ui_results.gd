@@ -81,18 +81,19 @@ func _ledger(column: VBoxContainer) -> void:
 	var renown := Kit.stat("RENOWN", "0")
 	(renown.get_meta("value") as Label).add_theme_font_size_override("font_size", 30)
 	column.add_child(renown)
-	_figure("score", renown, 0.0, Kit.format_number)
+	set_meta("score_label", renown.get_meta("value"))
+	_figure("score", renown, Kit.format_number)
 	var best := Kit.label("", T.MICRO, T.ASH, HORIZONTAL_ALIGNMENT_RIGHT)
 	column.add_child(best)
 	set_meta("best_label", best)
 	var cells := Kit.stat("CELLS CARRIED OUT", "+0", T.GOLD)
 	column.add_child(cells)
 	set_meta("cells_label", cells.get_meta("value"))
-	_figure("cells", cells, 0.0, func(v: float) -> String: return "+" + Kit.format_number(roundi(v)))
+	_figure("cells", cells, func(v: float) -> String: return "+" + Kit.format_number(roundi(v)))
 	_vows_kept = Kit.stat("VOWS KEPT", "0", T.WAX_HI)
 	_vows_kept.visible = false
 	column.add_child(_vows_kept)
-	_figure("vows", _vows_kept, 0.0, func(v: float) -> String: return str(roundi(v)))
+	_figure("vows", _vows_kept, func(v: float) -> String: return str(roundi(v)))
 	gap(column, T.S1)
 	var split := HBoxContainer.new()
 	split.add_theme_constant_override("separation", T.S5)
@@ -110,9 +111,10 @@ func _ledger(column: VBoxContainer) -> void:
 	set_meta("summary_labels", labels)
 
 
-## Remember the figure `key` shows in `line`'s value, to roll up when read.
-func _figure(key: String, line: Control, to: float, shown: Callable) -> void:
-	_figures[key] = [line.get_meta("value") as Label, to, shown]
+## Remember the figure `key` that `line`'s value shows (written by `shown`),
+## to roll up when the page is read.
+func _figure(key: String, line: Control, shown: Callable) -> void:
+	_figures[key] = [line.get_meta("value") as Label, 0.0, shown]
 
 
 ## The grave: an arch-topped sheet torn at its foot, a printed arch inside it,

@@ -3,6 +3,8 @@ extends Control
 ## parts every page shares cut from the kit: the torn veil behind it, the sheet,
 ## its heading and the prompt footer. Each page (ui_title.gd, ui_pause.gd...)
 ## extends this, fills build(), and hears opened() each time it is shown.
+## Key caps name the device last touched on their own (Kit.Glyph), so a page
+## never repaints its prompts.
 
 const Kit := preload("res://scripts/ui_kit.gd")
 const T := preload("res://scripts/ui_theme.gd")
@@ -25,7 +27,6 @@ func mount(p_stage: UiScreens, panel_name: String) -> void:
 	name = panel_name.capitalize() + "Screen"
 	mouse_filter = Control.MOUSE_FILTER_STOP
 	set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
-	add_to_group(UiInput.PROMPT_GROUP)
 	build()
 
 
@@ -39,11 +40,6 @@ func build() -> void:
 func opened(_from: String) -> void:
 	Kit.focus_first_control(self)
 	settle()
-
-
-## Repaint whatever names a key (glyphs repaint themselves).
-func refresh_prompts() -> void:
-	pass
 
 
 # --- Parts every page shares -------------------------------------------------------

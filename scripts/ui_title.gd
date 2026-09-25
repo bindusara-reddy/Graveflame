@@ -89,7 +89,6 @@ func _corner_notes() -> void:
 	_prompt.grow_vertical = Control.GROW_DIRECTION_BEGIN
 	_roll = Kit.outlined(Kit.label("", T.VOICE, T.ASH, HORIZONTAL_ALIGNMENT_RIGHT), 4)
 	_roll.name = "Roll"
-	_roll.size_flags_horizontal = Control.SIZE_SHRINK_END
 	add_child(_roll)
 	_roll.set_anchors_and_offsets_preset(Control.PRESET_BOTTOM_RIGHT, Control.PRESET_MODE_MINSIZE, T.S5)
 	_roll.grow_horizontal = Control.GROW_DIRECTION_BEGIN
@@ -184,7 +183,9 @@ func tick(delta: float) -> void:
 		return
 	var still := T.still()
 	var reveal := float(tableau.reveal)
-	holder.modulate.a = 1.0 if still else clampf(0.35 + 0.65 * (reveal - 0.2) / 0.7, 0.35, 1.0)
+	var lit := 1.0 if still else clampf(0.35 + 0.65 * (reveal - 0.2) / 0.7, 0.35, 1.0)
+	for part: Control in [holder, _prompt, _roll]:
+		part.modulate.a = lit
 	if still:
 		face.self_modulate = VFX.GOLD
 		return
