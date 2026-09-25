@@ -19,7 +19,7 @@ func run() -> void:
 
 func _check_title(ui: UI) -> void:
 	var tableau = ui._title_tableau
-	check(tableau.legacy.victories == 3 and tableau.legacy.oath, "the title reads the victory record on arrival")
+	check(tableau.legacy.victories == 3 and tableau.legacy.ending == "" and not tableau.legacy.dawn, "the title reads the victory record on arrival; a kept Oath alone brings no dawn")
 	check(tableau._wax(0) == tableau.WAX_PLAIN and tableau._wax(1) == tableau.WAX_VOWED and tableau._wax(2) == tableau.WAX_OATH, "wax follows the vows each win was kept under")
 	check(tableau._exclusions.size() == 2, "the title passes its wordmark band and menu column to the tableau")
 	var near: Dictionary = tableau._foreground(tableau.size)
