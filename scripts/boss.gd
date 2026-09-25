@@ -269,7 +269,7 @@ func _boss_recover(delta: float) -> void:
 		state = EState.SEEK
 		action_t = 0.3 if phase == BPhase.TWO else 0.55
 
-func take_damage(amount: float, from_dir: Vector2, kb: float) -> void:
+func take_damage(amount: float, from_dir: Vector2, kb: float, _poise_dmg := 1.0) -> void:
 	if dead: return
 	var dealt := minf(amount, maxf(hp, 0.0))
 	hp -= amount

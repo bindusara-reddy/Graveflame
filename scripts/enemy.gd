@@ -13,6 +13,9 @@ signal exploded(pos: Vector2, radius: float, damage: float)
 signal pyre_burst(pos: Vector2, radius: float)
 ## Windup announcement. The game voices this so an incoming hit is never a surprise.
 signal telegraphed(kind: String, pos: Vector2, elite: bool)
+## A beat the game names over the creature and/or voices: a broken guard, a
+## ring-out. Either part may be empty.
+signal announced(text: String, cue: String, pos: Vector2)
 
 enum Kind { STALKER, HOPPER, WISP, BRUTE, BOMBER, CROW }
 enum EState { SPAWN, SEEK, WINDUP, ATTACK, RECOVER, STAGGER, DEAD }
@@ -22,6 +25,22 @@ enum EState { SPAWN, SEEK, WINDUP, ATTACK, RECOVER, STAGGER, DEAD }
 ## names an audio cue directly; anticipation_contract checks every Kind has one.
 static func telegraph_id(p_kind: int) -> String:
 	return str(Kind.keys()[p_kind]).to_lower()
+
+## Once this share of a windup has passed, a poised creature is committed: a
+## blow still lands but no longer calls the strike off.
+const COMMIT_AT := 0.4
+## Seconds without a blow before a creature's poise is whole again.
+const POISE_REGEN := 1.0
+## A worn-through guard: how long the creature reels, and how much harder it is
+## hit until it has its feet back.
+const BREAK_STAGGER := 0.6
+const BREAK_VULNERABLE := 1.0
+const BREAK_DAMAGE_MUL := 1.25
+## Seconds a fresh spawn waits before its first windup, so no wave strikes the
+## moment it lands.
+const SPAWN_GRACE := 0.7
+## A fall onto the spikes is the knight's kill if they struck it this recently.
+const RING_OUT_CREDIT := 2.0
 
 ## Pyre boon damage, mirrored from the player's build by the game so a burning
 ## enemy can detonate against its neighbours without holding a player reference.
@@ -88,6 +107,18 @@ var _last_hit_dir := Vector2.RIGHT
 var exploded_out := false
 ## A drawing-only copy (no collision, no AI) used by the paper-cut death.
 var ghost := false
+## True when the last blow was absorbed (the brute's shield) instead of dealt,
+## so the knight's blade can ring off the guard.
+var last_hit_blocked := false
+## Poise left before the guard breaks; see _react_to_blow.
+var _poise := 0.0
+var _poise_regen_t := 0.0
+var _poise_flash := 0.0  # visual only: a committed blow rings gold
+## Seconds left of a broken guard's opening (BREAK_DAMAGE_MUL applies).
+var _vulnerable_t := 0.0
+var _spawn_grace := 0.0
+## Seconds since the knight's side last struck this creature; drives ring-out credit.
+var _since_struck := INF
 
 ## A frozen, collision-free copy of this creature's drawing, recoiling from the blow.
 func echo() -> Node2D:
@@ -118,6 +149,7 @@ func setup(p_kind: int, p_pos: Vector2, mods: Dictionary = {}) -> void:
 		data.windup = float(data.windup) * 0.85
 		data.cd = float(data.cd) * 0.9
 	elite = bool(mods.get("elite", false))
+	_poise = poise_max()
 	_elite_anim = 0.25 if elite else 0.0
 	var hp_mul := float(mods.get("hp_mul", 1.0)) * (Content.ELITE_HP_MUL if elite else 1.0)
 	damage_mul = float(mods.get("dmg_mul", 1.0)) * (Content.ELITE_DMG_MUL if elite else 1.0)
@@ -131,6 +163,11 @@ func setup(p_kind: int, p_pos: Vector2, mods: Dictionary = {}) -> void:
 	if bool(data.get("explodes", false)):
 		_fuse_total = float(data.get("fuse", 0.8))
 		_blast_radius = float(data.get("blast_radius", 90.0)) * (1.15 if elite else 1.0)
+
+## Blows a committed windup shrugs off before the guard breaks. Fodder has
+## none and always flinches; elites stand firmer than their kind.
+func poise_max() -> float:
+	return float(data.get("poise", 0.0)) + (Content.ELITE_POISE if elite else 0.0)
 
 ## Contact damage for this instance, after difficulty and elite multipliers.
 func attack_damage() -> float:
@@ -161,6 +198,7 @@ func _ready() -> void:
 		add_child(_ledge_ray)
 	state = EState.SEEK
 	_spawn_anim = 0.4
+	_spawn_grace = SPAWN_GRACE
 
 ## Body shape, hurtbox and melee box shared by every creature, the Warden
 ## included; `reach` is how far the melee box outgrows the body. Each area is
@@ -238,9 +276,17 @@ func _physics_process(delta: float) -> void:
 			_do_explosion()
 			return
 	_spawn_anim = maxf(0.0, _spawn_anim - delta)
+	_spawn_grace = maxf(0.0, _spawn_grace - delta)
 	_elite_anim = maxf(0.0, _elite_anim - delta)
 	_hurt_flash = maxf(0.0, _hurt_flash - delta)
 	_shield_flash = maxf(0.0, _shield_flash - delta)
+	_poise_flash = maxf(0.0, _poise_flash - delta)
+	_vulnerable_t = maxf(0.0, _vulnerable_t - delta)
+	_since_struck += delta
+	if _poise_regen_t > 0.0:
+		_poise_regen_t -= delta
+		if _poise_regen_t <= 0.0:
+			_poise = poise_max()
 	cd = maxf(0.0, cd - delta)
 	if global_position.y > Content.FLOOR_Y + 220.0:
 		_die(false)
@@ -282,9 +328,13 @@ func _close_in(dx: float, stop_x: float, delta: float, speed_mul := 1.0) -> void
 	var speed := facing * float(data.speed) * speed_mul if absf(dx) > stop_x else 0.0
 	_walk(speed, delta)
 
+## Off cooldown and past the spawn grace: free to start a windup.
+func _ready_to_strike() -> bool:
+	return cd <= 0.0 and _spawn_grace <= 0.0
+
 func _seek_stalker(to_p: Vector2, delta: float) -> void:
 	_close_in(to_p.x, 44.0, delta)
-	if absf(to_p.x) < 50.0 and absf(to_p.y) < 60.0 and cd <= 0.0:
+	if absf(to_p.x) < 50.0 and absf(to_p.y) < 60.0 and _ready_to_strike():
 		_begin_windup()
 
 func _seek_hopper(to_p: Vector2, delta: float) -> void:
@@ -293,7 +343,7 @@ func _seek_hopper(to_p: Vector2, delta: float) -> void:
 	if is_on_floor() and cd <= 0.0 and absf(to_p.x) < 360.0 and absf(to_p.x) > 50.0:
 		velocity.y = -560.0
 		velocity.x = facing * float(data.speed) * 1.4
-	if absf(to_p.x) < 52.0 and absf(to_p.y) < 60.0 and cd <= 0.0:
+	if absf(to_p.x) < 52.0 and absf(to_p.y) < 60.0 and _ready_to_strike():
 		_begin_windup()
 
 func _seek_wisp(to_p: Vector2, delta: float) -> void:
@@ -322,19 +372,19 @@ func _seek_crow(to_p: Vector2, delta: float, player) -> void:
 	var desired := want.normalized() * minf(speed, want.length() * 3.0)
 	velocity = velocity.move_toward(desired, 900.0 * delta)
 	global_position += velocity * delta
-	if cd <= 0.0 and to_p.y > 70.0 and absf(to_p.x) < 300.0 and _spawn_anim <= 0.0:
+	if _ready_to_strike() and to_p.y > 70.0 and absf(to_p.x) < 300.0:
 		_begin_windup()
 
 func _seek_brute(to_p: Vector2, delta: float) -> void:
 	# Slow heavy melee approach
 	_close_in(to_p.x, 60.0, delta)
-	if absf(to_p.x) < 64.0 and absf(to_p.y) < 70.0 and cd <= 0.0:
+	if absf(to_p.x) < 64.0 and absf(to_p.y) < 70.0 and _ready_to_strike():
 		_begin_windup()
 
 func _seek_bomber(to_p: Vector2, delta: float) -> void:
 	# Rush toward player; arm and start fuse when close
 	_close_in(to_p.x, 48.0, delta, 1.15)
-	if absf(to_p.x) < 56.0 and absf(to_p.y) < 80.0 and not _bomb_armed:
+	if absf(to_p.x) < 56.0 and absf(to_p.y) < 80.0 and not _bomb_armed and _spawn_grace <= 0.0:
 		_bomb_armed = true
 		_begin_windup()
 
@@ -455,30 +505,17 @@ func _step_stagger(delta: float) -> void:
 	if stagger_t <= 0.0:
 		state = EState.SEEK
 
-func take_damage(amount: float, from_dir: Vector2, kb: float) -> void:
+## `poise_dmg` is how hard the blow tests a guard: a light cut 1, a parry or
+## riposte enough to break any guard outright.
+func take_damage(amount: float, from_dir: Vector2, kb: float, poise_dmg := 1.0) -> void:
 	if dead: return
 	_last_hit_dir = from_dir
-	# Brute shield: frontal hits absorbed by shield first
-	if shield_active and kind == Kind.BRUTE:
-		# Frontal = attacker is on the side the brute is facing
-		var hit_from_front := signf(from_dir.x) == -facing
-		if hit_from_front:
-			_shield_flash = 0.12
-			var absorbed := minf(amount, maxf(shield_hp, 0.0))
-			shield_hp -= amount
-			emit_signal("damaged", absorbed, global_position + Vector2(0.0, -float(data.h) * 0.5), true)
-			if shield_hp <= 0.0:
-				shield_active = false
-				_shield_flash = 0.25
-				# shield break stagger
-				state = EState.STAGGER
-				stagger_t = 0.3
-				velocity = from_dir.normalized() * kb * 0.5
-			else:
-				# shield blocks the hit entirely; small pushback
-				velocity = from_dir.normalized() * kb * 0.2
-			return
-		# backstab: bypass shield, full damage to HP
+	_since_struck = 0.0
+	last_hit_blocked = _shield_blocks(amount, from_dir, kb)
+	if last_hit_blocked:
+		return
+	if _vulnerable_t > 0.0:
+		amount *= BREAK_DAMAGE_MUL
 	var dealt := minf(amount, maxf(hp, 0.0))
 	hp -= amount
 	_hurt_flash = 0.1
@@ -489,13 +526,67 @@ func take_damage(amount: float, from_dir: Vector2, kb: float) -> void:
 		else:
 			_die()
 		return
-	state = EState.STAGGER
+	_react_to_blow(from_dir, kb, poise_dmg)
+
+## The brute's tower shield takes a blow from the front: it rings off, or the
+## shield finally breaks and staggers its bearer. True when the hit was absorbed.
+func _shield_blocks(amount: float, from_dir: Vector2, kb: float) -> bool:
+	# Frontal = the blow travels against the way the brute faces; a backstab slips past.
+	if not shield_active or signf(from_dir.x) != -facing:
+		return false
+	_shield_flash = 0.12
+	var absorbed := minf(amount, maxf(shield_hp, 0.0))
+	shield_hp -= amount
+	emit_signal("damaged", absorbed, global_position + Vector2(0.0, -float(data.h) * 0.5), true)
+	if shield_hp <= 0.0:
+		shield_active = false
+		_shield_flash = 0.25
+		_stagger(0.3, from_dir.normalized() * kb * 0.5)
+	else:
+		velocity = from_dir.normalized() * kb * 0.2
+	return true
+
+## How a blow that landed moves the creature. Fodder always flinches. A poised
+## creature holds a committed windup through the blow, and a guard worn
+## through breaks into a long stagger that leaves it open.
+func _react_to_blow(from_dir: Vector2, kb: float, poise_dmg: float) -> void:
+	if poise_max() > 0.0 and _vulnerable_t <= 0.0:
+		_poise -= poise_dmg
+		_poise_regen_t = POISE_REGEN
+		if _poise <= 0.0:
+			_break_guard(from_dir, kb)
+			return
+		if _committed():
+			_poise_flash = 0.12
+			return
 	# Elites shrug off hits faster so they keep pressure on.
-	stagger_t = 0.12 if elite else 0.18
-	velocity = from_dir.normalized() * kb * (0.6 if elite else 1.0)
+	_stagger(0.12 if elite else 0.18, from_dir.normalized() * kb * (0.6 if elite else 1.0))
 	if kind == Kind.WISP or kind == Kind.CROW:
 		velocity.y = from_dir.y * kb * 0.5
-	# An armed fuse deliberately keeps counting down through this stagger state.
+
+## Past COMMIT_AT of its windup: the strike is coming whatever lands on it.
+func _committed() -> bool:
+	return state == EState.WINDUP and st_timer <= float(data.windup) * (1.0 - COMMIT_AT)
+
+## The guard gives way: a long stagger, and blows land harder until it recovers.
+func _break_guard(from_dir: Vector2, kb: float) -> void:
+	_poise = poise_max()
+	_vulnerable_t = BREAK_VULNERABLE
+	_stagger(BREAK_STAGGER, from_dir.normalized() * kb * 0.6)
+	announced.emit("BROKEN", "shatter", global_position + Vector2(0.0, -float(data.h) * 0.8))
+
+## Knock the creature off its stride for `seconds` (a longer stagger already
+## running is kept). Whatever it was swinging is called off, its melee box
+## closes so nothing can parry a swing that is not coming, and a called-off
+## strike waits out half a cooldown so it never winds straight back up. An
+## armed fuse keeps burning.
+func _stagger(seconds: float, knock: Vector2) -> void:
+	if state == EState.WINDUP or state == EState.ATTACK:
+		cd = maxf(cd, float(data.cd) * 0.5)
+	stagger_t = maxf(stagger_t, seconds) if state == EState.STAGGER else seconds
+	state = EState.STAGGER
+	velocity = knock
+	_disarm()
 
 func apply_burn(dps: float, duration: float) -> void:
 	burn_dps = dps if burn_time <= 0.0 else maxf(burn_dps, dps)
@@ -517,11 +608,9 @@ func _tick_status(delta: float) -> void:
 		else:
 			_die()
 
+## A parried strike always staggers, whatever the creature's poise.
 func on_parried(knock_dir: Vector2) -> void:
-	_disarm()
-	state = EState.STAGGER
-	stagger_t = 0.4
-	velocity = knock_dir.normalized() * 260.0
+	_stagger(0.4, knock_dir.normalized() * 260.0)
 
 ## Pyre boon: a burning enemy detonates against its neighbours when it dies.
 func _pyre_detonate() -> void:
@@ -640,6 +729,7 @@ func _draw() -> void:
 		Kind.BOMBER: _draw_bomber(w, h, base, mid, t, flash)
 		Kind.CROW: _draw_crow(w, h, base, mid, t, tw, flash)
 	draw_set_transform_matrix(Transform2D.IDENTITY)
+	_draw_guard(w, h, t)
 	# The committed line: in the last beat of the shriek, a faint dashed track
 	# shows where the dive will go, so a sidestep is a read, not a guess.
 	if kind == Kind.CROW and state == EState.WINDUP and tw > 0.45:
@@ -671,6 +761,19 @@ func _draw() -> void:
 	if burn_time > 0.0:
 		for i in range(3):
 			VFX.draw_flame(self, Vector2(-w * 0.28 + float(i) * w * 0.28, -h * 0.4), 14.0, 8.0, t, float(i) * 2.1)
+
+## A committed windup rings gold where a blow glances off it; a broken guard
+## hangs round the body as a torn gold hoop until the opening closes.
+func _draw_guard(w: float, h: float, t: float) -> void:
+	var r := maxf(w, h) * 0.66
+	var center := Vector2(0.0, -h * 0.08)
+	if _poise_flash > 0.0:
+		draw_arc(center, r, 0.0, TAU, 28, Color(VFX.GOLD, _poise_flash / 0.12), 3.0)
+	if _vulnerable_t > 0.0:
+		var k := _vulnerable_t / BREAK_VULNERABLE
+		for i in range(3):
+			var a0 := float(i) * TAU / 3.0 + t * 1.5
+			draw_arc(center, r + 4.0, a0, a0 + 1.4, 8, Color(VFX.GOLD, 0.75 * k), 2.0)
 
 func _draw_stalker(w: float, h: float, base: Color, mid: Color, t: float, tw: float, ta: float, flash: bool) -> void:
 	var sway := sin(t * 2.6) * 2.0
