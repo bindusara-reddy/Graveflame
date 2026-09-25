@@ -250,6 +250,8 @@ func _relay(foe: Enemy) -> void:
 func _spawn_boss() -> void:
 	boss = Boss.new()
 	boss.global_position = Vector2(900, Content.FLOOR_Y - 80)
+	# Trial of the Throne: the Warden reads this as it readies, so it goes first.
+	boss.set("trial", trial)
 	add_child(boss)
 	_relay(boss)
 	boss.phase_changed.connect(boss_phase_changed.emit)

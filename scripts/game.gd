@@ -926,7 +926,8 @@ func _advance_room() -> void:
 	if not is_boss:
 		var hp_frac := float(run.build.hp) / maxf(1.0, float(run.build.max_hp))
 		room.exit_kinds = run.roll_exits(hp_frac)
-		room.trial = run.trial_next
+	# A Trial taken in the last chamber is paid at the throne (Trial of the Throne).
+	room.trial = run.trial_next
 	run.trial_next = false
 	room.room_index = run.room_index
 	# Connect before _ready() because boss_spawned and the first wave happen there.
@@ -1332,7 +1333,8 @@ func _on_player_died() -> void:
 func _on_boss_spawned() -> void:
 	if is_instance_valid(room) and room.boss != null:
 		ui.show_boss_bar(room.boss.hp_max)
-		ui.show_boss_intro("The Ember Warden", "Keeper of the Ember Throne")
+		var subtitle := "Trial of the Throne" if room.trial else "Keeper of the Ember Throne"
+		ui.show_boss_intro("The Ember Warden", subtitle)
 		feedback.shake(8.0, 0.3)
 		feedback.play("boss")
 		# The keep goes quiet as the Warden drops; its theme lands on the first move.

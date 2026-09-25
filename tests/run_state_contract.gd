@@ -1,7 +1,7 @@
 extends "res://tests/harness.gd"
 ## Run-state contracts: the save survives a torn write and is never written from
-## a kill, the ledger records each descent once, and a dead knight cannot take a
-## rift.
+## a kill, the ledger records each descent once, a dead knight cannot take a
+## rift, and a Trial before the throne is paid there.
 ## Headless; uses a scratch save.
 ##   godot4 --headless --path . --script res://tests/run_state_contract.gd
 
@@ -14,6 +14,7 @@ func run() -> void:
 	await _test_banking()
 	await _test_chamber_stats()
 	await _test_dead_knight()
+	await _test_throne()
 	await finish("RUN_STATE")
 
 func write_text(file: String, text: String) -> void:
@@ -36,6 +37,14 @@ func clear_room() -> void:
 	game.room._wave_index = game.room._waves.size()
 	game.room._unlock_exit()
 	await ticks(2)
+
+## Boots a run and walks straight into the throne room.
+func enter_throne(trial := false) -> void:
+	await boot()
+	game.run.room_index = game.run.rooms_total() - 2
+	game.run.trial_next = trial
+	game._advance_room()
+	await ticks(3)
 
 func _test_save_file() -> void:
 	Save.add_cells(5)
@@ -114,3 +123,11 @@ func _test_dead_knight() -> void:
 	check(game.state == Game.GState.GAME_OVER and not (game.ui._panels["reward"] as Control).visible, "a dead knight cannot take a rift")
 	var d := Save.load_save()
 	check(int(d.stats.deaths) == 1 and int(d.history[0].room) == 0 and game._stats.has("broken"), "the death is recorded once, with no chamber cleared")
+
+func _test_throne() -> void:
+	await enter_throne(true)
+	check(game.room.is_boss and game.room.trial and not game.run.trial_next, "a Trial taken before the throne is paid at the throne")
+	check((game.ui._boss_intro.sub as Label).text == "TRIAL OF THE THRONE", "the Warden's card names the Trial of the Throne")
+	var boss: Boss = game.room.boss
+	if "trial" in boss:
+		check(boss.trial, "the Warden knows it is a Trial")
