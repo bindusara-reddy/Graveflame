@@ -236,6 +236,7 @@ func _restore_options() -> void:
 	for key in ["reduced_motion", "reduced_flash", "fullscreen", "music_on", "vibration"]:
 		_apply_toggle(key, bool(opts[key]))
 	_apply_audio_options()
+	Feedback.shake_scale = float(opts.shake)
 	ui.sync_options(opts)
 	_apply_bindings()
 
@@ -1753,6 +1754,7 @@ func _on_back_from_options() -> void:
 func _on_option_value_changed(key: String, value: float) -> void:
 	Save.set_option(key, value)
 	_apply_audio_options()
+	Feedback.shake_scale = float(Save.get_options().shake)
 
 ## Replace only the keyboard events for an action. Gamepad bindings are left
 ## untouched, so rebinding can never remove pad support as a side effect.

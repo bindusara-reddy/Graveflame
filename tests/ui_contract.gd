@@ -41,7 +41,17 @@ func run() -> void:
 	await _test_burn_veil()
 	await _test_title_return()
 	_test_hud_affordances()
+	_test_shake_slider()
 	await finish("UI_CONTRACT")
+
+
+## Screen shake has its own strength, saved and applied as it moves.
+func _test_shake_slider() -> void:
+	var slider: HSlider = game.ui._option_sliders["shake"]["slider"]
+	slider.value = 0.35
+	check(is_equal_approx(Feedback.shake_scale, 0.35), "the shake slider scales the camera shake")
+	check(is_equal_approx(float(Save.get_options().shake), 0.35), "the shake strength is saved")
+	slider.value = 1.0
 
 
 ## The HUD marks what a resource buys: Lance notches, a gold IGNITE prompt,

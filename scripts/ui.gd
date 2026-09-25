@@ -1329,6 +1329,9 @@ func _build_options() -> void:
 	_option_check(seen, "fullscreen", "Fullscreen", "Fill the display instead of a window.")
 	_option_check(seen, "vibration", "Controller vibration", "The pad rumbles with hits, parries and falls.")
 	seen.add_child(_make_label("ACCESSIBILITY", 12, C_EMBER_HI, HORIZONTAL_ALIGNMENT_LEFT))
+	# Shake on its own, so a player can calm the camera and keep the hit-stop
+	# and slow motion that reduced motion also takes away.
+	_slider_row(seen, "Screen shake", "shake", 1.0)
 	_reduced_motion_check = _option_check(seen, "reduced_motion", "Reduced motion", "Disables camera shake and softens particles.")
 	_option_check(seen, "reduced_flash", "Reduced flash", "Reduces high-contrast impact flashes.")
 

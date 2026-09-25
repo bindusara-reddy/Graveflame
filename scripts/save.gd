@@ -105,7 +105,7 @@ static func get_best_score() -> int:
 const DEFAULT_OPTIONS := {
 	"master": 0.9, "music": 0.75, "sfx": 0.9, "music_on": true,
 	"fullscreen": false, "reduced_motion": false, "reduced_flash": false,
-	"vibration": true,
+	"vibration": true, "shake": 1.0,
 }
 
 ## Forget every rebinding, so the project's default keys return on next boot.
@@ -156,7 +156,7 @@ static func get_options() -> Dictionary:
 			if (stored as Dictionary).has(key):
 				out[key] = (stored as Dictionary)[key]
 	# Coerce: a hand-edited or older file must never poison the audio server.
-	for key in ["master", "music", "sfx"]:
+	for key in ["master", "music", "sfx", "shake"]:
 		out[key] = clampf(float(out[key]), 0.0, 1.0)
 	for key in ["fullscreen", "reduced_motion", "reduced_flash", "music_on", "vibration"]:
 		out[key] = bool(out[key])

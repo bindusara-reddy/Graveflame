@@ -25,6 +25,8 @@ static var motion_reduced := false
 static var flash_reduced := false
 ## Controller vibration switch (Options). Off means the pad never rumbles.
 static var vibration := true
+## Screen-shake strength (Options); scales shakes and kicks, 0 turns them off.
+static var shake_scale := 1.0
 var _glow: Node2D
 var _particles: Array[Dictionary] = []
 var _audio_pool: Array[AudioStreamPlayer] = []
