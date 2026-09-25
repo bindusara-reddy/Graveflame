@@ -63,6 +63,8 @@ var mood: Dictionary = Content.mood_for(0.0)
 var zone := "crypt"
 ## A roofless chamber (template "open_sky"): its colonnade stands broken to a curtain wall.
 var _open_sky := false
+## The chamber's dressing salt (Room.dress_salt), re-dealing the backdrop's bays.
+var dress_salt := 0
 const VIGNETTE_EDGE := Color(0.027, 0.02, 0.043, 0.78)
 const VIGNETTE_LOW_HP := Color(0.46, 0.04, 0.07, 0.92)
 ## Attack anticipation: a windup the player cannot hear reads as an unfair hit.
@@ -567,6 +569,11 @@ func _paint_backdrop(ci: CanvasItem) -> void:
 	_draw_undercroft(ci, horizon)
 	_draw_fog(ci, horizon)
 
+## The backdrop's per-bay dice. Salted per chamber, so every chamber deals its
+## own bays, banners, chains and mounds from the same planes.
+func _plane_hash(k: int, channel: int) -> float:
+	return VFX.hash01(k + dress_salt, channel)
+
 ## Visible repeat-index range for a plane at `depth` whose elements repeat every `period`.
 func _plane_range(depth: float, period: float, margin: float) -> Vector2i:
 	var half := float(Content.VIEW_W) * 0.5 + margin
@@ -618,9 +625,9 @@ func _draw_stars(ci: CanvasItem, horizon: float) -> void:
 	var moving := not Feedback.motion_reduced
 	for k in range(r.x, r.y + 1):
 		for j in range(3):
-			var h := VFX.hash01(k * 7 + j, 51)
-			var x := _plane_x(depth, float(k) * period + VFX.hash01(k, 52 + j) * period)
-			var y := horizon - 500.0 + VFX.hash01(k, 55 + j) * 260.0
+			var h := _plane_hash(k * 7 + j, 51)
+			var x := _plane_x(depth, float(k) * period + _plane_hash(k, 52 + j) * period)
+			var y := horizon - 500.0 + _plane_hash(k, 55 + j) * 260.0
 			var tw := 0.5 + 0.5 * sin(_atmo_t * (1.0 + h * 2.0) + float(k)) if moving else 0.7
 			ci.draw_circle(Vector2(x, y), 0.8 + h * 1.3, Color(0.85, 0.88, 1.0, (0.2 + 0.5 * tw) * vis))
 
@@ -675,9 +682,9 @@ func _draw_spires(ci: CanvasItem, horizon: float) -> void:
 	var spire_hi := col.darkened(0.22)
 	VFX.draw_vgradient(ci, Rect2(_plane_x(depth, float(r.x) * period) - period, mass_top, float(r.y - r.x + 2) * period, base - mass_top), spire_hi, spire_lo)
 	for k in range(r.x, r.y + 1):
-		var h := 300.0 + VFX.hash01(k, 1) * 120.0
-		var w := 58.0 + VFX.hash01(k, 2) * 32.0
-		var x := _plane_x(depth, float(k) * period + VFX.hash01(k, 3) * 40.0)
+		var h := 300.0 + _plane_hash(k, 1) * 120.0
+		var w := 58.0 + _plane_hash(k, 2) * 32.0
+		var x := _plane_x(depth, float(k) * period + _plane_hash(k, 3) * 40.0)
 		var spire_top := base - h
 		# Per-vertex ramp, indexed to the point order below: the two base corners
 		# stay lifted while everything above the shoulder falls into shadow.
@@ -691,8 +698,8 @@ func _draw_spires(ci: CanvasItem, horizon: float) -> void:
 		]))
 		# Slit windows keep the towers reading as inhabited ruins; a few flicker.
 		for wi in range(3):
-			var wy := spire_top + 80.0 + float(wi) * 64.0 + VFX.hash01(k + wi, 4) * 30.0
-			var lit := VFX.hash01(k, 5 + wi)
+			var wy := spire_top + 80.0 + float(wi) * 64.0 + _plane_hash(k + wi, 4) * 30.0
+			var lit := _plane_hash(k, 5 + wi)
 			var flick := 1.0 if Feedback.motion_reduced else 0.85 + 0.15 * sin(_atmo_t * 3.0 + float(k * 3 + wi))
 			ci.draw_rect(Rect2(x - 2.0 + (float(wi % 2) - 0.5) * 10.0, wy, 4.0, 14.0), Color(window_col, (0.06 + lit * 0.16) * flick))
 
@@ -719,7 +726,7 @@ func _draw_arches(ci: CanvasItem, horizon: float) -> void:
 	VFX.draw_vgradient(ci, Rect2(x_start, arch_top, width, 54.0), Color(0.0, 0.0, 0.0, 0.34), Color(0.0, 0.0, 0.0, 0.0))
 	for k in range(r.x, r.y + 1):
 		var cx := _plane_x(depth, float(k) * period)
-		var glazed := VFX.hash01(k, 11) > 0.6
+		var glazed := _plane_hash(k, 11) > 0.6
 		if glazed:
 			# A walled bay: leaded rose window glowing with the mood's light.
 			ci.draw_rect(Rect2(cx - 52.0, arch_top + 100.0, 104.0, base - arch_top - 100.0), wall.darkened(0.12))
@@ -741,9 +748,9 @@ func _draw_arches(ci: CanvasItem, horizon: float) -> void:
 		_draw_shaft(ci, cx + 52.0, 28.0, arch_top, base, wall)
 		_draw_spandrel(ci, cx, arch_top, wall, edge)
 		# Heraldic banners hang from the entablature on some bays.
-		if VFX.hash01(k, 12) > 0.62:
+		if _plane_hash(k, 12) > 0.62:
 			var by := arch_top - 30.0
-			var bl := 150.0 + VFX.hash01(k, 13) * 70.0
+			var bl := 150.0 + _plane_hash(k, 13) * 70.0
 			var sway := sin(_atmo_t * 0.9 + float(k) * 0.7) * 5.0 if moving else 0.0
 			var bc: Color = mood.banner
 			ci.draw_colored_polygon(PackedVector2Array([
@@ -754,12 +761,12 @@ func _draw_arches(ci: CanvasItem, horizon: float) -> void:
 			ci.draw_line(Vector2(cx - 27.0, by), Vector2(cx + 27.0, by), edge.lightened(0.15), 3.0)
 			VFX.draw_flame(ci, Vector2(cx + sway * 0.5, by + bl * 0.55), 16.0, 9.0, 0.0, 0.0, Color(mood.torch, 0.55), Color(VFX.GOLD, 0.35))
 		# Hanging chains, each with a slow deterministic sway.
-		if VFX.hash01(k, 7) > 0.35:
-			var length := 80.0 + VFX.hash01(k, 8) * 100.0
+		if _plane_hash(k, 7) > 0.35:
+			var length := 80.0 + _plane_hash(k, 8) * 100.0
 			var sway := sin(_atmo_t * 0.7 + float(k)) * 4.0 if moving else 0.0
 			ci.draw_dashed_line(Vector2(cx, arch_top - 34.0), Vector2(cx + sway, arch_top - 34.0 + length), edge, 2.0, 6.0)
-		if VFX.hash01(k, 9) > 0.7:
-			var drop := 240.0 + VFX.hash01(k, 10) * 220.0
+		if _plane_hash(k, 9) > 0.7:
+			var drop := 240.0 + _plane_hash(k, 10) * 220.0
 			var sway2 := sin(_atmo_t * 0.5 + float(k) * 1.9) * 6.0 if moving else 0.0
 			ci.draw_dashed_line(Vector2(cx + 46.0, -560.0), Vector2(cx + 46.0 + sway2, -560.0 + drop), edge, 2.0, 6.0)
 
@@ -788,13 +795,13 @@ func _draw_curtain_wall(ci: CanvasItem, horizon: float) -> void:
 		var x := _plane_x(depth, float(k) * period)
 		var crest := PackedVector2Array()
 		for i in range(6):
-			crest.append(Vector2(x + float(i) * period / 5.0, horizon - 220.0 + (VFX.hash01(k * 6 + i, 16) - 0.5) * 80.0))
+			crest.append(Vector2(x + float(i) * period / 5.0, horizon - 220.0 + (_plane_hash(k * 6 + i, 16) - 0.5) * 80.0))
 		var mass := crest.duplicate()
 		mass.append(Vector2(x + period, base))
 		mass.append(Vector2(x, base))
 		VFX.draw_shaded_polygon(ci, mass, wall)
 		ci.draw_polyline(crest, edge, 1.5)
-		var stump := horizon - 250.0 - VFX.hash01(k, 17) * 60.0
+		var stump := horizon - 250.0 - _plane_hash(k, 17) * 60.0
 		_draw_shaft(ci, x - 14.0, 28.0, stump, base, wall)
 		ci.draw_colored_polygon(PackedVector2Array([
 			Vector2(x - 14.0, stump + 6.0), Vector2(x - 6.0, stump - 8.0), Vector2(x + 2.0, stump + 2.0), Vector2(x + 14.0, stump - 6.0), Vector2(x + 14.0, stump + 8.0),
@@ -820,11 +827,11 @@ func _draw_stacks(ci: CanvasItem, horizon: float) -> void:
 		# One shed tooth per bay: a steep glazed face catching the furnace light.
 		ci.draw_colored_polygon(PackedVector2Array([Vector2(x, roof), Vector2(x + 30.0, roof - 46.0), Vector2(x + period, roof)]), shade)
 		ci.draw_line(Vector2(x + 3.0, roof - 3.0), Vector2(x + 28.0, roof - 42.0), Color(mouth, 0.16), 2.0)
-		if VFX.hash01(k, 1) < 0.3:
+		if _plane_hash(k, 1) < 0.3:
 			continue
-		var w := 40.0 + VFX.hash01(k, 2) * 30.0
-		var top := base - 380.0 - VFX.hash01(k, 3) * 80.0
-		var sx := x + 50.0 + VFX.hash01(k, 4) * 60.0
+		var w := 40.0 + _plane_hash(k, 2) * 30.0
+		var top := base - 380.0 - _plane_hash(k, 3) * 80.0
+		var sx := x + 50.0 + _plane_hash(k, 4) * 60.0
 		ci.draw_polygon(PackedVector2Array([
 			Vector2(sx - w * 0.5, base), Vector2(sx - w * 0.42, top), Vector2(sx + w * 0.42, top), Vector2(sx + w * 0.5, base),
 		]), PackedColorArray([lit, shade, shade, lit]))
@@ -833,7 +840,7 @@ func _draw_stacks(ci: CanvasItem, horizon: float) -> void:
 		ci.draw_rect(Rect2(sx - w * 0.6, top - 16.0, w * 1.2, 2.0), Color(mouth, 0.3))
 		# Five puffs climb and lean downwind at 6px/s, thinning as they rise.
 		for i in range(5):
-			var rise := fmod(_atmo_t * 6.0 + float(i) * 36.0 + VFX.hash01(k, 5) * 36.0, 180.0)
+			var rise := fmod(_atmo_t * 6.0 + float(i) * 36.0 + _plane_hash(k, 5) * 36.0, 180.0)
 			var puff := Vector2(sx + rise * 0.5, top - 22.0 - rise)
 			VFX.draw_ellipse(ci, puff, 16.0 + rise * 0.22, 10.0 + rise * 0.1, Color(smoke, 0.2 * (1.0 - rise / 180.0)))
 
@@ -867,7 +874,7 @@ func _draw_trusses(ci: CanvasItem, horizon: float) -> void:
 		ci.draw_line(Vector2(cx + period, lintel), apex, iron, 14.0)
 		ci.draw_line(apex, Vector2(bay, lintel), iron, 6.0)
 		_draw_shaft(ci, cx - 12.0, 24.0, lintel, base, iron)
-		if VFX.hash01(k, 11) > 0.55:
+		if _plane_hash(k, 11) > 0.55:
 			# A grated furnace port breathing in the dado, where the crypt has glass.
 			var port := Vector2(bay, dado + 84.0)
 			var breathe := 0.24 + (0.06 * sin(_atmo_t * 1.3 + float(k)) if moving else 0.0)
@@ -878,10 +885,10 @@ func _draw_trusses(ci: CanvasItem, horizon: float) -> void:
 				var dy := sqrt(34.0 * 34.0 - dx * dx)
 				ci.draw_line(Vector2(port.x + dx, port.y - dy), Vector2(port.x + dx, port.y + dy), iron, 2.5)
 			ci.draw_arc(port, 34.0, 0.0, TAU, 24, iron, 4.0)
-		if posmod(k, 3) == 0:
+		if posmod(k + dress_salt, 3) == 0:
 			# A crucible slung from the truss, its molten rim catching the light.
 			var sway := sin(_atmo_t * 0.6 + float(k)) * 4.0 if moving else 0.0
-			var cup := Vector2(bay + sway, lintel + 140.0 + VFX.hash01(k, 12) * 60.0)
+			var cup := Vector2(bay + sway, lintel + 140.0 + _plane_hash(k, 12) * 60.0)
 			ci.draw_dashed_line(Vector2(bay, lintel + 20.0), cup, rivet, 2.0, 6.0)
 			ci.draw_colored_polygon(PackedVector2Array([cup + Vector2(-20.0, 0.0), cup + Vector2(20.0, 0.0), cup + Vector2(13.0, 28.0), cup + Vector2(-13.0, 28.0)]), iron)
 			ci.draw_line(cup + Vector2(-21.0, 1.0), cup + Vector2(21.0, 1.0), Color(glow, 0.55), 2.0)
@@ -904,18 +911,18 @@ func _draw_crags(ci: CanvasItem, horizon: float) -> void:
 	for k in range(r.x, r.y + 1):
 		var x := _plane_x(depth, float(k) * period)
 		# Five to nine stalactites per bay, their tips lifting toward the light.
-		var teeth := 5 + int(VFX.hash01(k, 1) * 5.0)
+		var teeth := 5 + int(_plane_hash(k, 1) * 5.0)
 		var step := period / float(teeth)
 		for i in range(teeth):
-			var h := VFX.hash01(k * 9 + i, 2)
+			var h := _plane_hash(k * 9 + i, 2)
 			var tx := x + float(i) * step
 			ci.draw_polygon(PackedVector2Array([
 				Vector2(tx, roof - 1.0), Vector2(tx + step, roof - 1.0), Vector2(tx + step * (0.3 + 0.4 * h), roof + 20.0 + h * 100.0),
 			]), PackedColorArray([shade, shade, lit]))
 		# One broken crag on the far ridge per bay.
-		var w := 70.0 + VFX.hash01(k, 3) * 60.0
-		var peak := base - 200.0 - VFX.hash01(k, 4) * 140.0
-		var cx := x + VFX.hash01(k, 5) * 60.0
+		var w := 70.0 + _plane_hash(k, 3) * 60.0
+		var peak := base - 200.0 - _plane_hash(k, 4) * 140.0
+		var cx := x + _plane_hash(k, 5) * 60.0
 		ci.draw_polygon(PackedVector2Array([
 			Vector2(cx - w * 0.5, base), Vector2(cx - w * 0.36, peak + 60.0), Vector2(cx - w * 0.12, peak + 18.0), Vector2(cx, peak),
 			Vector2(cx + w * 0.18, peak + 34.0), Vector2(cx + w * 0.34, peak + 26.0), Vector2(cx + w * 0.5, base),
@@ -936,12 +943,12 @@ func _draw_ruin_arches(ci: CanvasItem, horizon: float) -> void:
 	var moving := not Feedback.motion_reduced
 	for k in range(r.x, r.y + 1):
 		var cx := _plane_x(depth, float(k) * period)
-		var standing := posmod(k, 2) == 0
+		var standing := posmod(k + dress_salt, 2) == 0
 		for side in range(2):
 			var px := cx - 80.0 + float(side) * 132.0
 			var top := arch_top
 			if not standing:
-				top = base - (base - arch_top) * (0.4 + VFX.hash01(k * 2 + side, 14) * 0.4)
+				top = base - (base - arch_top) * (0.4 + _plane_hash(k * 2 + side, 14) * 0.4)
 			_draw_shaft(ci, px, 28.0, top, base, wall)
 			if not standing:
 				ci.draw_colored_polygon(PackedVector2Array([
@@ -954,7 +961,7 @@ func _draw_ruin_arches(ci: CanvasItem, horizon: float) -> void:
 		_draw_spandrel(ci, cx, arch_top, wall, edge)
 		for i in range(5):
 			var rx := cx + 76.0 + float(i) * 6.0
-			var fall := 60.0 + VFX.hash01(k * 5 + i, 15) * 130.0
+			var fall := 60.0 + _plane_hash(k * 5 + i, 15) * 130.0
 			var sway := sin(_atmo_t * 0.8 + float(k + i)) * 3.0 if moving else 0.0
 			ci.draw_polyline(PackedVector2Array([
 				Vector2(rx, arch_top - 20.0), Vector2(rx + 5.0 + sway, arch_top + fall * 0.4),
@@ -970,12 +977,12 @@ func _draw_light_shafts(ci: CanvasItem, top: float, horizon: float) -> void:
 	var r := _plane_range(depth, period, 260.0)
 	var moving := not Feedback.motion_reduced
 	for k in range(r.x, r.y + 1):
-		if VFX.hash01(k, 71) < 0.4:
+		if _plane_hash(k, 71) < 0.4:
 			continue
-		var x := _plane_x(depth, float(k) * period + VFX.hash01(k, 72) * 200.0)
-		var w := 60.0 + VFX.hash01(k, 73) * 90.0
+		var x := _plane_x(depth, float(k) * period + _plane_hash(k, 72) * 200.0)
+		var w := 60.0 + _plane_hash(k, 73) * 90.0
 		var sway := sin(_atmo_t * 0.25 + float(k)) * 18.0 if moving else 0.0
-		var lean := 140.0 + VFX.hash01(k, 74) * 80.0
+		var lean := 140.0 + _plane_hash(k, 74) * 80.0
 		ci.draw_polygon(PackedVector2Array([
 			Vector2(x, top), Vector2(x + w, top),
 			Vector2(x + w + lean + sway, horizon + 40.0), Vector2(x + lean + sway - w * 0.6, horizon + 40.0),
@@ -1037,25 +1044,25 @@ func _draw_rubble(ci: CanvasItem, horizon: float) -> void:
 	var r := _plane_range(depth, period, 120.0)
 	var stone: Color = _haze(mood.stone, depth)
 	for k in range(r.x, r.y + 1):
-		if VFX.hash01(k, 81) < 0.45:
+		if _plane_hash(k, 81) < 0.45:
 			continue
-		var x := _plane_x(depth, float(k) * period + VFX.hash01(k, 82) * 160.0)
-		var w := 40.0 + VFX.hash01(k, 83) * 70.0
-		var h := 14.0 + VFX.hash01(k, 84) * 26.0
+		var x := _plane_x(depth, float(k) * period + _plane_hash(k, 82) * 160.0)
+		var w := 40.0 + _plane_hash(k, 83) * 70.0
+		var h := 14.0 + _plane_hash(k, 84) * 26.0
 		var pts := PackedVector2Array([Vector2(x - w * 0.5, horizon)])
 		for i in range(1, 6):
 			var u := float(i) / 6.0
-			pts.append(Vector2(x - w * 0.5 + u * w, horizon - h * (0.5 + 0.5 * sin(u * PI)) * (0.7 + VFX.hash01(k + i, 85) * 0.5)))
+			pts.append(Vector2(x - w * 0.5 + u * w, horizon - h * (0.5 + 0.5 * sin(u * PI)) * (0.7 + _plane_hash(k + i, 85) * 0.5)))
 		pts.append(Vector2(x + w * 0.5, horizon))
 		ci.draw_colored_polygon(pts, stone.darkened(0.35))
 		ci.draw_polyline(pts, Color(VFX.RIM, 0.2), 1.0)
 		var bone := Color("8f877a")
-		if VFX.hash01(k, 86) > (0.3 if ashpit else 0.6):
-			var sk := Vector2(x + (VFX.hash01(k, 87) - 0.5) * w * 0.5, horizon - h * 0.5 - 4.0)
+		if _plane_hash(k, 86) > (0.3 if ashpit else 0.6):
+			var sk := Vector2(x + (_plane_hash(k, 87) - 0.5) * w * 0.5, horizon - h * 0.5 - 4.0)
 			ci.draw_circle(sk, 5.0, bone)
 			ci.draw_circle(sk + Vector2(-2.0, -1.0), 1.4, VFX.VOID)
 			ci.draw_circle(sk + Vector2(2.0, -1.0), 1.4, VFX.VOID)
-		if ashpit and VFX.hash01(k, 88) > 0.4:
+		if ashpit and _plane_hash(k, 88) > 0.4:
 			# Two long bones crossed on the heap.
 			var b := Vector2(x - w * 0.2, horizon - h * 0.4)
 			ci.draw_line(b + Vector2(-12.0, 2.0), b + Vector2(12.0, -5.0), bone.darkened(0.15), 3.0)
@@ -1080,8 +1087,8 @@ func _draw_undercroft(ci: CanvasItem, horizon: float) -> void:
 		]), PackedColorArray([Color(wall, 0.6), Color(wall, 0.6), Color(wall, 0.0), Color(wall, 0.0)]))
 		ci.draw_arc(Vector2(cx + period * 0.5, top + 150.0), 86.0, PI, TAU, 18, Color(mood.edge, 0.22), 5.0)
 		# Hanging roots and chains under the slab.
-		if VFX.hash01(k, 121) > 0.5:
-			var len := 40.0 + VFX.hash01(k, 122) * 90.0
+		if _plane_hash(k, 121) > 0.5:
+			var len := 40.0 + _plane_hash(k, 122) * 90.0
 			var sway := sin(_atmo_t * 0.6 + float(k)) * 4.0 if not Feedback.motion_reduced else 0.0
 			ci.draw_dashed_line(Vector2(cx + 60.0, horizon + 120.0), Vector2(cx + 60.0 + sway, horizon + 120.0 + len), Color(mood.edge, 0.5), 2.0, 6.0)
 	if float(mood.ember_seep) > 0.05:
@@ -1349,6 +1356,7 @@ func _advance_room() -> void:
 	room = Room.new()
 	room.mood = mood
 	room.setup(tmpl, is_boss, player, run.rng.randi())
+	dress_salt = room.dress_salt
 	if not is_boss:
 		var hp_frac := float(run.build.hp) / maxf(1.0, float(run.build.max_hp))
 		room.exit_kinds = run.roll_exits(hp_frac)

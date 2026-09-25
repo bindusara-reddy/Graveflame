@@ -98,10 +98,16 @@ var fire_heat := 1.0:
 		fire_heat = value
 		_light_points_dirty = true
 var victory_candles := 0
+## Re-deals the hashed dressing per chamber: prop placement and kinds here, and
+## the backdrop's bays, banners and mounds through Game. The opening chamber
+## keeps 0, so its composed first impression never shifts.
+var dress_salt := 0
 
 func setup(tmpl: Dictionary, p_is_boss: bool, player: Node, seed_val: int) -> void:
 	template = tmpl
-	zone = Content.zone_for(str(tmpl.get("tag", "intro")))
+	var tag := str(tmpl.get("tag", "intro"))
+	zone = Content.zone_for(tag)
+	dress_salt = 0 if tag == "intro" else hash(tag) & 0xffff
 	is_boss = p_is_boss
 	_player_ref = player
 	_rng.seed = seed_val
@@ -194,13 +200,16 @@ func _build_props() -> void:
 	var entry: Vector2 = template.get("entry", Vector2.ZERO)
 	var exit: Vector2 = template.get("exit", Vector2.ZERO)
 	var walls: Array = template.get("walls", [])
+	var kinds: Array = CryptProp.ZONE_KINDS.get(zone, [CryptProp.Kind.URN, CryptProp.Kind.STAND])
 	for platform: Rect2 in template.get("platforms", []):
 		if platform.size.x < 180.0 or platform.position.y > Content.FLOOR_Y:
 			continue
 		var count := clampi(int(platform.size.x / 240.0), 1, 6)
 		for i in range(count):
 			if props.size() >= 18: return
-			var point := Vector2(platform.position.x + platform.size.x * (float(i) + 0.5) / float(count), platform.position.y)
+			# Evenly spread, then nudged per chamber so no two stamp the same row.
+			var nudge := (VFX.hash01(i + int(platform.position.x), dress_salt) - 0.5) * 90.0
+			var point := Vector2(platform.position.x + platform.size.x * (float(i) + 0.5) / float(count) + nudge, platform.position.y)
 			if absf(point.x - entry.x) < 85.0 or absf(point.x - exit.x) < 65.0:
 				continue
 			# Keep every rift's arch clear, not just the primary one.
@@ -210,7 +219,7 @@ func _build_props() -> void:
 				continue
 			var prop := CryptProp.new()
 			prop.position = point
-			prop.kind = props.size() % 2
+			prop.kind = kinds[(props.size() + dress_salt) % kinds.size()]
 			prop.z_index = 0
 			prop.shattered.connect(prop_shattered.emit)
 			# A broken candle stops casting light.
@@ -474,8 +483,8 @@ func light_points() -> Array:
 	# Fixed room lights retain priority in the small PointLight pool. Every candle
 	# also gets its inexpensive halo from LightLayer, including those outside it.
 	for prop in props:
-		if is_instance_valid(prop) and prop.kind == 1 and not prop.broken:
-			out.append({ "pos": prop.global_position + Vector2(0.0, -49.0), "radius": 72.0, "color": Color("ffac67"), "alpha": 0.16, "rate": 8.0, "phase": prop.position.x })
+		if is_instance_valid(prop) and prop.flame_height() > 0.0 and not prop.broken:
+			out.append({ "pos": prop.global_position + Vector2(0.0, -prop.flame_height()), "radius": 72.0, "color": Color("ffac67"), "alpha": 0.16, "rate": 8.0, "phase": prop.position.x })
 	_light_points_cache = out
 	_light_points_dirty = false
 	return out
@@ -1081,8 +1090,8 @@ func _draw_decor_back(ci: CanvasItem) -> void:
 			_dead_branch(ci, Vector2(700.0, fy), -PI * 0.5, 170.0, 0, 1, t, m)
 		"crossfire":
 			# One gallows each side of the pit, their cages hung out over the spikes.
-			_gallows(ci, Vector2(300.0, fy), 180.0, t, m)
-			_gallows(ci, Vector2(980.0, fy), -180.0, t, m)
+			_gallows(ci, Vector2(190.0, fy), 230.0, t, m)
+			_gallows(ci, Vector2(1090.0, fy), -230.0, t, m)
 		"boss":
 			_throne(ci, Vector2(640.0, fy), m)
 			_banner_prop(ci, Vector2(120.0, 120.0), 230.0, t, m, 3)
