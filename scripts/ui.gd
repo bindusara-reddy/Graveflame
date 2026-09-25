@@ -54,6 +54,9 @@ render_mode unshaded;
 uniform float progress = 0.0;
 uniform vec2 origin = vec2(0.5, 0.55);
 uniform float aspect = 1.7778;
+// How far the edge travels by progress 1: past the farthest corner plus the
+// ragged margin, so the burn always finishes wherever it starts.
+uniform float reach = 1.47;
 uniform vec4 ink : source_color = vec4(0.035, 0.027, 0.06, 1.0);
 uniform vec4 ember : source_color = vec4(1.0, 0.48, 0.12, 1.0);
 uniform vec4 hot : source_color = vec4(1.0, 0.86, 0.55, 1.0);
@@ -77,7 +80,7 @@ void fragment() {
 	float d = length(q);
 	float ragged = fbm(UV * vec2(aspect, 1.0) * 7.0) * 0.22;
 	// Distance past the burning edge: > 0 is burned through.
-	float edge = progress * (1.25 + 0.22) - (d + ragged);
+	float edge = progress * reach - (d + ragged);
 	float cover = 1.0 - smoothstep(0.0, 0.004, edge);
 	// The glowing rim: a hot core just inside, embers fading behind it.
 	float rim = exp(-abs(edge) * 60.0);
@@ -1908,7 +1911,9 @@ func show_panel(name: String, fade: float = 0.0) -> void:
 		tween.tween_property(panel, "modulate:a", 1.0, fade).set_trans(Tween.TRANS_SINE).set_ease(Tween.EASE_OUT)
 	if name == "title":
 		_set_title_controls_open(false)
-		_title_tableau.arrive(_last_panel != "forge")
+		# Only a real arrival replays the reveal; stepping back from a
+		# title sub-screen must not grey the menu out again.
+		_title_tableau.arrive(not (_last_panel in ["forge", "options", "keys"]))
 		_celebrate_new_victories()
 	_last_panel = name
 	if name != "pause":
@@ -2530,11 +2535,28 @@ func fade_from_black(duration: float = 0.45, origin: Vector2 = Vector2(0.5, 0.55
 	var mat := burn_material()
 	_fade.material = mat
 	var vs := get_viewport().get_visible_rect().size
-	mat.set_shader_parameter("aspect", vs.x / maxf(1.0, vs.y))
+	var aspect := vs.x / maxf(1.0, vs.y)
+	mat.set_shader_parameter("aspect", aspect)
 	mat.set_shader_parameter("origin", origin)
+	mat.set_shader_parameter("reach", burn_reach(origin, aspect))
 	mat.set_shader_parameter("progress", 0.0)
 	_veil_tween.tween_method(func(v: float): mat.set_shader_parameter("progress", v), 0.0, 1.0, duration * 1.6).set_trans(Tween.TRANS_SINE).set_ease(Tween.EASE_OUT)
-	_veil_tween.tween_callback(func(): _fade.color = Color(C_VOID, 0.0))
+	# The shader paints its own colour, so the veil is gone only once the
+	# material is: clearing the alpha alone would leave the burn's last frame.
+	_veil_tween.tween_callback(func():
+		_fade.material = null
+		_fade.color = Color(C_VOID, 0.0)
+	)
+
+
+## How far the burn's edge must travel from `origin` (in UV) to clear the
+## farthest corner of the frame, plus the ragged edge's full depth.
+static func burn_reach(origin: Vector2, aspect: float) -> float:
+	var from := origin * Vector2(aspect, 1.0)
+	var farthest := 0.0
+	for corner in [Vector2.ZERO, Vector2(aspect, 0.0), Vector2(0.0, 1.0), Vector2(aspect, 1.0)]:
+		farthest = maxf(farthest, from.distance_to(corner))
+	return farthest + 0.24
 
 
 func show_run_summary(stats: Dictionary, panel_name: String) -> void:

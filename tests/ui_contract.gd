@@ -37,7 +37,32 @@ func run() -> void:
 	await _test_prompts()
 	await _test_pause_ledger()
 	await _test_chamber_banners()
+	await _test_burn_veil()
+	await _test_title_return()
 	await finish("UI_CONTRACT")
+
+
+## The chamber veil burns fully open from any arrival point and leaves nothing.
+func _test_burn_veil() -> void:
+	var aspect := 1280.0 / 720.0
+	var origin := Vector2(0.216, 0.596)
+	var corner := (Vector2(aspect, 0.0) - origin * Vector2(aspect, 1.0)).length()
+	check(UI.burn_reach(origin, aspect) >= corner + 0.22, "the burn reaches the farthest corner past its ragged edge")
+	game.ui.fade_from_black(0.45, Vector2(0.02, 0.02))
+	await _wait_real(1.0)
+	var veil: ColorRect = game.ui._fade
+	check(veil.material == null and is_zero_approx(veil.color.a), "a finished burn leaves no veil or shader behind")
+
+
+## Stepping back to the title from a sub-screen does not replay the reveal.
+func _test_title_return() -> void:
+	game.ui.quit_to_title_requested.emit()
+	await _wait_real(2.5)
+	game.ui.options_requested.emit()
+	await ticks(2)
+	game.ui.back_from_options_requested.emit()
+	await ticks(2)
+	check(is_equal_approx(game.ui._title_holder.modulate.a, 1.0), "the title menu is fully lit after BACK from options")
 
 
 ## The HUD counts chambers and names the throne; the clear card steps aside.
