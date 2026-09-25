@@ -532,14 +532,6 @@ static func panel_box(background: Color, border: Color, radius: int, border_widt
 	return box
 
 
-static func bar_box(color: Color) -> StyleBoxFlat:
-	var box := StyleBoxFlat.new()
-	box.bg_color = color
-	box.set_corner_radius_all(4)
-	box.corner_detail = 1
-	return box
-
-
 ## A flat, square-cut fill padded by `margin` on every side: the ink channel
 ## and ember grip of scrollbars.
 static func flat_box(color: Color, margin: float) -> StyleBoxFlat:

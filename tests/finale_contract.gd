@@ -527,9 +527,9 @@ func _test_remembered() -> void:
 	check(_boss_card() == "TRIAL OF THE THRONE", "the Trial of the Throne still names the Warden's fight")
 
 
-## The subtitle on the Warden's title card, as shown.
+## The subtitle on the Warden's title card, as shown (the paper banner's kicker).
 func _boss_card() -> String:
-	return (game.ui._boss_intro.sub as Label).text
+	return game.ui.hud._boss_intro.kicker.text
 
 
 ## The title remembers the last ending: an empty save is today's title; after

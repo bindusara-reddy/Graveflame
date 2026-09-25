@@ -184,13 +184,13 @@ func run() -> void:
 	await ticks(60)
 	await _check_frame("fresh save")
 
-	# --- A veteran's title: twelve candles in mixed wax and the Oath's dawn ---
-	Save.save_save({"victories": 12, "roll": [0, 1, 0, 3, 0, 0, 2, 0, 5, 0, 1, 0], "oath_kept": true, "last_celebrated": 12})
+	# --- A veteran's title: twelve candles in mixed wax and the dawn of a keep once ended ---
+	Save.save_save({"victories": 12, "roll": [0, 1, 0, 3, 0, 0, 2, 0, 5, 0, 1, 0], "ended_ever": true, "last_ending": "ended", "last_celebrated": 12})
 	ui.hide_all_panels()
 	ui.show_panel("title")
-	check(tableau.legacy.victories == 12 and tableau.legacy.oath, "the title reads the victory legacy on arrival")
+	check(tableau.legacy.victories == 12 and tableau.legacy.dawn, "the title reads the victory legacy on arrival")
 	await ticks(120)
-	await _check_frame("12 victories, oath kept")
+	await _check_frame("12 victories, the keep once ended")
 	# Reduced motion with a win still to celebrate: its candle is simply lit.
 	var strikes := [0]
 	tableau.candle_struck.connect(func() -> void: strikes[0] += 1)

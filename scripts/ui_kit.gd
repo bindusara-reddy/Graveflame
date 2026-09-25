@@ -127,17 +127,6 @@ static func outlined(l: Label, px := 2) -> Label:
 	return l
 
 
-## A caption on the left and its value on the right. Returns the value label.
-static func stat_line(parent: VBoxContainer, title: String, value: String, value_color: Color, value_size := 12) -> Label:
-	var row := HBoxContainer.new()
-	row.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	parent.add_child(row)
-	row.add_child(label(title, 10, T.ASH, HORIZONTAL_ALIGNMENT_LEFT))
-	var result := label(value, value_size, value_color, HORIZONTAL_ALIGNMENT_RIGHT)
-	row.add_child(result)
-	return result
-
-
 ## A ledger line, `CHAMBERS ........ 7 / 8`: caption, dotted leader, value.
 ## The value label is the row's "value" meta.
 static func stat(caption_text: String, value: String, value_color := T.BONE) -> HBoxContainer:
@@ -1297,53 +1286,6 @@ class RankPips extends Control:
 	func _draw() -> void:
 		for i in range(max_rank):
 			P.lozenge(get_canvas_item(), Vector2(7.0 + float(i) * 14.0, size.y * 0.5), 5.5, T.GOLD if i < rank else T.SOOT, i >= rank)
-
-
-# --- The HUD's legacy bars (until the HUD rebuild moves to Meter) ------------------
-
-static func bar(fill_color: Color, background: Color, height: float) -> ProgressBar:
-	var b := ProgressBar.new()
-	b.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	b.custom_minimum_size.y = height
-	b.show_percentage = false
-	b.add_theme_stylebox_override("background", T.bar_box(background))
-	b.add_theme_stylebox_override("fill", T.bar_box(fill_color))
-	return b
-
-
-## A bar with a chip trail behind it. Returns { holder, bar, trail }.
-static func trailed_bar(fill_color: Color, background: Color, height: float) -> Dictionary:
-	var holder := Control.new()
-	holder.custom_minimum_size.y = height
-	holder.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	var trail := bar(Color("f4e2c8"), background, height)
-	holder.add_child(trail)
-	trail.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
-	var front := bar(fill_color, Color(0.0, 0.0, 0.0, 0.0), height)
-	holder.add_child(front)
-	front.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
-	for b in [trail, front]:
-		(b as ProgressBar).max_value = 100.0
-		(b as ProgressBar).value = 100.0
-	return { "holder": holder, "bar": front, "trail": trail }
-
-
-## Lay ink notches over `target` at each fraction in `marks`.
-static func notch_bar(target: Control, marks: Array) -> void:
-	var notches := BarNotches.new()
-	notches.marks = marks
-	notches.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	target.add_child(notches)
-	notches.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
-
-
-## Thin cuts across a bar: thresholds the player spends or fights toward.
-class BarNotches extends Control:
-	var marks: Array = []
-	func _draw() -> void:
-		for mark in marks:
-			var x := roundf(size.x * float(mark))
-			draw_rect(Rect2(x - 1.0, -1.0, 2.0, size.y + 2.0), T.INK)
 
 
 # --- Screens additions -------------------------------------------------------------
