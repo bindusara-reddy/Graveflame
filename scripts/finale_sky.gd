@@ -48,8 +48,8 @@ uniform float rim_gain = 1.0;
 const vec3 EMBER = vec3(1.0, 0.48, 0.12);
 const vec3 HOT = vec3(1.0, 0.86, 0.55);
 const vec3 CHAR = vec3(0.06, 0.035, 0.05);
-const float RAGGED = 0.24;
-const float LAG = 0.34;
+const float RAGGED = 0.32;
+const float LAG = 0.07;
 const float SPREAD = 0.28;
 
 float hash(vec2 p) { return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453); }
@@ -75,13 +75,14 @@ float front_dist(vec2 uv) {
 // under a hot rim, then opens into holes with glowing lips. `ahead` is how far
 // the unragged front has passed this point; `edge` is the painting's local contrast.
 vec4 burn(vec4 world, float edge, vec2 p, float ahead) {
-	float char_edge = ahead - fbm(p * 6.0) * RAGGED;
-	float hole_edge = ahead - LAG - fbm(p * 9.0 + 3.1) * 0.2;
+	// Broad tongues of fire race ahead in places; fine tatters on their edges.
+	float char_edge = ahead - (fbm(p * 2.2) * 0.75 + fbm(p * 8.0) * 0.25) * RAGGED;
+	float hole_edge = ahead - LAG - (fbm(p * 2.2) * 0.75 + fbm(p * 9.0 + 3.1) * 0.25) * RAGGED;
 	float charred = mix(smoothstep(0.0, 0.35, progress), smoothstep(0.0, 0.01, char_edge), travel);
 	float burned = mix(smoothstep(0.45, 1.0, progress), smoothstep(0.0, 0.006, hole_edge), travel);
 	float glow = travel * rim_gain;
 	float rim = exp(-abs(char_edge) * 70.0) * glow;
-	float hole_rim = exp(-abs(hole_edge) * 90.0) * charred * glow;
+	float hole_rim = exp(-abs(hole_edge) * 110.0) * charred * glow * 0.75;
 	float scorch = smoothstep(-0.12, 0.0, char_edge) * (1.0 - charred) * travel;
 	// Painted cut edges keep glowing inside the char, cooling behind the front.
 	float seam = smoothstep(0.035, 0.12, edge) * rim_gain;
@@ -103,7 +104,7 @@ void fragment() {
 	float reach = max(max(front_dist(vec2(0.0)), front_dist(vec2(1.0, 0.0))), max(front_dist(vec2(0.0, 1.0)), front_dist(vec2(1.0)))) + RAGGED;
 	float ahead = progress * (reach + LAG) - front_dist(UV);
 	// Far from both travelling fronts nothing glows, so most of the frame skips the noise.
-	if (travel > 0.5 && (ahead < -0.12 || ahead > LAG + 0.3)) {
+	if (travel > 0.5 && (ahead < -0.12 || ahead > LAG + RAGGED + 0.05)) {
 		COLOR = ahead < 0.0 ? texture(TEXTURE, UV) : vec4(0.0);
 	} else {
 		vec2 px = TEXTURE_PIXEL_SIZE * 1.5;
@@ -125,13 +126,13 @@ const RIM_Y := -700.0
 ## The well is drawn from the knight's eye. Ledges above it sag toward the
 ## viewer by SAG per unit of height, showing their undersides; the floor's
 ## far edge, below it, arches the other way.
-const EYE_Y := 470.0
-const SAG := 0.11
+const EYE_Y := 550.0
+const SAG := 0.16
 ## Interior half-width at the floor and at the rim: the walls lean in as they
 ## climb, the way a shaft converges when you look up it.
 const HALF_FLOOR := 740.0
-const HALF_RIM := 560.0
-const LEVELS := 6
+const HALF_RIM := 500.0
+const LEVELS := 8
 ## How far each ledge juts: its unlit underside shows above the wall line.
 const LEDGE := 24.0
 ## The first chamber's moon, hung over the mouth.
@@ -179,8 +180,9 @@ const DAWN_TINT := Color(0.8, 0.82, 0.88)
 const RISE_SPEED := 270.0
 const RISE_MIN := 4.0
 const RISE_MAX := 7.5
-## A settling star pops and blooms over this long.
+## A settling star pops and blooms over this long; the arm length it keeps.
 const SETTLE_TIME := 0.9
+const STAR_R := 6.5
 ## Trail samples behind a flame, each this fraction of its climb earlier.
 const TRAIL := 14
 const TRAIL_STEP := 0.012
@@ -392,7 +394,8 @@ func _light() -> void:
 		var from := lerpf(0.3, 0.9, float(b) / STAR_BUCKETS)
 		_stars[b].modulate.a = smoothstep(from, from + 0.1, reveal) * out
 	var moon := smoothstep(0.2, 0.8, reveal)
-	_moon.modulate.a = moon * (1.0 - 0.5 * dawn)
+	# The dawn keeps the first chamber's moon as a pale ghost, night or no night.
+	_moon.modulate.a = maxf(moon * (1.0 - 0.5 * dawn), 0.3 * dawn)
 	_halo.modulate.a = moon * 0.5 * moon_glow * (1.0 - 0.7 * dawn)
 	for piece: Node2D in [_new_body, _new_glow]:
 		piece.modulate.a = out
@@ -501,7 +504,17 @@ func _arc(r: Dictionary, inset: float, lift: float, steps := 48) -> PackedVector
 
 ## How much of ledge `r`'s underside shows at the far middle.
 static func _soffit(r: Dictionary) -> float:
-	return 10.0 + 0.25 * float(r.sag)
+	return 10.0 + 0.2 * float(r.sag)
+
+
+## A colour for each point of an _arc(), turned away round the curve: full
+## where the wall faces us, darker toward the sides. This is what makes the
+## shaft read round rather than as a flat facade.
+static func _round(c: Color, steps := 48) -> PackedColorArray:
+	var cols := PackedColorArray()
+	for i in range(steps + 1):
+		cols.append(c.darkened(0.5 * (1.0 - sin(PI * float(i) / steps))))
+	return cols
 
 
 func _draw_well(ci: CanvasItem) -> void:
@@ -524,10 +537,12 @@ func _paint_level(m: PaperMesh, i: int) -> void:
 	var low: Dictionary = _rings[i]
 	var high: Dictionary = _rings[i + 1]
 	var v := (float(low.v) + float(high.v)) * 0.5
-	var face := WALL_WARM.lerp(WALL_COLD, v).lerp(MOONLIT, 0.45 * v * v)
+	# Low down the wall is lit only where the knight's flame reaches it (the
+	# warm pool in _draw_moonlight), so its own paint stays dark.
+	var face := WALL_WARM.darkened(0.3 * (1.0 - v)).lerp(WALL_COLD, v).lerp(MOONLIT, 0.45 * v * v)
 	var top := _arc(high, 0.0, 0.0)
 	var bottom := _arc(low, 0.0, 0.0)
-	m.band(top, bottom, flat(face.darkened(0.45), top.size()), flat(face, bottom.size()))
+	m.band(top, bottom, _round(face.darkened(0.45)), _round(face))
 	# Masonry courses: thin broken lines following the curve.
 	for c in range(1, 3):
 		var f := float(c) / 3.0
@@ -536,13 +551,13 @@ func _paint_level(m: PaperMesh, i: int) -> void:
 				m.line(bottom[j].lerp(top[j], f), bottom[j + 1].lerp(top[j + 1], f), Color(VFX.RIM, 0.06 + 0.08 * v), 1.0)
 	# Niches stand on the lip of the ledge below (the floor, for the lowest).
 	var sill := 0.0 if i == 0 else _soffit(low)
-	var count := 5 + i
+	var count := 7 + i
 	for j in range(count):
 		var seed := i * 17 + j
 		var a := PI * (float(j) + 0.5 + (VFX.hash01(seed, 8) - 0.5) * 0.4) / float(count)
 		var foot := _ring_point(low, a, 0.0, sill)
 		var crown := _ring_point(high, a)
-		var nh := (foot.y - crown.y) * (0.36 + VFX.hash01(seed, 6) * 0.26)
+		var nh := (foot.y - crown.y) * (0.34 + VFX.hash01(seed, 6) * 0.2)
 		foot.y -= (foot.y - crown.y) * 0.12
 		# Seen round the curve, a niche near the sides turns away and narrows.
 		_paint_niche(m, foot, nh, nh * 0.56 * lerpf(0.3, 1.0, sin(a)), VFX.hash01(seed, 7), face, v, seed)
@@ -604,38 +619,77 @@ func _paint_ledge(m: PaperMesh, i: int) -> void:
 	var under := SOFFIT.lerp(UNDERGLOW, 0.55 * pow(1.0 - v, 2.0))
 	var junction := _arc(r, 0.0, 0.0)
 	var lip := _arc(r, LEDGE, _soffit(r))
+	var lit := _round(under)
+	var shade := _round(under.darkened(0.3))
 	var seg := 0
 	while seg < junction.size() - 1:
 		var end := mini(seg + 3 + int(VFX.hash01(i * 50 + seg, 15) * 6.0), junction.size() - 1)
 		if rim or VFX.hash01(i * 50 + seg, 16) > 0.16:
 			var edge := lip.slice(seg, end + 1)
-			m.band(edge, junction.slice(seg, end + 1), flat(under, edge.size()), flat(under.darkened(0.3), edge.size()))
+			m.band(edge, junction.slice(seg, end + 1), lit.slice(seg, end + 1), shade.slice(seg, end + 1))
 			m.stroke(edge, Color(VFX.RIM, 0.55 if rim else 0.22 + 0.3 * v), 2.0 if rim else 1.5)
 		seg = end
 
 
-## The earth the shaft is sunk in, cut away like a stage set: dark coursed
-## stone either side of the well and under its floor, a moonlit bevel on
-## the cut and along the ground at the rim.
+## The earth the shaft is sunk in, cut away like a stage set: torn-paper
+## strata, each sheet a shade apart and lit along its top, with the
+## ossuary's bones pressed into them beside the shaft; a moonlit bevel on the
+## cut and along the ground at the rim.
 func _paint_earth(m: PaperMesh) -> void:
 	var bottom := FLOOR_Y + FLOOR_FACE
+	var shaft := PackedVector2Array([Vector2(CX - HALF_RIM, RIM_Y), Vector2(CX + HALF_RIM, RIM_Y),
+		Vector2(CX + half_width(bottom), bottom), Vector2(CX - half_width(bottom), bottom)])
+	var y := RIM_Y
+	var k := 0
+	while y < EXTENT.end.y:
+		var next := y + 58.0 + 40.0 * VFX.hash01(k, 91)
+		var sheet := _stratum_edge(y, k, k == 0)
+		var under := _stratum_edge(next, k + 1, false)
+		under.reverse()
+		sheet.append_array(under)
+		var tone := EARTH.lerp(EARTH_JOINT, 0.25 + 0.55 * VFX.hash01(k, 92)).darkened(0.25 * clampf((y - RIM_Y) / 1600.0, 0.0, 1.0))
+		for piece in Geometry2D.clip_polygons(sheet, shaft):
+			m.polygon(piece, VFX.shaded_colors(piece, tone, 1.35, 0.85))
+		y = next
+		k += 1
 	for side: float in [-1.0, 1.0]:
+		_paint_bones(m, side)
 		var rim := Vector2(CX + side * HALF_RIM, RIM_Y)
-		var foot := Vector2(CX + side * half_width(bottom), bottom)
 		var outer := EXTENT.position.x if side < 0.0 else EXTENT.end.x
-		m.fill(PackedVector2Array([Vector2(outer, RIM_Y), rim, foot, Vector2(foot.x, EXTENT.end.y), Vector2(outer, EXTENT.end.y)]), EARTH)
-		# Courses near the cut.
-		for k in range(1, 30):
-			var y := RIM_Y + float(k) * 46.0
-			if y >= bottom:
-				break
-			var edge_x := CX + side * half_width(y)
-			m.line(Vector2(edge_x, y), Vector2(edge_x + side * 420.0, y), EARTH_JOINT, 1.5)
-			var jx := edge_x + side * (40.0 + 60.0 * VFX.hash01(k, 31 + int(side)))
-			m.line(Vector2(jx, y), Vector2(jx, y + 46.0), EARTH_JOINT, 1.5)
-		m.line(rim, foot, Color(VFX.RIM, 0.28), 1.5)
-		m.line(Vector2(outer, RIM_Y), rim, Color(VFX.RIM, 0.4), 1.5)
-	m.rect(Rect2(EXTENT.position.x, bottom, EXTENT.size.x, EXTENT.end.y - bottom), EARTH)
+		m.line(rim, Vector2(CX + side * half_width(bottom), bottom), Color(VFX.RIM, 0.3), 1.5)
+		m.line(Vector2(outer, RIM_Y), rim, Color(VFX.RIM, 0.45), 1.5)
+
+
+## One torn edge between strata, across the whole extent at about `y`; the
+## ground's own top edge stays level.
+static func _stratum_edge(y: float, k: int, level: bool) -> PackedVector2Array:
+	var pts := PackedVector2Array()
+	var steps := 60
+	for j in range(steps + 1):
+		var x := lerpf(EXTENT.position.x, EXTENT.end.x, float(j) / steps)
+		var tear := 0.0 if level else (sin(x * 0.004 + float(k) * 1.9) * 10.0 + (VFX.hash01(j + k * 71, 93) - 0.5) * 7.0)
+		pts.append(Vector2(x, y + tear))
+	return pts
+
+
+## The ossuary's dead, pressed into the earth beside the shaft on `side`:
+## skulls and long bones, dim as the stone, a few to a stratum.
+func _paint_bones(m: PaperMesh, side: float) -> void:
+	for n in range(14):
+		var seed := n + (0 if side < 0.0 else 50)
+		var y := lerpf(RIM_Y + 60.0, FLOOR_Y + 60.0, (float(n) + VFX.hash01(seed, 94)) / 14.0)
+		var p := Vector2(CX + side * (half_width(y) + 40.0 + 260.0 * VFX.hash01(seed, 95)), y)
+		var bone := EFFIGY.darkened(0.15)
+		if VFX.hash01(seed, 96) < 0.45:
+			m.circle(p, 7.0, bone, 12)
+			m.rect(Rect2(p + Vector2(-4.0, 4.0), Vector2(8.0, 5.0)), bone)
+			for eye: float in [-2.8, 2.8]:
+				m.circle(p + Vector2(eye, -0.5), 1.8, EARTH, 6)
+		else:
+			var along := Vector2.RIGHT.rotated((VFX.hash01(seed, 97) - 0.5) * 1.2) * 13.0
+			m.line(p - along, p + along, bone, 3.0)
+			for end: Vector2 in [p - along, p + along]:
+				m.circle(end, 2.6, bone, 8)
 
 
 ## The well floor: a sliver of flagstones up to the far wall's foot, then the
@@ -687,6 +741,11 @@ func _remnants(near: bool) -> Array[Dictionary]:
 	out.append({ "shape": rib, "burnt": burnt })
 	out.append(_post(Vector2(CX + HALF_RIM + 90.0, RIM_Y), 70.0, 210.0, 5))
 	out.append(_post(Vector2(CX + HALF_RIM + 210.0, RIM_Y), 48.0, 118.0, 6))
+	# The keep's outer walls, burnt down to their footings along the ground.
+	for n in range(8):
+		var side := -1.0 if n % 2 == 0 else 1.0
+		var x := CX + side * (HALF_RIM + 380.0 + 250.0 * floorf(n / 2.0) + 60.0 * VFX.hash01(n, 85))
+		out.append(_post(Vector2(x, RIM_Y), 70.0 + 80.0 * VFX.hash01(n, 86), 40.0 + 130.0 * VFX.hash01(n, 87), 10 + n))
 	return out
 
 
@@ -732,7 +791,7 @@ func _draw_moonlight(ci: CanvasItem) -> void:
 	m.beam(Vector2(CX + 30.0, mouth), Vector2(CX + 250.0, mouth), Vector2(CX - 200.0, FLOOR_Y), Vector2(CX + 120.0, FLOOR_Y), Color(MOON_COL, 0.12), Color(MOON_COL, 0.07))
 	m.glow(Vector2(CX + 130.0, mouth + 30.0), 260.0, Color(MOON_COL, 0.1))
 	m.glow_ellipse(Vector2(CX - 40.0, FLOOR_Y + 2.0), Vector2(250.0, 36.0), Color(MOON_COL, 0.16))
-	m.glow_ellipse(Vector2(CX, FLOOR_Y - 40.0), Vector2(520.0, 320.0), Color(VFX.ORANGE, 0.08))
+	m.glow_ellipse(Vector2(CX, FLOOR_Y - 40.0), Vector2(480.0, 300.0), Color(VFX.ORANGE, 0.13))
 	m.commit(ci)
 
 
@@ -760,8 +819,6 @@ func _draw_spill(ci: CanvasItem) -> void:
 			m.band(prev, row, prev_cols, cols)
 		prev = row
 		prev_cols = cols
-	# Over the rim the grey light meets the sky's.
-	m.gradient(Rect2(CX - HALF_RIM, RIM_Y - 200.0, HALF_RIM * 2.0, 200.0), Color(DAWN_LIGHT, 0.0), Color(DAWN_LIGHT, 0.2 * strength))
 	m.commit(ci)
 
 
@@ -794,7 +851,7 @@ func _draw_risers(ci: CanvasItem) -> void:
 			m.circle(trail[TRAIL - 3 - j * 3] + drift * sc, 1.4 * sc, Color(fire(VFX.ORANGE), 0.7 - 0.2 * float(j)), 6)
 		var become := smoothstep(0.82, 1.0, t / float(r.dur))
 		m.crown(head + Vector2(0.0, 6.0 * sc), sc * (1.0 - become), _clock * 1.3 + float(r.seed), fire(RISER_FLAME), fire(VFX.GOLD))
-		m.star(head, 8.0 * become * _far_scale(MOON.y), STAR_GOLD, VFX.HOT)
+		m.star(head, STAR_R * become, STAR_GOLD, VFX.HOT)
 	m.commit(ci)
 
 
@@ -805,8 +862,11 @@ func _draw_riser_glow(ci: CanvasItem) -> void:
 	var k := 0.75 if Feedback.flash_reduced else 1.0
 	for r in _flying:
 		if float(r.t) >= 0.0:
+			# A close heart, and a wide pool that warms the galleries it passes.
 			var head := _rise_point(r, float(r.t))
-			m.glow(head, 42.0 * _far_scale(head.y), Color(VFX.GOLD, 0.4 * k))
+			var sc := _far_scale(head.y)
+			m.glow(head, 36.0 * sc, Color(VFX.GOLD, 0.45 * k))
+			m.glow(head, 130.0 * sc, Color(VFX.ORANGE, 0.16 * k))
 	m.commit(ci)
 
 
@@ -818,7 +878,7 @@ func _draw_new_stars(ci: CanvasItem) -> void:
 		var k := float(s.age) / SETTLE_TIME
 		# Past full size and back: the star catches.
 		var pop := 1.0 + 0.35 * sin(PI * minf(1.0, k * 1.4)) * (1.0 - k)
-		m.star(s.p, 8.0 * _far_scale(MOON.y) * pop, STAR_GOLD, VFX.HOT)
+		m.star(s.p, STAR_R * pop, STAR_GOLD, VFX.HOT)
 	m.commit(ci)
 
 
