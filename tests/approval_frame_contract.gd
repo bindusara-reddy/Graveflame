@@ -1,50 +1,29 @@
-extends SceneTree
+extends "res://tests/harness.gd"
 ## Approval-frame contract for the Blasphemous bar. Runs headless via SceneTree
 ## (no rendering): stages real gameplay state and asserts every number the
 ## approval frame must hit. A failing check = rebuild the layer, no eyeballing.
 ## Run: godot4 --headless --path . --script res://tests/approval_frame_contract.gd
 
-var checks := 0
-var failures := 0
 
-
-func _init() -> void:
-	call_deferred("_run")
-
-
-func check(condition: bool, message: String) -> void:
-	checks += 1
-	if not condition:
-		failures += 1
-		printerr("FAIL: " + message)
-
-
-func _run() -> void:
+func run() -> void:
 	await process_frame
-	Save.path = "user://graveflame_save_approval.json"
-	await _test_camera_framing()
+	use_scratch_save("graveflame_save_approval")
+	# One title-screen game serves every layout check below.
+	await load_main_scene(1)
+	_test_camera_framing()
+	_test_phase_tag()
+	_test_banner_placement()
+	await free_game()
 	await _test_attack_staging()
 	await _test_boss_staging()
-	await _test_phase_tag()
-	await _test_banner_placement()
-	await _test_damage_numbers()
-	if FileAccess.file_exists("user://graveflame_save_approval.json"):
-		DirAccess.remove_absolute("user://graveflame_save_approval.json")
-	var passed := failures == 0
-	print("APPROVAL_CONTRACT_RESULT: %s (%d checks, %d failures)" % ["PASS" if passed else "FAIL", checks, failures])
-	quit(0 if passed else 1)
+	_test_damage_numbers()
+	await finish("APPROVAL_CONTRACT")
 
 
 ## The locked camera contract: tighter frame, fighters read at Blasphemous scale.
 func _test_camera_framing() -> void:
 	check(Content.CAM_ZOOM >= 1.1 and Content.CAM_ZOOM <= 1.2, "CAM_ZOOM stays in the locked 1.1-1.2 band")
 	check(Content.PIXEL_SCALE <= 1.0, "vector-native PIXEL_SCALE stays at or below 1.0")
-	var packed = load("res://main.tscn")
-	var game = packed.instantiate()
-	root.add_child(game)
-	await process_frame
-	await physics_frame
-	game.feedback.camera.zoom = Vector2.ONE * Content.CAM_ZOOM / Content.PIXEL_SCALE
 	var zoom: Vector2 = game.feedback.camera.zoom
 	check(is_equal_approx(zoom.x, Content.CAM_ZOOM / Content.PIXEL_SCALE), "camera zoom honors the CAM_ZOOM contract")
 	# Tighter frame: at 1280 wide the view spans ~1113 world px, never the full room.
@@ -57,8 +36,6 @@ func _test_camera_framing() -> void:
 	# Boss must loom: >=18% of visible frame height.
 	var boss_frac: float = float(Content.BOSS_H) / (float(Content.VIEW_H) / zoom.y)
 	check(boss_frac >= 0.18, "boss body height reads >=18% of the visible frame")
-	game.queue_free()
-	await process_frame
 
 
 ## The finisher swing must be stageable: real state, real arc, real hit-stop.
@@ -80,7 +57,8 @@ func _test_attack_staging() -> void:
 	check(player.attack_index == 1, "forced chain reaches the cleave")
 	var cleave: Dictionary = Content.COMBO[1]
 	check(float(cleave.range) >= 70.0, "cleave range reaches the staged enemy")
-	check(float(cleave.arc) >= 1.8, "cleave arc sweeps a readable fan")
+	var sweep: Array = Player.KnightArt.SWINGS.cleave.smear
+	check(absf(float(sweep[1]) - float(sweep[0])) >= 1.8, "cleave smear sweeps a readable fan")
 	player.queue_free()
 	await process_frame
 
@@ -107,11 +85,6 @@ func _test_boss_staging() -> void:
 
 ## Banners must live in the upper third and never cover the combat plane.
 func _test_phase_tag() -> void:
-	var packed := load("res://main.tscn")
-	var game = packed.instantiate()
-	root.add_child(game)
-	await process_frame
-	await physics_frame
 	check(game.ui.has_method("flash_boss_phase"), "phase-2 callout renders as a small tag, not a center card")
 	game.ui.flash_boss_phase("THE WARDEN IGNITES")
 	var tag: Label = game.ui.get("_boss_phase_tag")
@@ -120,16 +93,9 @@ func _test_phase_tag() -> void:
 		var r: Rect2 = tag.get_global_rect()
 		check(r.position.y < float(Content.VIEW_H) * 0.3, "phase tag stays in the upper strip")
 		check(r.size.x < float(Content.VIEW_W) * 0.55, "phase tag never spans the combat plane")
-	game.queue_free()
-	await process_frame
 
 
 func _test_banner_placement() -> void:
-	var packed = load("res://main.tscn")
-	var game = packed.instantiate()
-	root.add_child(game)
-	await process_frame
-	await physics_frame
 	var hud_size := Vector2(float(Content.VIEW_W), float(Content.VIEW_H))
 	var upper_third := hud_size.y / 3.0
 	var clear_banner: Control = game.ui.get("_room_clear_banner")
@@ -142,8 +108,6 @@ func _test_banner_placement() -> void:
 		var root_c: Control = room_intro["root"]
 		var r2: Rect2 = root_c.get_global_rect()
 		check(r2.position.y + r2.size.y * 0.5 <= hud_size.y * 0.55, "chamber card never covers the fighters")
-	game.queue_free()
-	await process_frame
 
 
 ## Damage numbers must disambiguate: player-dealt vs player-taken, capped size.
