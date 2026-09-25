@@ -111,7 +111,6 @@ var _wave_label: Label
 var _score_label: Label
 var _boss_panel: Control
 var _boss_bar: ProgressBar
-var _boss_label: Label
 var _boss_value_label: Label
 var _flask_container: HBoxContainer
 var _flask_dots: Array = []
@@ -458,18 +457,14 @@ func _build_boss_status() -> void:
 	var head := HBoxContainer.new()
 	head.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	stack.add_child(head)
-	_boss_label = _make_label("THE EMBER WARDEN", 13, Color("f2c3c6"), HORIZONTAL_ALIGNMENT_LEFT)
-	head.add_child(_boss_label)
-	_boss_value_label = _make_label("420", 12, C_RED, HORIZONTAL_ALIGNMENT_RIGHT)
+	var boss_label := _make_label("THE EMBER WARDEN", 13, Color("f2c3c6"), HORIZONTAL_ALIGNMENT_LEFT)
+	head.add_child(boss_label)
+	_boss_value_label = _make_label("", 12, C_RED, HORIZONTAL_ALIGNMENT_RIGHT)
 	head.add_child(_boss_value_label)
 	var boss_pair := _trailed_bar(Color("b94350"), Color("41131b"), 13.0)
 	stack.add_child(boss_pair.holder)
 	_boss_bar = boss_pair.bar
 	_boss_trail = boss_pair.trail
-	_boss_bar.max_value = Content.BOSS_HP
-	_boss_bar.value = Content.BOSS_HP
-	_boss_trail.max_value = Content.BOSS_HP
-	_boss_trail.value = Content.BOSS_HP
 	_boss_panel.visible = false
 
 
@@ -524,7 +519,9 @@ func _build_title() -> void:
 		var band := panel.get_node_or_null(band_name)
 		if band != null:
 			band.visible = false
-	_build_title_scene(panel)
+	# Original menu art: the Threshold of the Descent tableau (scripts/title_tableau.gd).
+	_title_tableau = TitleTableau.new()
+	panel.add_child(_title_tableau)
 	# No opaque modal card: a borderless, transparent holder lets the furnace
 	# horizon, battlements and rising embers breathe around the menu.
 	var content := _dialog(panel, Vector2(440, 0), C_EMBER, 12, 20)
@@ -708,10 +705,7 @@ static func _binding_text(action: String) -> Dictionary:
 	if InputMap.has_action(action):
 		for event in InputMap.action_get_events(action):
 			if event is InputEventKey:
-				var key := event as InputEventKey
-				var code := int(key.physical_keycode)
-				if code == 0:
-					code = int(key.keycode)
+				var code := _event_keycode(event as InputEventKey)
 				if code != 0:
 					keys.append(OS.get_keycode_string(code))
 			elif event is InputEventJoypadButton:
@@ -760,6 +754,15 @@ func _set_title_controls_open(open: bool) -> void:
 		_title_controls_button.grab_focus.call_deferred()
 
 
+## The key a binding stores: the physical key, or the logical one for events
+## that carry no physical code.
+static func _event_keycode(key: InputEventKey) -> int:
+	var code := int(key.physical_keycode)
+	if code == 0:
+		code = int(key.keycode)
+	return code
+
+
 ## 1..9 select the matching boon card; anything else returns -1.
 static func _boon_index_for_key(keycode: int) -> int:
 	if keycode >= KEY_1 and keycode <= KEY_9:
@@ -771,10 +774,7 @@ func _unhandled_input(event: InputEvent) -> void:
 	# A pending rebind consumes the very next keypress, whatever it is.
 	if not _listening_action.is_empty():
 		if event is InputEventKey and event.pressed and not (event as InputEventKey).echo:
-			var key := event as InputEventKey
-			var code := int(key.physical_keycode)
-			if code == 0:
-				code = int(key.keycode)
+			var code := _event_keycode(event as InputEventKey)
 			if code == KEY_ESCAPE:
 				_cancel_rebind()
 			elif code != 0:
@@ -1202,12 +1202,6 @@ func _cancel_rebind() -> void:
 
 # --- Title scene ---------------------------------------------------------------
 
-func _build_title_scene(panel: Control) -> void:
-	# Original menu art: the Threshold of the Descent tableau (scripts/title_tableau.gd).
-	_title_tableau = TitleTableau.new()
-	panel.add_child(_title_tableau)
-
-
 ## Bundled title face: Noto Serif Display Bold (SIL OFL 1.1, fonts/), loaded
 ## from the shipped file so the wordmark never depends on the machine's fonts.
 static var _wordmark_font: Font
@@ -1624,9 +1618,8 @@ func show_panel(name: String, fade: float = 0.0) -> void:
 		var tween := create_tween()
 		tween.set_pause_mode(Tween.TWEEN_PAUSE_PROCESS)
 		tween.tween_property(panel, "modulate:a", 1.0, fade).set_trans(Tween.TRANS_SINE).set_ease(Tween.EASE_OUT)
-	if name == "title" and _title_controls != null:
+	if name == "title":
 		_set_title_controls_open(false)
-	if name == "title" and _title_tableau != null:
 		_title_tableau.arrive(_last_panel != "forge")
 	_last_panel = name
 	if name != "pause":
@@ -1716,8 +1709,6 @@ func set_score(score: int) -> void:
 
 func show_boss_bar(max_hp: float) -> void:
 	_boss_panel.visible = true
-	_boss_bar.visible = true
-	_boss_label.visible = true
 	_boss_bar.max_value = maxf(1.0, max_hp)
 	_boss_bar.value = max_hp
 	_boss_trail.max_value = _boss_bar.max_value
@@ -1733,8 +1724,6 @@ func update_boss_bar(hp: float) -> void:
 
 func hide_boss_bar() -> void:
 	_boss_panel.visible = false
-	_boss_bar.visible = false
-	_boss_label.visible = false
 
 
 ## Phase-2 callout: a small tag under the boss bar that fades on its own.
