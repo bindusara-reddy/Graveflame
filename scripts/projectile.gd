@@ -4,6 +4,11 @@ extends Area2D
 
 const VFX := preload("res://scripts/vfx.gd")
 
+## The shot met something, travelling along `dir`. `what` is "foe" (a player
+## shot landed), "returned" (a parried shot landed), "guard" (caught on a
+## shield) or "stone" (the chamber's stonework, which ends any shot).
+signal struck(pos: Vector2, dir: Vector2, color: Color, what: String)
+
 var team: String = "enemy"
 var vel := Vector2.ZERO
 var damage := 10.0
@@ -21,6 +26,9 @@ var _shape: CollisionShape2D
 var _age := 0.0
 var _trail: Line2D
 var _trail_times := PackedFloat32Array()
+var _reflected := false
+## Probes the stonework at the shot's centre each tick.
+var _stone_query := PhysicsPointQueryParameters2D.new()
 
 const TRAIL_LIFE := 0.22
 const TRAIL_POINTS := 14
@@ -66,6 +74,7 @@ func _ready() -> void:
 	if style == "":
 		_build_trail()
 	material = VFX.unshaded_material()
+	_stone_query.collision_mask = Content.L_WORLD
 
 ## Comet ribbon: world-space points appended every physics tick and aged out.
 func _build_trail() -> void:
@@ -122,6 +131,12 @@ func _physics_process(delta: float) -> void:
 	# Check overlaps with opposing hurtboxes
 	for area in get_overlapping_areas():
 		_try_hit(area)
+	if is_queued_for_deletion():
+		return
+	if _in_stone():
+		struck.emit(global_position, vel.normalized(), color, "stone")
+		_die()
+		return
 	# Cull off-screen / below world
 	var p := global_position
 	if p.x < Content.ROOM_LEFT - 80 or p.x > Content.ROOM_RIGHT + 80 or p.y > Content.FLOOR_Y + 240 or p.y < -400:
@@ -140,7 +155,12 @@ func _try_hit(area: Area2D) -> void:
 	var tgt = area.get_meta("owner")
 	if tgt != null and is_instance_valid(tgt) and tgt.has_method("take_damage"):
 		var dir := vel.normalized() if vel.length() > 1.0 else Vector2.RIGHT
-		tgt.take_damage(damage, dir, knockback)
+		Player.deal(tgt, damage, dir, knockback, 1.0)
+		if team == "player" and ateam != "scenery":
+			var what := "returned" if _reflected else "foe"
+			if tgt.get("last_hit_blocked") == true:
+				what = "guard"
+			struck.emit(global_position, dir, color, what)
 	if ateam == "scenery":
 		return # Dressing shatters without consuming enemy penetration.
 	if pierce > 0:
@@ -150,6 +170,7 @@ func _try_hit(area: Area2D) -> void:
 
 func reflect(direction: Vector2, damage_boost: float = 1.6) -> void:
 	team = "player"
+	_reflected = true
 	var speed := maxf(vel.length() * 1.2, 520.0)
 	var out_dir := direction.normalized()
 	if out_dir == Vector2.ZERO:
@@ -165,6 +186,11 @@ func reflect(direction: Vector2, damage_boost: float = 1.6) -> void:
 		_trail.clear_points()
 		_trail_times.clear()
 	queue_redraw()
+
+## True when the shot's centre is inside the chamber's stonework.
+func _in_stone() -> bool:
+	_stone_query.position = global_position
+	return not get_world_2d().direct_space_state.intersect_point(_stone_query, 1).is_empty()
 
 func _die() -> void:
 	set_physics_process(false)

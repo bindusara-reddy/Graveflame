@@ -1366,6 +1366,7 @@ func _on_player_projectile(team: String, pos: Vector2, vel: Vector2, dmg: float,
 func _spawn_projectile(team: String, pos: Vector2, vel: Vector2, dmg: float, kb: float, pierce: int, life: float, color: Color) -> void:
 	var p := Projectile.new()
 	p.setup(team, pos, vel, dmg, kb, pierce, life, color)
+	p.struck.connect(feedback.projectile_struck)
 	projectiles.add_child(p)
 	if team == "enemy":
 		_voice_enemy_shot(pos)

@@ -20,6 +20,7 @@ func run() -> void:
 	await test_parry_tiers()
 	await test_buffers_and_cancels()
 	await test_guard_rings_off()
+	await test_shots_strike()
 	release(["attack", "parry", "move_left"])
 	Feedback.motion_reduced = false
 	await finish("COMBAT_PRESENCE")
@@ -271,6 +272,31 @@ func test_guard_rings_off() -> void:
 	p.build.lifesteal = 0.0
 	guard.queue_free()
 	await ticks(30)
+
+## A lance that lands reports its strike for feedback, and any shot breaks
+## on the stonework instead of passing through it.
+func test_shots_strike() -> void:
+	var p := game.player
+	p.respawn_at(Vector2(480.0, Content.FLOOR_Y - Content.P_BODY_H * 0.5))
+	p.facing = 1.0
+	await ticks(20)
+	var foe := dummy_ahead(160.0)
+	var seen := []
+	var lance := Projectile.new()
+	lance.setup("player", p.global_position + Vector2(40.0, -5.0), Vector2(600.0, 0.0), 20.0, 100.0, 0, 1.0, Content.PAL.special)
+	lance.struck.connect(func(_pos, _dir, _color, what): seen.append(what))
+	game.projectiles.add_child(lance)
+	await ticks_until(func(): return not seen.is_empty(), 30)
+	check(seen == ["foe"], "a lance that lands reports its strike")
+	foe.queue_free()
+	var bolt := Projectile.new()
+	bolt.setup("enemy", Vector2(p.global_position.x + 120.0, Content.FLOOR_Y - 60.0), Vector2(0.0, 500.0), 5.0, 100.0, 0, 2.0, Color("ff6b6b"))
+	bolt.struck.connect(func(_pos, _dir, _color, what): seen.append(what))
+	var gone := [false]
+	bolt.tree_exiting.connect(func(): gone[0] = true)
+	game.projectiles.add_child(bolt)
+	await ticks_until(func(): return gone[0], 40)
+	check(seen.back() == "stone" and gone[0], "a shot breaks on the stonework")
 
 func test_breakable_crypt() -> void:
 	var props := game.room.props
