@@ -439,6 +439,7 @@ func _build_title() -> void:
 	# Original menu art: the Threshold of the Descent tableau (scripts/title_tableau.gd).
 	_title_tableau = TitleTableau.new()
 	panel.add_child(_title_tableau)
+	_title_tableau.candle_struck.connect(func() -> void: cue.emit("footlight"))
 	# No opaque modal card: a borderless, transparent holder lets the furnace
 	# horizon, battlements and rising embers breathe around the menu.
 	var content := _dialog(panel, Vector2(440, 0), C_EMBER, 12, 20)
@@ -452,7 +453,8 @@ func _build_title() -> void:
 	content.add_theme_constant_override("separation", 0)
 
 	# Wordmark alone carries the identity; bindings live behind CONTROLS.
-	content.add_child(_build_title_stack("GRAVEFLAME", 70))
+	var stack := _build_title_stack("GRAVEFLAME", 70)
+	content.add_child(stack)
 	var breath := Control.new()
 	breath.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	breath.custom_minimum_size = Vector2(0.0, 26.0)
@@ -472,6 +474,12 @@ func _build_title() -> void:
 	_title_nav_buttons = [start, forge, _title_controls_button, options_button]
 
 	_build_title_controls_overlay(panel)
+	# Victory candles keep clear of the lettering and the menu wherever layout
+	# settles them: after each sort of the menu, and whenever the card moves.
+	var sync := _sync_title_exclusions.bind(stack, _title_nav_buttons)
+	holder.item_rect_changed.connect(sync)
+	content.sort_children.connect(sync)
+	nav.sort_children.connect(sync)
 
 
 ## One title menu entry. BEGIN is the bright ember button; the others get the
@@ -1039,6 +1047,33 @@ func _cancel_rebind() -> void:
 
 # --- Title scene ---------------------------------------------------------------
 
+## The wordmark's whole band and the column of menu buttons, in global space: a
+## candle flame in the lettering's rows would read as stray title ink.
+func _sync_title_exclusions(stack: Control, buttons: Array) -> void:
+	var frame := (_panels["title"] as Control).get_global_rect()
+	var band := stack.get_global_rect().grow(8.0)
+	var menu: Rect2 = (buttons[0] as Control).get_global_rect()
+	for button: Control in buttons:
+		menu = menu.merge(button.get_global_rect())
+	_title_tableau.set_exclusions([
+		Rect2(frame.position.x, band.position.y, frame.size.x, band.size.y),
+		menu.grow(12.0),
+	])
+
+
+## A win since the title last showed strikes its candle once; the save then
+## remembers it, so later arrivals find it already burning.
+func _celebrate_new_victories() -> void:
+	var legacy: Dictionary = _title_tableau.legacy
+	var seen := int(legacy.celebrated)
+	if int(legacy.victories) <= seen:
+		return
+	_title_tableau.celebrate(seen)
+	var save_api: Script = Save
+	if save_api.has_method("set_last_celebrated"):
+		save_api.call("set_last_celebrated", int(legacy.victories))
+
+
 ## Bundled title face: Noto Serif Display Bold (SIL OFL 1.1, fonts/), loaded
 ## from the shipped file so the wordmark never depends on the machine's fonts.
 static var _wordmark_font: Font
@@ -1515,6 +1550,7 @@ func show_panel(name: String, fade: float = 0.0) -> void:
 	if name == "title":
 		_set_title_controls_open(false)
 		_title_tableau.arrive(_last_panel != "forge")
+		_celebrate_new_victories()
 	_last_panel = name
 	if name != "pause":
 		hide_room_clear()

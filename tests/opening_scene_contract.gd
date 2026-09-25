@@ -3,8 +3,9 @@ extends "res://tests/harness.gd"
 ## a purpose-built title tableau exists and fills the native viewport, the knight
 ## silhouette is framed away from the menu column, the arrival reveal never blocks
 ## input, the tableau lives only while the title is shown, the gameplay actor stays
-## the untouched Player, reduced motion is static, and repeated returns to the
-## title never leak scene nodes. Needs a display:
+## the untouched Player, reduced motion is static, repeated returns to the
+## title never leak scene nodes, and a veteran's seeded save (victory candles,
+## the Oath's dawn, a pending celebration) keeps all of that. Needs a display:
 ##   godot4 --path . --audio-driver Dummy --script res://tests/opening_scene_contract.gd
 
 var ui: UI
@@ -181,14 +182,46 @@ func run() -> void:
 	await _check_framing("960x540")
 	await set_window_size(Vector2i(1280, 720))
 	await ticks(60)
+	await _check_frame("fresh save")
 
-	# --- Real rendered frame: warm knight flame in a dark, non-uniform scene ---
+	# --- A veteran's title: twelve candles in mixed wax and the Oath's dawn ---
+	Save.save_save({"victories": 12, "roll": [0, 1, 0, 3, 0, 0, 2, 0, 5, 0, 1, 0], "oath_kept": true, "last_celebrated": 12})
+	ui.hide_all_panels()
+	ui.show_panel("title")
+	check(tableau.legacy.victories == 12 and tableau.legacy.oath, "the title reads the victory legacy on arrival")
+	await ticks(120)
+	await _check_frame("12 victories, oath kept")
+	# Reduced motion with a win still to celebrate: its candle is simply lit.
+	var strikes := [0]
+	tableau.candle_struck.connect(func() -> void: strikes[0] += 1)
+	var seeded := Save.load_save()
+	seeded["last_celebrated"] = 11
+	Save.save_save(seeded)
+	ui._reduced_motion_check.button_pressed = true
+	await ticks(3)
+	ui.hide_all_panels()
+	ui.show_panel("title")
+	await ticks(2)
+	check(strikes[0] == 1, "the pending candle strikes once (got %d)" % strikes[0])
+	var sig_c: Array = tableau.motion_signature()
+	await ticks(6)
+	check(tableau.motion_signature() == sig_c, "reduced motion freezes the tableau with a celebration pending (%s vs %s)" % [sig_c, tableau.motion_signature()])
+	ui._reduced_motion_check.button_pressed = false
+	await finish("OPENING_SCENE")
+
+
+## The real rendered frame: a warm knight flame, title ink centred on BEGIN (no
+## candle strays into the lettering's rows), a dark vault corner and a moody,
+## structured scene.
+func _check_frame(label: String) -> void:
+	var tableau := _tableau()
+	var title: Control = ui._panels["title"]
 	await RenderingServer.frame_post_draw
 	var image := root.get_texture().get_image()
-	check(image.get_size() == Vector2i(1280, 720), "real frame is 1280x720 (got %s)" % image.get_size())
+	check(image.get_size() == Vector2i(1280, 720), "%s: real frame is 1280x720 (got %s)" % [label, image.get_size()])
 	var flame: Vector2 = root.get_final_transform() * tableau.knight_flame_point()
 	var warm := image.get_pixel(int(flame.x), int(flame.y))
-	check(warm.r > warm.b + 0.2, "knight flame renders warm at %s (got %s)" % [flame, warm])
+	check(warm.r > warm.b + 0.2, "%s: knight flame renders warm at %s (got %s)" % [label, flame, warm])
 	# Rendered glyph ink: the warm title lettering's horizontal extent is centred
 	# on the BEGIN entry, measured on the real frame rather than on containers.
 	var wm_rect: Rect2 = (title.find_child("TitleStack", true, false) as Control).get_global_rect()
@@ -204,9 +237,9 @@ func run() -> void:
 				ink_max = maxf(ink_max, float(x))
 				break
 	var ink_centre := (ink_min + ink_max) * 0.5
-	check(ink_max > ink_min and absf(ink_centre - begin_rect.get_center().x) <= 3.0, "title glyph ink centred on BEGIN (ink %.0f..%.0f centre %.1f vs %.1f)" % [ink_min, ink_max, ink_centre, begin_rect.get_center().x])
+	check(ink_max > ink_min and absf(ink_centre - begin_rect.get_center().x) <= 3.0, "%s: title glyph ink centred on BEGIN (ink %.0f..%.0f centre %.1f vs %.1f)" % [label, ink_min, ink_max, ink_centre, begin_rect.get_center().x])
 	var corner := image.get_pixel(24, 24)
-	check(_luma(corner) < 0.2, "top-left vault stays dark (got %s)" % corner)
+	check(_luma(corner) < 0.2, "%s: top-left vault stays dark (got %s)" % [label, corner])
 	var total := 0.0
 	var samples := 0
 	var lit := 0
@@ -218,7 +251,5 @@ func run() -> void:
 			if l > 0.08:
 				lit += 1
 	var mean := total / float(samples)
-	check(mean > 0.03 and mean < 0.35, "scene is moody, not black or washed (mean luma %.3f)" % mean)
-	check(lit > samples / 12 and lit < samples * 3 / 4, "scene has lit structure and deep shadow (%d/%d lit)" % [lit, samples])
-
-	await finish("OPENING_SCENE")
+	check(mean > 0.03 and mean < 0.35, "%s: scene is moody, not black or washed (mean luma %.3f)" % [label, mean])
+	check(lit > samples / 12 and lit < samples * 3 / 4, "%s: scene has lit structure and deep shadow (%d/%d lit)" % [label, lit, samples])
