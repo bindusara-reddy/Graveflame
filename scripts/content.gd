@@ -403,8 +403,8 @@ static var BOSS_TEMPLATE: Dictionary = {
 	"platforms": [ Rect2(ROOM_LEFT, FLOOR_Y, ROOM_RIGHT - ROOM_LEFT, 120) ],
 	"hazards": [],
 	"slots": [],
-	# The knight enters at the far end of the hall; the Warden sits at x 640.
-	"entry": Vector2(40, FLOOR_Y - 80),
+	# The knight enters down the hall from the Warden's throne at x 640.
+	"entry": Vector2(180, FLOOR_Y - 80),
 	"exit": Vector2(640, FLOOR_Y - 80),
 }
 
