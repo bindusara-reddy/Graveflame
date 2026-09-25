@@ -108,6 +108,12 @@ const DEFAULT_OPTIONS := {
 	"vibration": true,
 }
 
+## Forget every rebinding, so the project's default keys return on next boot.
+static func clear_bindings() -> void:
+	var d := load_save()
+	d.erase("bindings")
+	save_save(d)
+
 ## Player key rebindings, stored as action -> physical keycode. Only actions in
 ## Content.CONTROLS_ROWS are honoured, so a hand-edited save cannot invent an
 ## action or clobber a menu binding.

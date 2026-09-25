@@ -790,14 +790,67 @@ func _input(event: InputEvent) -> void:
 
 
 ## The pending rebind takes this key; Escape stays reserved for cancelling.
+## A key another action already holds is taken from it: that action keeps
+## its other keys, or, when this was its only one, takes the rebound
+## action's old key, so no action is ever left unbound or doubled.
 func _capture_rebind(code: int) -> void:
 	if code == KEY_ESCAPE:
 		_cancel_rebind()
-	elif code != 0:
-		var action := _listening_action
-		_listening_action = ""
-		_listening_button = null
-		binding_changed.emit(action, code)
+		return
+	if code == 0:
+		return
+	var action := _listening_action
+	_listening_action = ""
+	_listening_button = null
+	var old_keys := _key_codes(action)
+	var note := ""
+	for row in Content.CONTROLS_ROWS:
+		var other := str(row.action)
+		var keys := _key_codes(other)
+		if other == action or not keys.has(code):
+			continue
+		keys.erase(code)
+		var kept: int = keys[0] if not keys.is_empty() else (old_keys[0] if not old_keys.is_empty() else 0)
+		binding_changed.emit(other, kept)
+		note = "%s gives up %s  ·  now %s" % [str(row.label), OS.get_keycode_string(code), _key_text_for(other)]
+	binding_changed.emit(action, code)
+	_set_keys_note(note)
+
+
+## Physical keycodes bound to `action`, in binding order.
+static func _key_codes(action: String) -> Array:
+	var codes: Array = []
+	for event in InputMap.action_get_events(action):
+		if event is InputEventKey:
+			codes.append(_event_keycode(event as InputEventKey))
+	return codes
+
+
+## The line under the Keys heading: what a rebind just moved, in gold, or the
+## instructions when nothing has.
+func _set_keys_note(note: String) -> void:
+	var label := (_panels["keys"] as Control).get_meta("note_label") as Label
+	label.text = note if not note.is_empty() else KEYS_HELP
+	label.add_theme_color_override("font_color", C_GOLD if not note.is_empty() else C_MUTED)
+
+
+## Put every rebindable action back on the project's default keys and forget
+## the saved rebinds. Pad buttons are never rebound, so they are left alone.
+func _restore_default_keys() -> void:
+	_cancel_rebind()
+	Save.clear_bindings()
+	for row in Content.CONTROLS_ROWS:
+		var action := str(row.action)
+		for event in InputMap.action_get_events(action):
+			if event is InputEventKey:
+				InputMap.action_erase_event(action, event)
+		var setting: Dictionary = ProjectSettings.get_setting("input/" + action, {})
+		for event in setting.get("events", []):
+			if event is InputEventKey:
+				InputMap.action_add_event(action, event)
+	sync_keys()
+	sync_controls()
+	_set_keys_note("Every key is back where the keep first set it.")
 
 
 ## Hovering a button or slider focuses it, so the mouse and the pad never
@@ -1308,6 +1361,8 @@ static func _key_text_for(action: String) -> String:
 	return text if not text.is_empty() else "—"
 
 
+const KEYS_HELP := "Choose a key, then press the one you want.  ESC cancels."
+
 ## Rebinding screen. Rows come from Content.CONTROLS_ROWS so this list and the
 ## controls reference can never disagree about what is rebindable.
 func _build_keys() -> void:
@@ -1317,18 +1372,24 @@ func _build_keys() -> void:
 
 	content.add_child(_make_label("SETTINGS", 12, C_EMBER_HI))
 	content.add_child(_make_label("KEY BINDINGS", 42, C_TEXT))
-	content.add_child(_make_label("Choose a key, then press the one you want.  ESC cancels.", 13, C_MUTED))
+	var note := _make_label(KEYS_HELP, 13, C_MUTED)
+	content.add_child(note)
+	panel.set_meta("note_label", note)
 	content.add_child(_separator(C_EDGE))
 
 	_key_rows = _scroll_list(content, 300.0, 5)
 
 	content.add_child(_make_label("Gamepad bindings are fixed and always live.", 12, C_MUTED))
+	var footer := _button_row(content)
+	var restore := _button("RESTORE DEFAULTS", "keys_restore", false, Vector2(220, 50))
+	restore.pressed.connect(_restore_default_keys)
+	footer.add_child(restore)
 	var back := _button("BACK", "keys_back", false, Vector2(220, 50), "ui_back")
 	back.pressed.connect(func():
 		_cancel_rebind()
 		back_from_keys_requested.emit()
 	)
-	_button_row(content).add_child(back)
+	footer.add_child(back)
 	panel.set_meta("back_button", back)
 
 
@@ -1355,7 +1416,7 @@ func sync_keys() -> void:
 		line.add_child(button)
 	# A rebind rebuilds the list under the cursor: stay on the same row.
 	if not kept.is_empty():
-		_focus_row(_key_rows, kept, null)
+		_focus_row.call_deferred(_key_rows, kept, null)
 
 
 func _begin_rebind(action: String, button: Button) -> void:
@@ -1931,6 +1992,8 @@ func show_panel(name: String, fade: float = 0.0) -> void:
 	_last_panel = name
 	if name != "pause":
 		hide_room_clear()
+	if name == "keys":
+		_set_keys_note("")
 	if name == "gameover":
 		var buttons: Array = panel.get_meta("buttons")
 		_arm_buttons(buttons, 0.9, buttons[0])
@@ -2385,7 +2448,7 @@ func setup_forge(cells: int) -> void:
 	_build_vow_rows()
 	# A purchase or vow rebuilds every row: the cursor stays on the row it was
 	# on, so a second press can never buy a relic the player did not choose.
-	_focus_row(_forge_rows, kept, panel.get_meta("back_button") as Button)
+	_focus_row.call_deferred(_forge_rows, kept, panel.get_meta("back_button") as Button)
 
 
 ## Name of the focused control when it sits inside `container`, so a list
@@ -2396,7 +2459,9 @@ func _focused_name_in(container: Node) -> String:
 
 
 ## Focus the button named `kept` in `rows`, or the next usable one after it
-## (the first usable one when nothing was kept), else `fallback`.
+## (the first usable one when nothing was kept), else `fallback`. Callers
+## defer it, so a list rebuilt twice in one frame (a rebind that displaces
+## another key) is searched only once it has settled.
 func _focus_row(rows: Node, kept: String, fallback: Button) -> void:
 	var buttons := rows.find_children("*", "Button", true, false)
 	var from := 0
@@ -2405,10 +2470,10 @@ func _focus_row(rows: Node, kept: String, fallback: Button) -> void:
 			from = i
 	for i in range(from, buttons.size()):
 		if not (buttons[i] as Button).disabled:
-			(buttons[i] as Button).grab_focus.call_deferred()
+			(buttons[i] as Button).grab_focus()
 			return
 	if fallback != null:
-		fallback.grab_focus.call_deferred()
+		fallback.grab_focus()
 
 
 ## One ledger row in the forge; its edge colour marks what is owned or sworn.

@@ -32,6 +32,7 @@ func run() -> void:
 	await _test_back_routing()
 	await _test_forge_focus()
 	await _test_rebind_capture()
+	await _test_rebind_conflicts()
 	await _test_reward_cards()
 	await _test_gameover_arming()
 	await _test_prompts()
@@ -151,6 +152,34 @@ func _test_prompts() -> void:
 
 func _wait_real(seconds: float) -> void:
 	await create_timer(seconds, true, false, true).timeout
+
+
+func _rebind(action: String, key: Key) -> void:
+	_focus_button("Key_" + action, "keys").pressed.emit()
+	await ticks(1)
+	await tap_key(key)
+
+
+## A key taken from another action never leaves two actions on it or one
+## on none, and RESTORE DEFAULTS puts every key and the save back.
+func _test_rebind_conflicts() -> void:
+	game.ui.keys_requested.emit()
+	await ticks(3)
+	_focus_button("keys_restore", "keys").pressed.emit()
+	await ticks(2)
+	check(UI._key_codes("parry") == [KEY_S] and UI._key_codes("move_down") == [KEY_DOWN], "restoring defaults returns every key")
+	check(Save.get_bindings().is_empty(), "restoring defaults forgets the saved rebinds")
+	await _rebind("attack", KEY_S)
+	check(UI._key_codes("attack") == [KEY_S] and UI._key_codes("parry") == [KEY_J], "taking parry's only key hands it blade's old one")
+	await _rebind("attack", KEY_A)
+	check(UI._key_codes("move_left") == [KEY_LEFT], "taking one of two keys leaves the other")
+	var note: Label = _panel("keys").get_meta("note_label")
+	check(note.text.begins_with("MOVE LEFT gives up A"), "the screen says what moved (got %s)" % note.text)
+	check(int(Save.get_bindings().get("move_left", 0)) == KEY_LEFT, "the displaced action's key is saved")
+	_focus_button("keys_restore", "keys").pressed.emit()
+	await ticks(2)
+	game.ui.back_from_keys_requested.emit()
+	await ticks(2)
 
 
 ## Seer's Eye deals four cards that still fit the frame, and a held jump
