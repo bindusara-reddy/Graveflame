@@ -32,6 +32,8 @@ func _seed_save(data: Dictionary) -> void:
 	var f := FileAccess.open(Save.path, FileAccess.WRITE)
 	f.store_string(JSON.stringify(data))
 	f.close()
+	# Save caches the parsed file; re-pointing the path drops that cache.
+	Save.path = Save.path
 
 
 ## A fresh game on `save`, already in the throne room with the Warden up.
@@ -135,7 +137,7 @@ func _test_reentry() -> void:
 	var fin := _kill_warden()
 	var finales := game.get_children().filter(func(n): return n is Finale)
 	check(finales.size() == 1, "one kill makes exactly one finale (%d)" % finales.size())
-	check(Save.get_victories() == 1 and Save.get_finale_seen() == 1, "one kill records one victory")
+	check(Save.get_victories() == 1 and Save.get_finale_seen() == 1, "one kill records one victory (%d, %d)" % [Save.get_victories(), Save.get_finale_seen()])
 	check(Save.get_cells() - cells == 30, "the throne pays its cells once (%d)" % (Save.get_cells() - cells))
 	check(game.player.cinematic and fin.phase == Finale.Phase.PROLOGUE, "the knight is untouchable while the beat plays")
 
@@ -147,7 +149,7 @@ func _test_trade() -> void:
 	game.player.take_damage(99999.0, Vector2.RIGHT, 0.0)
 	game.room.boss.take_damage(99999.0, Vector2.RIGHT, 0.0)
 	check(game.state == Game.GState.GAME_OVER and game.finale == null, "a trade is a loss")
-	check(Save.get_victories() == 0 and Save.get_falls() == 1, "a trade records a fall, not a win")
+	check(Save.get_victories() == 0 and Save.get_falls() == 1, "a trade records a fall, not a win (%d, %d)" % [Save.get_victories(), Save.get_falls()])
 
 
 ## T3: with no input at all, every cut reaches the results panel in time.
@@ -244,6 +246,8 @@ func _test_skip() -> void:
 		check(again.disabled, "with pause still held the results cannot be pressed")
 		Input.action_release("pause")
 		game.ui._process(DT)
+		# The first control grabs focus deferred, on the next frame.
+		await process_frame
 		check(not again.disabled and again.has_focus(), "released, NEW RUN takes focus")
 	await _at_throne({ "victories": 1, "finale_seen": 1 })
 	fin = _kill_warden()

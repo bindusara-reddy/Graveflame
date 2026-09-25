@@ -36,19 +36,21 @@ static func _data() -> Dictionary:
 static func _read_with_fallback() -> Dictionary:
 	if not FileAccess.file_exists(path):
 		return {}
-	var d := _parse(path)
-	if d.is_empty():
+	var d: Variant = _parse(path)
+	if d == null:
 		d = _parse(path + ".bak")
-		if d.is_empty():
+		if d == null:
 			DirAccess.copy_absolute(path, "%s.corrupt-%d" % [path, int(Time.get_unix_time_from_system())])
+			return {}
 	return d
 
-## The JSON dictionary in `file`, or {} when it is missing, empty or not a dictionary.
-static func _parse(file: String) -> Dictionary:
+## The JSON dictionary in `file`, or null when it is missing, unparseable or not
+## a dictionary. An empty dictionary is a valid (fresh) save, not damage.
+static func _parse(file: String) -> Variant:
 	var json := JSON.new()
 	if not FileAccess.file_exists(file) or json.parse(FileAccess.get_file_as_string(file)) != OK:
-		return {}
-	return json.data if json.data is Dictionary else {}
+		return null
+	return json.data if json.data is Dictionary else null
 
 ## Hand-edited or older files must still carry the core keys with sane types.
 static func _coerced(d: Dictionary) -> Dictionary:
