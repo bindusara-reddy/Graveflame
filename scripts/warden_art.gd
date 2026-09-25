@@ -9,6 +9,9 @@ const RIDGE := Color("e6b17a")
 const HORN := Color("f2d5a0")
 const MANTLE := Color("873844")
 static var BODY: Dictionary = _body_shapes()
+## Open detail strokes, sampled once like BODY. They stay out of BODY because it
+## holds filled polygons only (boss_art_contract triangulates every entry).
+static var STROKES: Dictionary = _stroke_shapes()
 
 static func curve(start: Vector2, segments: Array) -> PackedVector2Array:
 	var points := PackedVector2Array([start])
@@ -47,6 +50,21 @@ static func _body_shapes() -> Dictionary:
 			[Vector2(-9,25),Vector2(-10,21),Vector2(0,19)],
 			[Vector2(10,-3),Vector2(1,-46),Vector2(-22,-54)],
 		]),
+		"shade": curve(Vector2(-33,-42), [
+			[Vector2(-42,-21),Vector2(-35,5),Vector2(-15,18)],
+			[Vector2(-2,28),Vector2(13,22),Vector2(22,17)],
+			[Vector2(9,5),Vector2(-4,-22),Vector2(-5,-53)],
+			[Vector2(-20,-58),Vector2(-30,-52),Vector2(-33,-42)],
+		]),
+	}
+
+static func _stroke_shapes() -> Dictionary:
+	return {
+		"mantle_fold": curve(Vector2(-29,-39), [[Vector2(-43,-20),Vector2(-33,12),Vector2(-55,38)]]),
+		"shoulder_ridge": curve(Vector2(-31,-41), [[Vector2(-17,-50),Vector2(4,-40),Vector2(12,-26)]]),
+		"fissure": PackedVector2Array([Vector2(12,-28),Vector2(3,-12),Vector2(13,-3),Vector2(5,11)]),
+		"jaw": curve(Vector2(9,-51), [[Vector2(18,-43),Vector2(36,-44),Vector2(42,-55)]]),
+		"crest": curve(Vector2(-9,-77), [[Vector2(-23,-81),Vector2(-28,-94),Vector2(-21,-106)]]),
 	}
 
 static func pose(b) -> Dictionary:
@@ -63,24 +81,24 @@ static func pose(b) -> Dictionary:
 	var lean := clampf(absf(b.velocity.x) / 2800.0, 0.0, 0.12)
 	if windup or active:
 		match int(b.action_idx):
-			0:
+			Boss.Action.LUNGE:
 				hand = Vector2(38,-5).lerp(Vector2(16,-23),progress) if windup else Vector2(92,-14)
 				elbow = Vector2(53,-16) if windup else Vector2(61,-26)
 				claw_angle = -0.60 if windup else -0.05
 				lean = -0.07 if windup else 0.20
-			1:
+			Boss.Action.FAN:
 				offhand = Vector2(-52,-48).lerp(Vector2(-59,-67),progress)
 				off_angle = -1.25
 				hand = Vector2(45,13)
 				lean = -0.035
-			2:
+			Boss.Action.SLAM:
 				hand = Vector2(24,-95) if windup else Vector2(65,28)
 				elbow = Vector2(52,-65) if windup else Vector2(48,-5)
 				offhand = Vector2(-20,-90) if windup else Vector2(-29,31)
 				claw_angle = -1.35 if windup else 0.80
 				off_angle = -1.8 if windup else 0.9
 				lean = -0.09 if windup else 0.20
-			3:
+			Boss.Action.CHARGE:
 				hand = Vector2(64,8)
 				elbow = Vector2(42,-14)
 				offhand = Vector2(-14,31)
@@ -145,7 +163,7 @@ static func paint(b,p: Dictionary) -> void:
 	for i in range(mantle.size()):
 		if mantle[i].y > 0: mantle[i].x += sin(t*2.4+mantle[i].y*0.05)*3.0
 	shape(ci,mantle,MANTLE.darkened(0.12),RUST)
-	ci.draw_polyline(curve(Vector2(-29,-39),[[Vector2(-43,-20),Vector2(-33,12),Vector2(-55,38)]]),RUST.darkened(0.25),3.0,true)
+	ci.draw_polyline(STROKES.mantle_fold,RUST.darkened(0.25),3.0,true)
 	# Heavy haunches and three hooked toes anchor the creature to the same floor.
 	for side: float in [-1.0,1.0]:
 		var hip := Vector2(side*20,14)
@@ -162,23 +180,17 @@ static func paint(b,p: Dictionary) -> void:
 	arm(ci,back_shoulder,back_elbow,p.offhand,float(p.off_angle),rust.darkened(0.30))
 	shape(ci,BODY.body,rust)
 	# Broad shading planes replace the rejected costume's many little plates.
-	var shade := curve(Vector2(-33,-42),[
-		[Vector2(-42,-21),Vector2(-35,5),Vector2(-15,18)],
-		[Vector2(-2,28),Vector2(13,22),Vector2(22,17)],
-		[Vector2(9,5),Vector2(-4,-22),Vector2(-5,-53)],
-		[Vector2(-20,-58),Vector2(-30,-52),Vector2(-33,-42)],
-	])
-	ci.draw_colored_polygon(shade,CHAR)
-	ci.draw_polyline(curve(Vector2(-31,-41),[[Vector2(-17,-50),Vector2(4,-40),Vector2(12,-26)]]),RIDGE.darkened(0.14),3.5,true)
+	ci.draw_colored_polygon(BODY.shade,CHAR)
+	ci.draw_polyline(STROKES.shoulder_ridge,RIDGE.darkened(0.14),3.5,true)
 	# Scorched torso fissure: one directional ember motif, not a lantern/grille.
-	ci.draw_polyline(PackedVector2Array([Vector2(12,-28),Vector2(3,-12),Vector2(13,-3),Vector2(5,11)]),INK,7.0,true)
-	ci.draw_polyline(PackedVector2Array([Vector2(12,-28),Vector2(3,-12),Vector2(13,-3),Vector2(5,11)]),fire,2.4 if phase2 else 1.5,true)
+	ci.draw_polyline(STROKES.fissure,INK,7.0,true)
+	ci.draw_polyline(STROKES.fissure,fire,2.4 if phase2 else 1.5,true)
 	shape(ci,BODY.head,rust.lightened(0.10))
 	ci.draw_colored_polygon(BODY.face,INK)
 	# Side-on eye, jaw and fangs read as a beast rather than a human death mask.
 	ci.draw_line(Vector2(11,-68),Vector2(27,-70),Color("ffdb87"),4.0,true)
 	ci.draw_line(Vector2(22,-69),Vector2(28,-71),Color.WHITE,1.5,true)
-	ci.draw_polyline(curve(Vector2(9,-51),[[Vector2(18,-43),Vector2(36,-44),Vector2(42,-55)]]),RIDGE,3.5,true)
+	ci.draw_polyline(STROKES.jaw,RIDGE,3.5,true)
 	for x in [23.0,32.0]:
 		ci.draw_colored_polygon(PackedVector2Array([Vector2(x,-48),Vector2(x+4,-48),Vector2(x+2,-57)]),HORN)
 	# Flame crown shares the hero's warm identity but has a swept, bestial crest.
@@ -186,13 +198,13 @@ static func paint(b,p: Dictionary) -> void:
 	VFX.draw_flame(ci,Vector2(-8,-75),30.0*crown_scale,12.0,t,1.0,fire,Content.PAL.attack)
 	VFX.draw_flame(ci,Vector2(8,-85),39.0*crown_scale,12.0,t,2.3,fire,Content.PAL.attack)
 	VFX.draw_flame(ci,Vector2(25,-78),26.0*crown_scale,10.0,t,4.0,fire,Content.PAL.attack)
-	ci.draw_polyline(curve(Vector2(-9,-77),[[Vector2(-23,-81),Vector2(-28,-94),Vector2(-21,-106)]]),INK,7.0,true)
-	ci.draw_polyline(curve(Vector2(-9,-77),[[Vector2(-23,-81),Vector2(-28,-94),Vector2(-21,-106)]]),RIDGE.darkened(0.15),2.2,true)
+	ci.draw_polyline(STROKES.crest,INK,7.0,true)
+	ci.draw_polyline(STROKES.crest,RIDGE.darkened(0.15),2.2,true)
 	arm(ci,p.shoulder,p.elbow,p.hand,float(p.claw_angle),rust)
 	if phase2:
 		ci.draw_line(p.elbow+Vector2(3,0),p.hand,fire,2.0,true)
 		VFX.draw_flame(ci,Vector2(-36,-40),15.0,6.0,t,5.1,fire,HORN)
-	if p.windup and int(b.action_idx) == 1:
+	if p.windup and int(b.action_idx) == Boss.Action.FAN:
 		var palm: Vector2 = p.offhand+Vector2(-6,-18)
 		VFX.draw_flame(ci,palm,20.0+float(p.progress)*14.0,9.0,t,0.4,fire,HORN)
 	if p.has("dying"):
@@ -216,7 +228,7 @@ static func paint(b,p: Dictionary) -> void:
 			if line.size() >= 2:
 				ci.draw_polyline(line,INK,6.0,true)
 				ci.draw_polyline(line,fire.lerp(Color.WHITE,dk*0.6),2.5+dk*2.0,true)
-	if p.windup and int(b.action_idx) == 3:
+	if p.windup and int(b.action_idx) == Boss.Action.CHARGE:
 		for i in range(3):
 			var x := 55.0+float(i)*27.0
 			ci.draw_polyline(PackedVector2Array([Vector2(x-7,54),Vector2(x,58),Vector2(x-7,62)]),Color(fire,0.2+float(p.progress)*0.6),2.0,true)
