@@ -28,7 +28,6 @@ static var vibration := true
 var _glow: Node2D
 var _particles: Array[Dictionary] = []
 var _audio_pool: Array[AudioStreamPlayer] = []
-var _audio_idx := 0
 var _streams: Dictionary = {}
 var _hit_stop_active := false
 var _hit_stop_until_usec: int = 0
@@ -98,11 +97,35 @@ func _set_slowmo(v: float) -> void:
 	_apply_time_scale()
 
 const SfxSynth := preload("res://scripts/sfx_synth.gd")
-const VOICES := 14
+## World voices pause with the tree. The persistent few play through a pause:
+## a toll ringing over a panel, menu cues while the game is held.
+const VOICES := 20
+const PERSISTENT_VOICES := 4
+## Who may cut whom when every voice is busy: a footstep never cuts a toll.
+## Unlisted cues rank 1.
+const PRIORITY := {
+	"victory": 3, "defeat": 3, "boss": 3, "roar": 3, "last_ember": 3,
+	"elite": 2, "wave": 2, "clear": 2, "parry": 2, "perfect_parry": 2, "second_wind": 2, "pyre": 2, "rift": 2,
+	"step": 0, "ui_move": 0,
+}
+## Most copies of a cue that may sound at once; another restarts the oldest.
+const POLYPHONY := { "step": 2, "swing": 3, "hit": 3, "tear": 4, "shoot": 2, "spit": 2 }
+## Cues with a musical pitch: never humanized, so they stay in the score's key.
+const PITCHED := [
+	"clear", "wave", "victory", "defeat", "heal", "pickup", "streak", "second_wind", "elite",
+	"ui_move", "ui_confirm", "ui_back", "perfect_parry", "tell_sexton", "grave_light",
+	"fold", "grave_bell", "kindle",
+]
+## Cues that duck the score through its sidechained compressor (music.gd).
+const STINGERS := ["boss", "roar", "last_ember", "elite", "wave", "clear", "victory", "defeat"]
+const STINGER_BUS := "Stinger"
 var _sfx_thread: Thread
 ## name -> Array of takes; play() rotates through them.
 var _takes: Dictionary = {}
 var _take_idx: Dictionary = {}
+var _persistent_pool: Array[AudioStreamPlayer] = []
+## The low-flame heartbeat's last beat, so each pulse sounds once.
+var _heartbeat_beat := 0
 
 func _init_audio() -> void:
 	# Every cue is registered up front so callers and contracts can see the full
@@ -110,12 +133,16 @@ func _init_audio() -> void:
 	# (about a second of synthesis), and play() stays silent for a cue until then.
 	for name in SfxSynth.cue_names():
 		_streams[name] = null
-	for i in range(VOICES):
+	for i in range(VOICES + PERSISTENT_VOICES):
 		var p := AudioStreamPlayer.new()
 		# One bus for every gameplay and menu cue, so a single slider mixes them.
 		p.bus = "SFX"
 		add_child(p)
-		_audio_pool.append(p)
+		if i < VOICES:
+			_audio_pool.append(p)
+		else:
+			p.process_mode = Node.PROCESS_MODE_ALWAYS
+			_persistent_pool.append(p)
 	var cached := SfxSynth.load_cached()
 	if not cached.is_empty():
 		_install_sfx(cached)
@@ -153,7 +180,34 @@ func _install_sfx(book: Dictionary) -> void:
 		_takes[name] = takes
 		_streams[name] = takes[0]
 
-func play(name: String, pitch: float = 1.0, volume_db: float = 0.0) -> void:
+## Play a cue; an unknown or not-yet-rendered one is silently skipped.
+## `humanize` detunes by up to 3% so repeats never machine-gun; melodic calls
+## pass false, and PITCHED cues are never detuned. A cue played while the tree
+## is paused (menus) goes to a persistent voice so the pause cannot hold it.
+func play(name: String, pitch: float = 1.0, volume_db: float = 0.0, humanize: bool = true) -> void:
+	var paused := is_inside_tree() and get_tree().paused
+	_voice(name, pitch, volume_db, humanize, _persistent_pool if paused else _audio_pool)
+
+## Play a cue that must ring on through a paused tree (a toll over a panel).
+func play_persistent(name: String, pitch: float = 1.0, volume_db: float = 0.0) -> void:
+	_voice(name, pitch, volume_db, true, _persistent_pool)
+
+## Before a panel pauses the tree: world sounds end here, instead of freezing
+## and replaying their tails in the next chamber or run.
+func stop_world_voices() -> void:
+	for p in _audio_pool:
+		p.stop()
+
+## One heartbeat per turn of the low-health pulse, louder as the flame gutters.
+## `phase` is the vignette's own clock, so each beat lands on its reddest frame.
+func heartbeat(phase: float, strength: float) -> void:
+	var beat := floori((phase - PI * 0.5) / TAU)
+	if beat > _heartbeat_beat:
+		play("heartbeat", 1.0, linear_to_db(0.3 + 0.7 * strength))
+	# A pulse that restarted from zero (the flame recovered) waits for its peak.
+	_heartbeat_beat = beat
+
+func _voice(name: String, pitch: float, volume_db: float, humanize: bool, pool: Array[AudioStreamPlayer]) -> void:
 	if _streams.get(name) == null:
 		return
 	var takes: Array = _takes.get(name, [])
@@ -162,13 +216,50 @@ func play(name: String, pitch: float = 1.0, volume_db: float = 0.0) -> void:
 		var ti := (int(_take_idx.get(name, 0)) + 1) % takes.size()
 		_take_idx[name] = ti
 		stream = takes[ti]
-	var p := _audio_pool[_audio_idx]
-	_audio_idx = (_audio_idx + 1) % _audio_pool.size()
+	var p := _pick_voice(name, pool)
+	if p == null:
+		return
 	p.stream = stream
-	p.pitch_scale = pitch * randf_range(0.97, 1.03)
+	p.set_meta("cue", name)
+	# Stingers key the score's compressor so the music steps back under them.
+	var stinger := STINGERS.has(name) and AudioServer.get_bus_index(STINGER_BUS) >= 0
+	p.bus = STINGER_BUS if stinger else "SFX"
+	var detune := randf_range(0.97, 1.03) if humanize and not PITCHED.has(name) else 1.0
+	p.pitch_scale = pitch * detune
 	# Telegraphs attenuate with distance; UI and player cues stay flat.
 	p.volume_db = volume_db
 	p.play(0.0)
+
+## A cue at its polyphony cap restarts its own oldest copy; otherwise a free
+## voice; otherwise the least important voice, furthest into its cue. A voice
+## that outranks the new cue is never cut: then the new cue is dropped instead.
+func _pick_voice(name: String, pool: Array[AudioStreamPlayer]) -> AudioStreamPlayer:
+	var rank := int(PRIORITY.get(name, 1))
+	var copies := 0
+	var oldest_copy: AudioStreamPlayer = null
+	var free: AudioStreamPlayer = null
+	var victim: AudioStreamPlayer = null
+	var victim_score := INF
+	for p in pool:
+		if not p.playing and not p.stream_paused:
+			if free == null:
+				free = p
+			continue
+		var cue := str(p.get_meta("cue", ""))
+		var progress := p.get_playback_position()
+		if cue == name:
+			copies += 1
+			if oldest_copy == null or progress > oldest_copy.get_playback_position():
+				oldest_copy = p
+		# Rank first; among equals, the voice nearest the end of its cue.
+		var p_rank := int(PRIORITY.get(cue, 1))
+		var score := float(p_rank) * 1000.0 - progress
+		if p_rank <= rank and score < victim_score:
+			victim = p
+			victim_score = score
+	if copies >= int(POLYPHONY.get(name, pool.size())):
+		return oldest_copy
+	return free if free != null else victim
 
 ## Rift bloom where an enemy is pulled into the chamber: ring plus rising embers.
 func spawn_rift(pos: Vector2, color: Color) -> void:
