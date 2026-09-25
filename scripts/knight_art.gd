@@ -76,6 +76,11 @@ const SWINGS := {
 	},
 	"riposte": { "wind": THRUST_WIND, "strike": THRUST_STRIKE, "smear": [] },
 	"dash_strike": { "wind": THRUST_WIND, "strike": THRUST_STRIKE, "smear": [0.0, 0.0] },
+	"rising_cut": {
+		"wind": { "arm_f": 1.2, "sword": 0.5, "torso": 0.15, "head": 0.1, "hip_f": 0.9, "knee_f": 1.4, "hip_b": 0.5, "knee_b": 1.3, "arm_b": 2.2 },
+		"strike": { "arm_f": -2.6, "sword": -0.3, "torso": -0.3, "head": -0.3, "hip_f": 0.3, "knee_f": 0.4, "hip_b": -0.4, "knee_b": 0.6, "arm_b": 2.8 },
+		"smear": [0.9, -2.4],
+	},
 }
 
 ## Held poses: fixed keys laid over the idle pose for as long as the state lasts.
@@ -119,8 +124,8 @@ const HURT_POSE := {
 static func swing_name(p) -> String:
 	if p._riposte_attack:
 		return "riposte"
-	if p._dash_strike:
-		return "dash_strike"
+	if p._opener != "":
+		return p._opener
 	match int(p.attack_index):
 		1: return "cleave"
 		2: return "finish"

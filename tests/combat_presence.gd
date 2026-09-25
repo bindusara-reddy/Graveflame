@@ -26,7 +26,8 @@ func run() -> void:
 	await test_ignition_and_clear_beat()
 	await test_soft_separation()
 	await test_dash_strike()
-	release(["attack", "parry", "move_left"])
+	await test_rising_cut_and_hover()
+	release(["attack", "parry", "move_left", "jump"])
 	Feedback.motion_reduced = false
 	await finish("COMBAT_PRESENCE")
 
@@ -393,10 +394,42 @@ func test_dash_strike() -> void:
 	await hold_action("attack")
 	var def: Dictionary = p.get_meta("atk_def", {})
 	check(p.state == Player.State.ATTACK and def.get("name", "") == "dash_strike", "attacking out of a dash makes a dash strike")
-	check(p.velocity.x >= float(Player.DASH_STRIKE.lunge) * 0.9, "the dash strike keeps the dash's momentum")
+	check(p.velocity.x >= float(Player.OPENERS.dash_strike.lunge) * 0.9, "the dash strike keeps the dash's momentum")
 	await hold_action("attack")
 	check(await ticks_until(func(): return p.attack_index == 1, 30), "a dash strike chains on into the cleave")
 	await ticks(40)
+
+## A foe held still at `lift` px above the knight and `dx` px ahead of it.
+func hovering_dummy(dx: float, lift: float) -> Enemy:
+	var foe := dummy_ahead(dx)
+	foe.set_physics_process(false)
+	foe.global_position.y -= lift
+	return foe
+
+## A blade pressed on the way up a jump is a rising cut that throws a foe
+## overhead upward; a blade that connects in the air holds the knight up.
+func test_rising_cut_and_hover() -> void:
+	var p := game.player
+	p.respawn_at(Vector2(480.0, Content.FLOOR_Y - Content.P_BODY_H * 0.5))
+	p.facing = 1.0
+	await ticks(60)
+	var overhead := hovering_dummy(24.0, 110.0)
+	await hold_action("jump", 3)
+	await hold_action("attack")
+	var def: Dictionary = p.get_meta("atk_def", {})
+	check(def.get("name", "") == "rising_cut", "a blade pressed on the way up a jump is a rising cut")
+	var struck: bool = await ticks_until(func(): return overhead.hp < overhead.hp_max, 15)
+	check(struck and overhead._last_hit_dir.y < -0.5, "the rising cut reaches a foe overhead and throws it up")
+	overhead.queue_free()
+	await ticks(60)
+	await hold_action("jump", 3)
+	await ticks_until(func(): return p.velocity.y > -60.0, 40)
+	var level := hovering_dummy(40.0, 0.0)
+	await hold_action("attack")
+	await ticks_until(func(): return level.hp < level.hp_max, 12)
+	check(p.velocity.y < 0.0, "a blade that connects in the air holds the knight up")
+	level.queue_free()
+	await ticks(60)
 
 func test_breakable_crypt() -> void:
 	var props := game.room.props

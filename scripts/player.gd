@@ -24,15 +24,34 @@ const BLOWS := {
 	"finish": { "stop": 0.075, "slant": 1.0, "kick": 6.0, "poise": 2.0 },
 	"riposte": { "stop": 0.10, "slant": 0.0, "kick": 6.0, "poise": GUARD_BREAK },
 	"dash_strike": { "stop": 0.06, "slant": 0.0, "kick": 4.0, "poise": 1.0 },
+	"rising_cut": { "stop": 0.05, "slant": -1.2, "kick": 3.0, "poise": 1.0 },
 }
-## Attacking out of a dash, or within DASH_STRIKE_GRACE of its end, thrusts
-## with the dash's momentum instead of throwing it away; the next press
-## chains on into the cleave.
-const DASH_STRIKE := {
-	"name": "dash_strike", "startup": 0.03, "active": 0.10, "recover": 0.22,
-	"damage": 16.0, "knock": 380.0, "range": 96.0, "window": 0.30, "lunge": 520.0,
+## Openers take the combo's first slot in a moment that asks for more than a
+## cut, and the next press chains on into the cleave. dash_strike: out of a
+## dash, or within DASH_STRIKE_GRACE of its end, a thrust that keeps the dash's
+## momentum. rising_cut: on the way up a jump, an overhead arc that reaches
+## hovering foes and throws them up. `box` / `box_at` (facing right) replace
+## the blade's usual hitbox; `dir` is the direction a hit knocks the foe.
+const OPENERS := {
+	"dash_strike": {
+		"name": "dash_strike", "startup": 0.03, "active": 0.10, "recover": 0.22,
+		"damage": 16.0, "knock": 380.0, "range": 96.0, "window": 0.30, "lunge": 520.0,
+	},
+	"rising_cut": {
+		"name": "rising_cut", "startup": 0.05, "active": 0.10, "recover": 0.18,
+		"damage": 14.0, "knock": 260.0, "range": 72.0, "window": 0.30, "lunge": 60.0,
+		"box": Vector2(72.0, 100.0), "box_at": Vector2(22.0, -52.0), "dir": Vector2(0.3, -1.0),
+	},
 }
 const DASH_STRIKE_GRACE := 0.08
+## Rising faster than this (px/s) when the blade is pressed makes a rising cut.
+const RISING_CUT_VY := -120.0
+## Air hover: each of the first AIR_HOVER_HITS swings to connect in one airtime
+## holds the knight up at AIR_HOVER_VY, and gravity eases to AIR_ACTIVE_GRAVITY
+## of itself while an airborne blade is out, so crows and wisps can be juggled.
+const AIR_HOVER_HITS := 3
+const AIR_HOVER_VY := -150.0
+const AIR_ACTIVE_GRAVITY := 0.4
 ## A killing blow holds the freeze this much longer.
 const KILL_STOP_BONUS := 0.03
 ## Being struck freezes the world longest of all: it is the hit that must read.
@@ -98,9 +117,12 @@ var _queued_attack := false
 var dash_cd := 0.0
 var _dash_buffer := 0.0
 var dash_time := 0.0
-## Seconds since the last dash ended, and whether this swing is a dash strike.
+## Seconds since the last dash ended.
 var _since_dash := INF
-var _dash_strike := false
+## The OPENERS key this swing opened with, or "" for the plain combo.
+var _opener := ""
+## Air hover swings spent since the knight last stood on the ground.
+var _air_hits := 0
 var _dash_echo_pos := Vector2.ZERO
 var iframes := 0.0
 var _hurt_started_airborne := false
@@ -423,6 +445,7 @@ func _floor_and_wall_tracking(delta: float) -> void:
 	if is_on_floor():
 		coyote = Content.P_COYOTE
 		jumps_left = Content.P_MAX_JUMPS
+		_air_hits = 0
 		_wall_dir = 0.0
 		wall_sliding = false
 		_wall_stick = 0.0
@@ -513,17 +536,18 @@ func is_finisher() -> bool:
 # --- Attack combo ---
 func _begin_attack(force_chain: bool = false) -> void:
 	_riposte_attack = riposte_time > 0.0 and not force_chain
-	_dash_strike = not _riposte_attack and not force_chain and (state == State.DASH or _since_dash <= DASH_STRIKE_GRACE)
+	_opener = "" if _riposte_attack or force_chain else _opener_now()
 	if _riposte_attack:
 		riposte_time = 0.0
 		attack_index = Content.COMBO.size() - 1
-	elif (force_chain or combo_timer > 0.0) and attack_index >= 0 and not is_finisher() and not _dash_strike:
+	elif (force_chain or combo_timer > 0.0) and attack_index >= 0 and not is_finisher() and _opener == "":
 		attack_index += 1
 	else:
 		attack_index = 0
 	var def: Dictionary = Content.RIPOSTE if _riposte_attack else Content.COMBO[attack_index]
-	if _dash_strike:
-		def = DASH_STRIKE
+	if _opener != "":
+		def = OPENERS[_opener]
+	if _opener == "dash_strike":
 		# The dash's immunity carries the thrust through its startup.
 		iframes = maxf(iframes, float(def.startup))
 	attack_buffer = 0.0
@@ -543,6 +567,14 @@ func _begin_attack(force_chain: bool = false) -> void:
 	set_meta("atk_def", def)
 	emit_signal("action_feedback", "swing", global_position)
 
+## The opener a fresh swing makes right now (see OPENERS), or "".
+func _opener_now() -> String:
+	if state == State.DASH or _since_dash <= DASH_STRIKE_GRACE:
+		return "dash_strike"
+	if not is_on_floor() and velocity.y < RISING_CUT_VY:
+		return "rising_cut"
+	return ""
+
 func _step_attack(delta: float) -> void:
 	if attack_buffer > 0.0 and not is_finisher():
 		_queued_attack = true
@@ -560,7 +592,8 @@ func _step_attack(delta: float) -> void:
 		_drop_combo()
 		_begin_parry()
 		return
-	velocity.y += Content.GRAVITY * delta
+	var hang := AIR_ACTIVE_GRAVITY if atk_phase == "active" and not is_on_floor() else 1.0
+	velocity.y += Content.GRAVITY * hang * delta
 	var air_dir := Input.get_axis("move_left", "move_right")
 	var drag := Content.P_AIR_ACCEL if not is_on_floor() else Content.P_FRICTION
 	var target_x := air_dir * Content.P_SPEED * 0.45 if not is_on_floor() else 0.0
@@ -601,16 +634,16 @@ func _drop_combo() -> void:
 	state = State.LOCOMOTION
 
 func _activate_hitbox(def: Dictionary) -> void:
-	var origin := Vector2(facing * 8.0, -8.0)
-	_atk_rect.size = Vector2(def.range, Content.P_BODY_H + 10.0)
-	_atk_shape.position = origin + Vector2(facing * def.range * 0.5, 0.0)
+	var at: Vector2 = def.get("box_at", Vector2(8.0 + def.range * 0.5, -8.0))
+	_atk_rect.size = def.get("box", Vector2(def.range, Content.P_BODY_H + 10.0))
+	_atk_shape.position = Vector2(facing * at.x, at.y)
 	_atk_shape.disabled = false
 	_attack_area.monitoring = true
 	_draw_attack = true
 	_attack_range = def.range
 	atk_hit.clear()
 	emit_signal("action_feedback", "swing_active", global_position)
-	if _dash_strike and feedback != null:
+	if _opener == "dash_strike" and feedback != null:
 		feedback.riposte_cut(global_position + Vector2(facing * 8.0, -8.0), facing, def.range, Content.PAL.attack)
 	if is_finisher() and (_flame_time > 0.0 or bool(build.get("finisher_wave", false))):
 		var wave_pos := global_position + Vector2(facing * 34.0, -8.0)
@@ -657,7 +690,8 @@ func _scan_attack_hits(def: Dictionary, areas: Array) -> void:
 				dmg *= _riposte_mul
 			if _flame_time > 0.0:
 				dmg *= Content.P_FLAME_DAMAGE_MUL
-			deal(tgt, dmg, Vector2(facing, -0.2), def.knock, blow.poise)
+			var knock_dir: Vector2 = def.get("dir", Vector2(1.0, -0.2))
+			deal(tgt, dmg, Vector2(knock_dir.x * facing, knock_dir.y), def.knock, blow.poise)
 			var contact := _contact_point(area)
 			if tgt.get("last_hit_blocked") == true:
 				_ring_off_guard(contact)
@@ -668,11 +702,22 @@ func _scan_attack_hits(def: Dictionary, areas: Array) -> void:
 				tgt.apply_burn(Content.P_FLAME_BURN_DPS + float(build.get("burn_bonus_dps", 0.0)), Content.P_FLAME_BURN_TIME + float(build.get("burn_bonus_time", 0.0)))
 			emit_signal("hit_landed", dmg, contact, finisher)
 			_feel_blow(tgt, contact, blow, finisher)
-			if finisher and is_on_floor() and atk_hit.size() == 1:
-				velocity.x -= facing * HEAVY_RECOIL
+			if atk_hit.size() == 1:
+				_answer_first_contact(finisher)
 			_gain_special(Content.P_SPECIAL_GAIN * float(build.get("special_mul", 1.0)))
 			if float(build.get("lifesteal", 0.0)) > 0.0:
 				_heal(float(build.lifesteal))
+
+## The knight's body answers a swing's first contact: a heavy blow on the
+## ground rocks it back, and in the air the first AIR_HOVER_HITS connecting
+## swings hold it up so a hovering foe can be juggled.
+func _answer_first_contact(heavy: bool) -> void:
+	if is_on_floor():
+		if heavy:
+			velocity.x -= facing * HEAVY_RECOIL
+	elif _air_hits < AIR_HOVER_HITS:
+		_air_hits += 1
+		velocity.y = minf(velocity.y, AIR_HOVER_VY)
 
 ## Deal a blow through `tgt`'s take_damage, with the poise damage it carries
 ## when the target's take_damage accepts it (creatures do; scenery does not).
@@ -1254,7 +1299,7 @@ func _draw() -> void:
 		var heal_progress := clampf(1.0 - _heal_time / Content.P_HEAL_TIME, 0.0, 1.0)
 		draw_arc(Vector2.ZERO, 33.0, -PI * 0.5, -PI * 0.5 + TAU * heal_progress, 32, VFX.TEAL, 4.0)
 	# The blade smear is part of the puppet; a thrust keeps its own line.
-	if _draw_attack and (_riposte_attack or _dash_strike):
+	if _draw_attack and (_riposte_attack or _opener == "dash_strike"):
 		# A narrow forward blade, not the normal circular sweep: teal for the
 		# counterthrust, gold for the dash strike.
 		var tip := Vector2(facing * (_attack_range + 8.0), -8.0)
