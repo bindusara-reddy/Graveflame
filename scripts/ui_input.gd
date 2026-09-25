@@ -15,21 +15,36 @@ static var last_device := "key"
 
 ## Godot's built-in ui_accept / ui_cancel ship keyboard-only here, so a pad
 ## could navigate menus but never activate or back out. Register A / B at
-## runtime without touching the project input map or any gameplay action.
-static func ensure_pad_menu_bindings() -> void:
+## runtime without touching the project input map or any gameplay action,
+## and add the page-turn actions tabbed screens read (see UiKit.Tabs).
+static func ensure_menu_bindings() -> void:
 	for pair in [["ui_accept", JOY_BUTTON_A], ["ui_cancel", JOY_BUTTON_B]]:
 		var action: String = pair[0]
-		var button: int = pair[1]
-		if not InputMap.has_action(action):
+		if InputMap.has_action(action):
+			_bind_pad(action, pair[1])
+	for tab in [[TAB_PREV, KEY_PAGEUP, KEY_BRACKETLEFT, JOY_BUTTON_LEFT_SHOULDER], [TAB_NEXT, KEY_PAGEDOWN, KEY_BRACKETRIGHT, JOY_BUTTON_RIGHT_SHOULDER]]:
+		if InputMap.has_action(tab[0]):
 			continue
-		var bound := false
-		for event in InputMap.action_get_events(action):
-			if event is InputEventJoypadButton and (event as InputEventJoypadButton).button_index == button:
-				bound = true
-		if not bound:
-			var pad := InputEventJoypadButton.new()
-			pad.button_index = button as JoyButton
-			InputMap.action_add_event(action, pad)
+		InputMap.add_action(tab[0])
+		for code in [tab[1], tab[2]]:
+			var key := InputEventKey.new()
+			key.physical_keycode = code
+			InputMap.action_add_event(tab[0], key)
+		_bind_pad(tab[0], tab[3])
+
+
+## Tabbed screens turn their pages with these (LB/RB, PageUp/PageDown, [ ]).
+const TAB_PREV := "ui_tab_prev"
+const TAB_NEXT := "ui_tab_next"
+
+
+static func _bind_pad(action: String, button: int) -> void:
+	for event in InputMap.action_get_events(action):
+		if event is InputEventJoypadButton and (event as InputEventJoypadButton).button_index == button:
+			return
+	var pad := InputEventJoypadButton.new()
+	pad.button_index = button as JoyButton
+	InputMap.action_add_event(action, pad)
 
 
 ## Godot 4 exposes no joypad-to-string API (only OS.get_keycode_string for keys),
@@ -80,14 +95,20 @@ static func binding_text(action: String) -> Dictionary:
 	return { "key": " / ".join(keys), "pad": " / ".join(pads) }
 
 
+## The first binding of `action` on the device last touched, or on the other
+## device when this one has none: { name, device }.
+static func first_binding(action: String) -> Dictionary:
+	var text := binding_text(action)
+	var device := last_device
+	if str(text[device]).is_empty():
+		device = "pad" if device == "key" else "key"
+	return { "name": str(text[device]).get_slice(" / ", 0), "device": device }
+
+
 ## Key cap for `action` on the device last used, such as "[F]" or "[X]", so a
 ## prompt names the key the player actually presses, even after a rebind.
 static func prompt(action: String) -> String:
-	var text := binding_text(action)
-	var names := str(text[last_device])
-	if names.is_empty():
-		names = str(text["pad" if last_device == "key" else "key"])
-	return "[%s]" % names.get_slice(" / ", 0).to_upper()
+	return "[%s]" % str(first_binding(action).name).to_upper()
 
 
 ## Fill each {action} token in `template` with that action's live prompt.

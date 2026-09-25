@@ -381,29 +381,16 @@ func _build_title() -> void:
 	nav.sort_children.connect(sync)
 
 
-## One title menu entry. BEGIN is the bright ember button; the others get the
-## quiet glass restyle below.
+## One title menu entry. BEGIN is the ember button; the others are quiet
+## words on the vista that take paper only under focus, so the ember call to
+## action stays the single bright element.
 func _title_entry(nav: VBoxContainer, text: String, node_name: String, primary: bool, on_press: Callable) -> Button:
 	var height := 54.0 if primary else 46.0
-	var button := Kit.button(text, node_name, primary, Vector2(300, height))
+	var button := Kit.button(text, node_name, Kit.PRIMARY if primary else Kit.QUIET, Vector2(300, height))
 	button.size_flags_horizontal = Control.SIZE_SHRINK_CENTER
 	button.pressed.connect(on_press)
-	if not primary:
-		_title_quiet_button(button)
 	nav.add_child(button)
 	return button
-
-
-## Title-only restyle: secondary entries sit on the vista as thin-edged glass so
-## the ember BEGIN button is the single bright element. Focus stays a gold ring.
-func _title_quiet_button(button: Button) -> void:
-	var glass := Color(T.C_INK.r, T.C_INK.g, T.C_INK.b, 0.42)
-	button.add_theme_font_size_override("font_size", 14)
-	button.add_theme_stylebox_override("normal", T.button_box(glass, Color(T.C_EDGE, 0.7), 1))
-	button.add_theme_stylebox_override("hover", T.button_box(Color(T.C_SURFACE_HI, 0.75), T.C_EMBER_HI, 1))
-	button.add_theme_stylebox_override("pressed", T.button_box(Color(T.C_SURFACE_HI, 0.85), T.C_GOLD, 2))
-	button.add_theme_stylebox_override("focus", T.button_box(Color(T.C_SURFACE_HI, 0.6), T.C_GOLD, 2))
-	button.add_theme_color_override("font_color", T.C_MUTED)
 
 
 ## Compact CONTROLS overlay: hidden by default, toggled by the CONTROLS button,
@@ -416,7 +403,7 @@ func _build_title_controls_overlay(panel: Control) -> void:
 	panel.add_child(overlay)
 	overlay.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	overlay.visible = false
-	var dim := Kit.sheet(overlay, Color(0.02, 0.015, 0.03, 0.72), Control.PRESET_FULL_RECT, true)
+	var dim := Kit.backdrop(overlay, Color(0.02, 0.015, 0.03, 0.72), Control.PRESET_FULL_RECT, true)
 	dim.name = "Dim"
 	var center := CenterContainer.new()
 	center.name = "ControlsCenter"
@@ -460,7 +447,7 @@ func _build_title_controls_overlay(panel: Control) -> void:
 		cells[action] = { "key": key_label, "pad": pad_label }
 	stack.add_child(Kit.label(Content.CONTROLS_HINTS, 11, T.C_MUTED))
 	overlay.set_meta("control_cells", cells)
-	var close := Kit.button("CLOSE", "close_controls", false, Vector2(200, 46))
+	var close := Kit.button("CLOSE", "close_controls", Kit.SECONDARY, Vector2(200, 46))
 	close.size_flags_horizontal = Control.SIZE_SHRINK_CENTER
 	close.visible = false
 	close.pressed.connect(toggle_title_controls)
@@ -617,13 +604,13 @@ func _build_pause() -> void:
 	content.add_child(Kit.separator(T.C_EDGE))
 
 	var actions := Kit.button_row(content)
-	var resume := Kit.button("RESUME", "resume", true, Vector2(200, 54))
+	var resume := Kit.button("RESUME", "resume", Kit.PRIMARY, Vector2(200, 54))
 	resume.pressed.connect(ui.resume_requested.emit)
 	actions.add_child(resume)
-	var options_button := Kit.button("OPTIONS", "pause_options", false, Vector2(200, 54))
+	var options_button := Kit.button("OPTIONS", "pause_options", Kit.SECONDARY, Vector2(200, 54))
 	options_button.pressed.connect(ui.options_requested.emit)
 	actions.add_child(options_button)
-	_quit_button = Kit.button("QUIT TO TITLE", "quit", false, Vector2(200, 54))
+	_quit_button = Kit.button("QUIT TO TITLE", "quit", Kit.SECONDARY, Vector2(200, 54))
 	_quit_button.pressed.connect(_on_quit_pressed)
 	actions.add_child(_quit_button)
 
@@ -730,11 +717,7 @@ func _set_quit_warning(on: bool) -> void:
 	Kit.kill_tween(_quit_confirm)
 	_quit_confirm = null
 	_quit_button.text = "ABANDON DESCENT?" if on else "QUIT TO TITLE"
-	Kit.style_button(_quit_button, false)
-	if on:
-		for state in ["normal", "hover", "focus"]:
-			_quit_button.add_theme_stylebox_override(state, T.button_box(Color("3a1418"), T.C_RED, 2))
-		_quit_button.add_theme_color_override("font_focus_color", T.C_RED)
+	Kit.style_button(_quit_button, Kit.DANGER if on else Kit.SECONDARY)
 
 
 # --- The boon deal -----------------------------------------------------------------
@@ -770,55 +753,17 @@ func _build_reward() -> void:
 	panel.set_meta("footer_label", footer)
 
 
-## One boon card. The Button IS the card frame, so focus, hover and click stay a
-## single control; the children are plain labels. Rarity is carried by the
-## coloured top edge, border weight and medallion ring, not by text alone.
+## One boon card: the kit's dealt card carrying the boon's medallion. Rarity
+## reads from the printed band, the medallion ring and the foot line, not
+## colour alone. The number is a live keyboard shortcut, printed as a key cap.
 func _upgrade_card(index: int, upgrade: Dictionary, rarity: String, rc: Color, width: float) -> Button:
 	var epic := rarity == "epic"
-	var edge_w := 3 if epic else 2
-	var paper := Color("1c1725")
-	var button := Button.new()
-	button.custom_minimum_size = Vector2(width, 318)
-	button.size_flags_horizontal = Control.SIZE_SHRINK_CENTER
-	button.size_flags_vertical = Control.SIZE_SHRINK_CENTER
-	button.focus_mode = Control.FOCUS_ALL
-	button.mouse_default_cursor_shape = Control.CURSOR_POINTING_HAND
-	button.add_theme_stylebox_override("normal", T.card_box(paper, rc.darkened(0.3), edge_w))
-	button.add_theme_stylebox_override("hover", T.card_box(paper.lightened(0.05), rc, edge_w + 1))
-	button.add_theme_stylebox_override("focus", T.card_box(paper.lightened(0.05), rc.lightened(0.25), edge_w + 1))
-	button.add_theme_stylebox_override("pressed", T.card_box(paper.lightened(0.1), T.C_GOLD, edge_w + 1))
-
-	var margin := Kit.margin(22, 22, 16, 18)
-	margin.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	margin.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
-	button.add_child(margin)
-	var stack := VBoxContainer.new()
-	stack.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	stack.add_theme_constant_override("separation", 8)
-	margin.add_child(stack)
-
-	# The index is a live keyboard shortcut, so printing it is not decoration.
-	var key := Kit.label("%d" % (index + 1), 12, T.C_MUTED, HORIZONTAL_ALIGNMENT_RIGHT)
-	stack.add_child(key)
-
-	var sigil := Kit.BoonMedallion.new()
-	sigil.setup(str(upgrade.get("id", "")), rc, epic)
-	stack.add_child(sigil)
-
-	var title := Kit.label(str(upgrade.get("title", "Unknown Boon")), 25, T.C_TEXT)
-	title.add_theme_font_override("font", T.heading_font())
-	stack.add_child(title)
-	var desc := Kit.label(str(upgrade.get("desc", "")), 14, T.C_MUTED)
-	desc.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-	desc.vertical_alignment = VERTICAL_ALIGNMENT_TOP
-	desc.custom_minimum_size = Vector2(width - 52.0, 0)
-	desc.size_flags_vertical = Control.SIZE_EXPAND_FILL
-	stack.add_child(desc)
-	# Rarity sits at the foot of the card, where a printed card keeps its set mark.
+	var medallion := Kit.BoonMedallion.new()
+	medallion.setup(str(upgrade.get("id", "")), rc, epic)
 	var foot := rarity.to_upper()
 	if bool(upgrade.get("unique", false)):
 		foot += "  ·  ONCE PER DESCENT"
-	stack.add_child(Kit.label(foot, 11, rc))
+	var button := Kit.card("Boon%d" % index, str(upgrade.get("title", "Unknown Boon")), str(upgrade.get("desc", "")), foot, rc, medallion, Vector2(width, 318), epic, str(index + 1))
 	# Lift toward the hand under focus; hovering a card focuses it.
 	button.focus_entered.connect(_lift_card.bind(button, true))
 	button.focus_exited.connect(_lift_card.bind(button, false))
@@ -905,7 +850,7 @@ func _build_game_over() -> void:
 	content.add_child(epitaph)
 	panel.set_meta("line_label", epitaph)
 	content.add_child(Kit.separator(Color("75414b")))
-	var retry := Kit.button("DESCEND AGAIN", "restart", true, Vector2(250, 56))
+	var retry := Kit.button("DESCEND AGAIN", "restart", Kit.PRIMARY, Vector2(250, 56))
 	_build_run_end_body(panel, content, Color("75414b"), "Return stronger, or descend again while the embers are warm.", retry)
 
 
@@ -922,7 +867,7 @@ func _build_victory() -> void:
 	content.add_child(closing)
 	panel.set_meta("line_label", closing)
 	content.add_child(Kit.separator(T.C_MINT))
-	var again := Kit.button("DESCEND AGAIN", "again", true, Vector2(230, 56))
+	var again := Kit.button("DESCEND AGAIN", "again", Kit.PRIMARY, Vector2(230, 56))
 	_build_run_end_body(panel, content, Color("1f5b52"), "A brighter ember waits at the beginning.", again)
 	# A first win points to the vows, just above the parting line.
 	var vows := Kit.label("VOWS AWAKEN AT THE FORGE.", 14, T.C_GOLD)
@@ -954,7 +899,7 @@ func _build_run_end_body(panel: Control, content: VBoxContainer, tile_edge: Colo
 	var actions := Kit.button_row(content)
 	again.pressed.connect(ui.restart_requested.emit)
 	actions.add_child(again)
-	var title := Kit.button("RETURN TO TITLE", "title", false, Vector2(230, 56))
+	var title := Kit.button("RETURN TO TITLE", "title", Kit.SECONDARY, Vector2(230, 56))
 	title.pressed.connect(ui.quit_to_title_requested.emit)
 	actions.add_child(title)
 	panel.set_meta("buttons", [again, title])
@@ -1050,7 +995,7 @@ func _build_forge() -> void:
 
 	_forge_rows = Kit.scroll_list(content, 350.0, 8)
 
-	var back := Kit.button("BACK", "back", false, Vector2(220, 50), "ui_back")
+	var back := Kit.button("BACK", "back", Kit.SECONDARY, Vector2(220, 50), "ui_back")
 	back.pressed.connect(ui.back_from_forge_requested.emit)
 	Kit.button_row(content).add_child(back)
 	panel.set_meta("back_button", back)
@@ -1091,7 +1036,7 @@ func setup_forge(cells: int) -> void:
 		head.add_child(Kit.rank_pips(rank, max_rank))
 		copy.add_child(Kit.label(str(upgrade.get("desc", "")), 12, T.C_MUTED, HORIZONTAL_ALIGNMENT_LEFT))
 
-		var buy := Kit.button("MASTERED" if mastered else "%d CELLS" % next_cost, "Buy%d" % i, false, Vector2(132, 44), "")
+		var buy := Kit.button("MASTERED" if mastered else "%d CELLS" % next_cost, "Buy%d" % i, Kit.SECONDARY, Vector2(132, 44), "")
 		buy.disabled = mastered or cells < next_cost
 		if mastered:
 			buy.add_theme_color_override("font_disabled_color", T.C_MINT)
@@ -1148,7 +1093,7 @@ func _build_vow_rows() -> void:
 		copy.add_child(Kit.label("%s   +%d%% score" % [str(v.desc), roundi(float(v.score) * 100.0)], 12, T.C_MUTED, HORIZONTAL_ALIGNMENT_LEFT))
 		if kept.has(str(v.id)):
 			line.add_child(Kit.kept_seal())
-		var toggle := Kit.button("SWORN" if on else "SWEAR", "Vow%d" % i, on, Vector2(132, 40), "")
+		var toggle := Kit.button("SWORN" if on else "SWEAR", "Vow%d" % i, Kit.DANGER if on else Kit.SECONDARY, Vector2(132, 40), "")
 		toggle.pressed.connect(ui.vow_toggled.emit.bind(str(v.id)))
 		line.add_child(toggle)
 
@@ -1205,10 +1150,10 @@ func _build_options() -> void:
 	_option_check(seen, "reduced_flash", "Reduced flash", "Reduces high-contrast impact flashes.")
 
 	var footer := Kit.button_row(content)
-	var keys := Kit.button("KEYS", "options_keys", false, Vector2(200, 50))
+	var keys := Kit.button("KEYS", "options_keys", Kit.SECONDARY, Vector2(200, 50))
 	keys.pressed.connect(ui.keys_requested.emit)
 	footer.add_child(keys)
-	var back := Kit.button("BACK", "options_back", false, Vector2(200, 50), "ui_back")
+	var back := Kit.button("BACK", "options_back", Kit.SECONDARY, Vector2(200, 50), "ui_back")
 	back.pressed.connect(ui.back_from_options_requested.emit)
 	footer.add_child(back)
 	panel.set_meta("back_button", back)
@@ -1228,16 +1173,7 @@ func _slider_row(parent: VBoxContainer, title: String, key: String, value: float
 	var readout := Kit.label("%d%%" % roundi(value * 100.0), 12, T.C_MUTED, HORIZONTAL_ALIGNMENT_RIGHT)
 	readout.size_flags_horizontal = Control.SIZE_SHRINK_END
 	head.add_child(readout)
-	var slider := HSlider.new()
-	slider.name = "Opt_%s" % key
-	slider.min_value = 0.0
-	slider.max_value = 1.0
-	slider.step = 0.05
-	slider.value = value
-	slider.custom_minimum_size = Vector2(0, 20)
-	slider.focus_mode = Control.FOCUS_ALL
-	slider.mouse_default_cursor_shape = Control.CURSOR_POINTING_HAND
-	Kit.paper_slider(slider)
+	var slider := Kit.slider("Opt_%s" % key, value)
 	row.add_child(slider)
 	slider.value_changed.connect(func(v: float):
 		readout.text = "%d%%" % roundi(v * 100.0)
@@ -1249,7 +1185,7 @@ func _slider_row(parent: VBoxContainer, title: String, key: String, value: float
 ## A toggle bound to Save option `key`, registered so sync_options can
 ## restore it without emitting.
 func _option_check(parent: Container, key: String, title: String, description: String) -> CheckBox:
-	var box := Kit.check(title, description)
+	var box := Kit.toggle(title, description)
 	parent.add_child(box)
 	_option_checks[key] = box
 	box.toggled.connect(func(value: bool): ui.option_toggled.emit(key, value))
@@ -1289,10 +1225,10 @@ func _build_keys() -> void:
 
 	content.add_child(Kit.label("Gamepad bindings are fixed and always live.", 12, T.C_MUTED))
 	var footer := Kit.button_row(content)
-	var restore := Kit.button("RESTORE DEFAULTS", "keys_restore", false, Vector2(220, 50))
+	var restore := Kit.button("RESTORE DEFAULTS", "keys_restore", Kit.SECONDARY, Vector2(220, 50))
 	restore.pressed.connect(_restore_default_keys)
 	footer.add_child(restore)
-	var back := Kit.button("BACK", "keys_back", false, Vector2(220, 50), "ui_back")
+	var back := Kit.button("BACK", "keys_back", Kit.SECONDARY, Vector2(220, 50), "ui_back")
 	back.pressed.connect(func():
 		_cancel_rebind()
 		ui.back_from_keys_requested.emit()
@@ -1318,7 +1254,7 @@ func sync_keys() -> void:
 		line.add_child(row_label)
 		# Empty cue kind: the label changing to "PRESS A KEY" is the feedback, and
 		# a confirm blip here would imply a commit that has not happened yet.
-		var button := Kit.button(UiInput.key_text_for(action), "Key_%s" % action, false, Vector2(200, 40), "")
+		var button := Kit.button(UiInput.key_text_for(action), "Key_%s" % action, Kit.SECONDARY, Vector2(200, 40), "")
 		button.pressed.connect(_begin_rebind.bind(action, button))
 		line.add_child(button)
 	# A rebind rebuilds the list under the cursor: stay on the same row.

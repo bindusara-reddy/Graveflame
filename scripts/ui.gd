@@ -52,7 +52,7 @@ var _veil_tween: Tween
 
 func _ready() -> void:
 	layer = 50
-	UiInput.ensure_pad_menu_bindings()
+	UiInput.ensure_menu_bindings()
 
 	_root = Control.new()
 	_root.name = "InterfaceRoot"
@@ -60,7 +60,7 @@ func _ready() -> void:
 	add_child(_root)
 	_root.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 
-	_fade = UiKit.sheet(_root, Color(C_VOID, 0.0), Control.PRESET_FULL_RECT)
+	_fade = UiKit.backdrop(_root, Color(C_VOID, 0.0), Control.PRESET_FULL_RECT)
 	_fade.name = "RiftFade"
 	hud = UiHud.new()
 	_layer(hud, "HUD")
@@ -68,6 +68,7 @@ func _ready() -> void:
 	screens = UiScreens.new()
 	_layer(screens, "Screens")
 	screens.build(self)
+	UiKit.focus_flame(_root)
 	get_viewport().gui_focus_changed.connect(screens.on_focus_changed)
 	_refresh_prompts()
 
