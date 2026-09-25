@@ -284,20 +284,43 @@ func _build_banner(node_name: String, top: float, bottom: float, minimum: Vector
 
 
 func _play_banner(banner: Dictionary, title: String, subtitle: String, hold: float) -> void:
-	var root: Control = banner.root
 	(banner.title as Label).text = title
 	(banner.sub as Label).text = subtitle
-	if banner.tween != null and is_instance_valid(banner.tween):
-		(banner.tween as Tween).kill()
-	root.visible = true
-	root.modulate = Color(1.0, 1.0, 1.0, 0.0)
-	var tween := create_tween()
-	tween.set_pause_mode(Tween.TWEEN_PAUSE_PROCESS)
-	tween.tween_property(root, "modulate:a", 1.0, 0.22)
+	banner.tween = _flash_card(banner.root, banner.tween, 0.22, hold, 0.55)
+
+
+## Cut a title card short: stop its fade and hide it.
+func _hide_banner(banner: Dictionary) -> void:
+	if banner.is_empty():
+		return
+	_kill_tween(banner.tween)
+	(banner.root as Control).visible = false
+
+
+## Fade `node` in, hold it, fade it out and hide it, replacing the `previous`
+## run of the same card. Returns the new tween so the caller can cut it short.
+func _flash_card(node: Control, previous: Tween, fade_in: float, hold: float, fade_out: float) -> Tween:
+	_kill_tween(previous)
+	node.visible = true
+	node.modulate = Color(1.0, 1.0, 1.0, 0.0)
+	var tween := _ui_tween()
+	tween.tween_property(node, "modulate:a", 1.0, fade_in)
 	tween.tween_interval(hold)
-	tween.tween_property(root, "modulate:a", 0.0, 0.55)
-	tween.tween_callback(func(): root.visible = false)
-	banner.tween = tween
+	tween.tween_property(node, "modulate:a", 0.0, fade_out)
+	tween.tween_callback(node.hide)
+	return tween
+
+
+## A tween that keeps running while the tree is paused: the reward, pause and
+## run-end screens animate over a paused game.
+func _ui_tween() -> Tween:
+	return create_tween().set_pause_mode(Tween.TWEEN_PAUSE_PROCESS)
+
+
+## Stop a tween that may be null or already finished.
+static func _kill_tween(tween: Tween) -> void:
+	if tween != null and is_instance_valid(tween):
+		tween.kill()
 
 
 func _build_player_status() -> void:
@@ -1296,13 +1319,11 @@ func _set_trailed(bar: ProgressBar, trail: ProgressBar, value: float, maximum: f
 	trail.max_value = bar.max_value
 	var v := clampf(value, 0.0, bar.max_value)
 	bar.value = v
-	if _trail_tweens.has(trail) and is_instance_valid(_trail_tweens[trail]):
-		(_trail_tweens[trail] as Tween).kill()
+	_kill_tween(_trail_tweens.get(trail))
 	if v >= trail.value or Feedback.motion_reduced:
 		trail.value = v
 		return
-	var tw := create_tween()
-	tw.set_pause_mode(Tween.TWEEN_PAUSE_PROCESS)
+	var tw := _ui_tween()
 	tw.tween_interval(0.35)
 	tw.tween_property(trail, "value", v, 0.45).set_trans(Tween.TRANS_SINE).set_ease(Tween.EASE_IN_OUT)
 	_trail_tweens[trail] = tw
@@ -1484,8 +1505,7 @@ func show_panel(name: String, fade: float = 0.0) -> void:
 	panel.modulate = Color.WHITE
 	if fade > 0.0 and not Feedback.motion_reduced:
 		panel.modulate = Color(1.0, 1.0, 1.0, 0.0)
-		var tween := create_tween()
-		tween.set_pause_mode(Tween.TWEEN_PAUSE_PROCESS)
+		var tween := _ui_tween()
 		tween.tween_property(panel, "modulate:a", 1.0, fade).set_trans(Tween.TRANS_SINE).set_ease(Tween.EASE_OUT)
 	if name == "title":
 		_set_title_controls_open(false)
@@ -1513,38 +1533,22 @@ func show_hint(text: String, hold: float = 4.5) -> void:
 	if _hint_panel == null:
 		return
 	_hint_label.text = text
-	if _hint_tween != null and is_instance_valid(_hint_tween):
-		_hint_tween.kill()
-	_hint_panel.visible = true
-	_hint_panel.modulate = Color(1.0, 1.0, 1.0, 0.0)
-	var tween := create_tween()
-	tween.set_pause_mode(Tween.TWEEN_PAUSE_PROCESS)
-	tween.tween_property(_hint_panel, "modulate:a", 1.0, 0.25)
-	tween.tween_interval(hold)
-	tween.tween_property(_hint_panel, "modulate:a", 0.0, 0.5)
-	tween.tween_callback(func(): _hint_panel.visible = false)
-	_hint_tween = tween
+	_hint_tween = _flash_card(_hint_panel, _hint_tween, 0.25, hold, 0.5)
 
 
 func hide_hint() -> void:
-	if _hint_tween != null and is_instance_valid(_hint_tween):
-		_hint_tween.kill()
+	_kill_tween(_hint_tween)
 	if _hint_panel != null:
 		_hint_panel.visible = false
 
 
 func hide_banners() -> void:
-	if _boss_phase_tween != null and is_instance_valid(_boss_phase_tween):
-		(_boss_phase_tween as Tween).kill()
+	_kill_tween(_boss_phase_tween)
 	if _boss_phase_tag != null:
 		_boss_phase_tag.visible = false
 	hide_hint()
 	for banner in [_room_intro, _boss_intro]:
-		if banner.is_empty():
-			continue
-		if banner.tween != null and is_instance_valid(banner.tween):
-			(banner.tween as Tween).kill()
-		(banner.root as Control).visible = false
+		_hide_banner(banner)
 
 
 func set_hp(hp: float, max_hp: float) -> void:
@@ -1597,17 +1601,8 @@ func hide_boss_bar() -> void:
 
 ## Phase-2 callout: a small tag under the boss bar that fades on its own.
 func flash_boss_phase(text: String, hold: float = 1.7) -> void:
-	if _boss_phase_tween != null and is_instance_valid(_boss_phase_tween):
-		(_boss_phase_tween as Tween).kill()
 	_boss_phase_tag.text = text
-	_boss_phase_tag.visible = true
-	_boss_phase_tag.modulate = Color(1.0, 1.0, 1.0, 0.0)
-	_boss_phase_tween = create_tween()
-	_boss_phase_tween.set_pause_mode(Tween.TWEEN_PAUSE_PROCESS)
-	_boss_phase_tween.tween_property(_boss_phase_tag, "modulate:a", 1.0, 0.18)
-	_boss_phase_tween.tween_interval(hold)
-	_boss_phase_tween.tween_property(_boss_phase_tag, "modulate:a", 0.0, 0.5)
-	_boss_phase_tween.tween_callback(func(): _boss_phase_tag.visible = false)
+	_boss_phase_tween = _flash_card(_boss_phase_tag, _boss_phase_tween, 0.18, hold, 0.5)
 
 
 ## Draws one boon sigil. A Control so it lays out inside a card; the drawing
@@ -1728,8 +1723,7 @@ func _lift_card(button: Button, up: bool) -> void:
 	if not is_instance_valid(button) or Feedback.motion_reduced:
 		return
 	button.pivot_offset = button.size * Vector2(0.5, 1.0)
-	var t := create_tween()
-	t.set_pause_mode(Tween.TWEEN_PAUSE_PROCESS)
+	var t := _ui_tween()
 	t.tween_property(button, "scale", Vector2.ONE * (1.035 if up else 1.0), 0.12).set_trans(Tween.TRANS_SINE).set_ease(Tween.EASE_OUT)
 
 
@@ -1743,8 +1737,7 @@ func _deal_cards(buttons: Array) -> void:
 		b.scale = Vector2.ONE * 0.9
 		b.rotation = (float(i) - float(buttons.size() - 1) * 0.5) * 0.09
 		b.pivot_offset = b.custom_minimum_size * Vector2(0.5, 1.0)
-		var t := create_tween()
-		t.set_pause_mode(Tween.TWEEN_PAUSE_PROCESS)
+		var t := _ui_tween()
 		t.tween_interval(0.06 + float(i) * 0.08)
 		t.set_parallel(true)
 		t.tween_property(b, "modulate:a", 1.0, 0.18)
@@ -1946,11 +1939,9 @@ func set_streak(kills: int, frac: float, mult: float) -> void:
 	_streak_mult_label.add_theme_color_override("font_color", col)
 	_streak_bar.add_theme_stylebox_override("fill", _bar_box(col))
 	if tier > _streak_tier and not Feedback.motion_reduced:
-		if _streak_tween != null and is_instance_valid(_streak_tween):
-			_streak_tween.kill()
+		_kill_tween(_streak_tween)
 		_streak_panel.scale = Vector2(1.12, 1.12)
-		_streak_tween = create_tween()
-		_streak_tween.set_pause_mode(Tween.TWEEN_PAUSE_PROCESS)
+		_streak_tween = _ui_tween()
 		_streak_tween.tween_property(_streak_panel, "scale", Vector2.ONE, 0.22).set_trans(Tween.TRANS_BACK).set_ease(Tween.EASE_OUT)
 	_streak_tier = tier
 
@@ -1975,31 +1966,22 @@ var _hud_tween: Tween
 func set_hud_faded(faded: bool) -> void:
 	if _hud == null:
 		return
-	if _hud_tween != null and is_instance_valid(_hud_tween):
-		_hud_tween.kill()
+	_kill_tween(_hud_tween)
 	if not faded:
 		_hud.modulate = Color.WHITE
 		return
-	_hud_tween = create_tween()
-	_hud_tween.set_pause_mode(Tween.TWEEN_PAUSE_PROCESS)
+	_hud_tween = _ui_tween()
 	_hud_tween.tween_property(_hud, "modulate:a", 0.0, 0.5)
 
 
 ## The Warden's fall, carried by the same card that announced it.
 func show_victory_card() -> void:
-	if not _room_intro.is_empty():
-		if _room_intro.tween != null and is_instance_valid(_room_intro.tween):
-			(_room_intro.tween as Tween).kill()
-		(_room_intro.root as Control).visible = false
-	_play_banner(_boss_intro, "THE WARDEN FALLS", "THE EMBER THRONE IS SILENT", 2.2)
+	show_boss_intro("THE WARDEN FALLS", "THE EMBER THRONE IS SILENT", 2.2)
 
 
 func show_boss_intro(boss_name: String, subtitle: String, hold: float = 2.4) -> void:
 	# The boss card owns the screen: drop any chamber card still fading out.
-	if not _room_intro.is_empty():
-		if _room_intro.tween != null and is_instance_valid(_room_intro.tween):
-			(_room_intro.tween as Tween).kill()
-		(_room_intro.root as Control).visible = false
+	_hide_banner(_room_intro)
 	_play_banner(_boss_intro, boss_name.to_upper(), subtitle.to_upper(), hold)
 
 
@@ -2011,18 +1993,15 @@ var _veil_tween: Tween
 func fade_from_black(duration: float = 0.45, origin: Vector2 = Vector2(0.5, 0.55)) -> void:
 	if _fade == null:
 		return
-	if _veil_tween != null and is_instance_valid(_veil_tween):
-		_veil_tween.kill()
-	_veil_tween = create_tween()
-	_veil_tween.set_pause_mode(Tween.TWEEN_PAUSE_PROCESS)
+	_kill_tween(_veil_tween)
+	_veil_tween = _ui_tween()
+	_fade.color = Color(C_VOID, 1.0)
 	if Feedback.motion_reduced:
 		_fade.material = null
-		_fade.color = Color(C_VOID, 1.0)
 		_veil_tween.tween_property(_fade, "color:a", 0.0, duration).set_trans(Tween.TRANS_SINE).set_ease(Tween.EASE_IN)
 		return
 	var mat := burn_material()
 	_fade.material = mat
-	_fade.color = Color(C_VOID, 1.0)
 	var vs := get_viewport().get_visible_rect().size
 	mat.set_shader_parameter("aspect", vs.x / maxf(1.0, vs.y))
 	mat.set_shader_parameter("origin", origin)
@@ -2070,8 +2049,7 @@ func show_room_clear(room_name: String) -> void:
 	_room_clear_name.text = room_name.to_upper() if not room_name.strip_edges().is_empty() else "PATH UNSEALED"
 	_room_clear_banner.visible = true
 	_room_clear_banner.modulate = Color(1.0, 1.0, 1.0, 0.0)
-	var tween := create_tween()
-	tween.set_pause_mode(Tween.TWEEN_PAUSE_PROCESS)
+	var tween := _ui_tween()
 	tween.tween_property(_room_clear_banner, "modulate", Color.WHITE, 0.16)
 
 
