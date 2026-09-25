@@ -51,6 +51,22 @@ const WAKE_AFTER := 3.0
 ## feet clear the top step, then steps down toward the knight.
 const RISE_STAND := 0.6
 const RISE_LIFT := 17.0
+## Chance that an ignited lunge runs straight on into a point-blank fan.
+const STRING_CHANCE := 0.4
+## A linked move (the next of a string) winds up this fraction of its usual tell.
+const LINK_WINDUP := 0.55
+## A charge runs through the knight's spot and this far past it, so a Warden
+## baited near a wall crashes into it and reels for WALL_STUN seconds.
+const CHARGE_OVERRUN := 260.0
+const WALL_STUN := 1.4
+## The last two moves, so none comes three times running.
+var _history: Array[int] = []
+## Moves queued to follow the current one without a rest: the strings.
+var _string: Array[int] = []
+## Where the tracked leap-slam will come down (its marker burns there).
+var slam_x := 0.0
+## Reeling after a charge into the wall.
+var _dazed := false
 ## Set by the room before _ready: start seated on the throne, not standing.
 var seated := false
 var _seated_t := 0.0
@@ -126,12 +142,9 @@ func _sit(delta: float) -> void:
 	var wait := WAKE_AFTER * (0.5 if Save.get_victories() > 0 else 1.0)
 	if Enemy.vows.has("v_pyre"):
 		wait = 0.0
+	_face_player()
 	var player = _get_player()
-	var near := false
-	if player != null:
-		var dx: float = player.global_position.x - global_position.x
-		facing = signf(dx) if absf(dx) > 4.0 else facing
-		near = absf(dx) < WAKE_RANGE
+	var near: bool = player != null and absf(player.global_position.x - global_position.x) < WAKE_RANGE
 	if near or _seated_t >= wait:
 		_wake()
 
@@ -176,6 +189,7 @@ func _ignite() -> void:
 	phase = BPhase.TWO
 	emit_signal("phase_changed", 2)
 	_disarm()
+	_string.clear()
 	state = EState.SEEK
 	action_t = 0.8
 	if not _summoned:
@@ -187,16 +201,25 @@ func _boss_seek(delta: float) -> void:
 	var player = _get_player()
 	velocity.y += Content.GRAVITY * delta
 	var target_speed := 0.0
-	if player != null:
-		var to_p: Vector2 = player.global_position - global_position
-		facing = signf(to_p.x) if absf(to_p.x) > 4.0 else facing
-		if absf(to_p.x) > 120.0:
-			target_speed = facing * Content.BOSS_SPEED
+	_face_player()
+	if player != null and absf(player.global_position.x - global_position.x) > 120.0:
+		target_speed = facing * Content.BOSS_SPEED
 	velocity.x = move_toward(velocity.x, target_speed, 1600.0 * delta)
 	move_and_slide()
 	action_t -= delta
 	if action_t <= 0.0:
 		_choose_action(player)
+
+## Turn toward the knight, unless it is right overhead.
+func _face_player() -> void:
+	var player = _get_player()
+	if player != null:
+		var dx: float = player.global_position.x - global_position.x
+		facing = signf(dx) if absf(dx) > 4.0 else facing
+
+## Seconds that are `calm` in phase one and `hot` once the Warden is ignited.
+func _timing(calm: float, hot: float) -> float:
+	return calm if phase < BPhase.TWO else hot
 
 func _choose_action(player) -> void:
 	var dx := 0.0
@@ -207,17 +230,43 @@ func _choose_action(player) -> void:
 		options = [Action.LUNGE, Action.LUNGE, Action.SLAM]   # bias melee when close
 	elif dx > 380.0:
 		options.append_array([Action.CHARGE, Action.CHARGE])  # close the gap with a charge
-	if phase == BPhase.TWO:
-		options.append_array([Action.FAN, Action.CHARGE])     # more pressure in p2
-	action_idx = options[randi() % options.size()]
-	match action_idx:
+	if phase >= BPhase.TWO:
+		options.append_array([Action.FAN, Action.CHARGE])     # more pressure once ignited
+	if _history.size() == 2 and _history[0] == _history[1]:
+		# Never one move three times running: the fight keeps asking new questions.
+		options = options.filter(func(a: int) -> bool: return a != _history[0])
+	var action: int = options[randi() % options.size()]
+	if action == Action.LUNGE and phase >= BPhase.TWO and randf() < STRING_CHANCE:
+		_string = [Action.FAN]
+	_start(action)
+
+## Wind up `action` and announce it at the decision point, so every entry into
+## a windup is voiced and the player can answer the one that is coming. A
+## linked move, the next of a string, comes on a shorter tell.
+func _start(action: int, linked := false) -> void:
+	_history.append(action)
+	if _history.size() > 2:
+		_history.pop_front()
+	match action:
 		Action.LUNGE: _begin_lunge()
 		Action.FAN: _begin_fan()
 		Action.SLAM: _begin_slam()
 		Action.CHARGE: _begin_charge()
-	# Announce the chosen move at the decision point so every entry into a
-	# windup is voiced, and the player can answer the one that is coming.
+	if linked:
+		st_timer *= LINK_WINDUP
+		data.windup = st_timer
 	emit_signal("telegraphed", _action_telegraph(), global_position, true)
+
+## Every move ends here: straight into the next link of a string, or a rest of
+## `rest` seconds, the knight's window to strike back.
+func _finish_move(rest: float) -> void:
+	_disarm()
+	if not _string.is_empty():
+		_face_player()
+		_start(_string.pop_front(), true)
+		return
+	state = EState.RECOVER
+	st_timer = rest
 
 ## Telegraph id for the move just chosen: the Action's own name, lower-cased
 ## ("lunge", "slam"), resolved to a sound by the game. anticipation_contract
@@ -234,20 +283,27 @@ func _wind_up(action: int, seconds: float) -> void:
 	data.windup = seconds
 
 func _begin_lunge() -> void:
-	var seconds := 0.4 if phase == BPhase.TWO else 0.55
-	_wind_up(Action.LUNGE, seconds)
+	_wind_up(Action.LUNGE, _timing(0.55, 0.4))
 
 func _begin_fan() -> void:
-	var seconds := 0.5 if phase == BPhase.TWO else 0.65
-	_wind_up(Action.FAN, seconds)
+	_wind_up(Action.FAN, _timing(0.65, 0.5))
 
+## The leap tracks the knight: in phase one it covers only part of the gap, so
+## a sidestep beats it; once ignited it comes down right on them. slam_x is
+## where it will land, and the marker burns there.
 func _begin_slam() -> void:
-	_wind_up(Action.SLAM, 0.45)
-	velocity.y = -700.0  # leap
+	var seconds := 0.45
+	_wind_up(Action.SLAM, seconds)
+	var target_x := global_position.x
+	var player = _get_player()
+	if player != null:
+		target_x = clampf(player.global_position.x, Content.ROOM_LEFT + 80.0, Content.ROOM_RIGHT - 80.0)
+	var drift := clampf((target_x - global_position.x) * _timing(0.6, 1.0) / seconds, -650.0, 650.0)
+	velocity = Vector2(drift, -700.0)
+	slam_x = global_position.x + drift * seconds
 
 func _begin_charge() -> void:
-	var seconds := 0.5 if phase == BPhase.TWO else 0.7
-	_wind_up(Action.CHARGE, seconds)
+	_wind_up(Action.CHARGE, _timing(0.7, 0.5))
 	_charge_dir = facing
 
 func _boss_attack(delta: float) -> void:
@@ -257,33 +313,39 @@ func _boss_attack(delta: float) -> void:
 		# Locked heading: the telegraph promised this line, so it never tracks the player.
 		_charge_t -= delta
 		velocity.x = _charge_dir * Content.BOSS_CHARGE_SPEED
-		if is_on_wall():
-			_charge_t = 0.0
 	else:
 		velocity.x = move_toward(velocity.x, 0.0, 1600.0 * delta)
 	move_and_slide()
 	st_timer -= delta
+	if charge and is_on_wall():
+		_crash_into_wall()
+		return
 	if action_idx == Action.SLAM and is_on_floor() and not _slam_wave_emitted:
 		_slam_wave_emitted = true
 		_emit_slam_waves()
 	var dmg := Content.BOSS_DAMAGE * (1.15 if charge else 1.0) * Enemy.vow_damage()
 	var knock := 480.0 if charge else 420.0
 	_strike_overlaps(dmg, Vector2(facing, -0.3), knock)
-	var finished := st_timer <= 0.0
-	if charge:
-		finished = _charge_t <= 0.0
+	var finished := _charge_t <= 0.0 if charge else st_timer <= 0.0
 	if finished:
-		_disarm()
 		velocity.x *= 0.2
-		state = EState.RECOVER
-		if charge:
-			st_timer = 0.55 if phase == BPhase.TWO else 0.8
-		else:
-			st_timer = 0.5 if phase == BPhase.TWO else 0.7
+		_finish_move(_timing(0.8, 0.55) if charge else _timing(0.7, 0.5))
+
+## The charge meets the wall: dust and a thud, and the Warden reels back dazed
+## for WALL_STUN seconds, the reward for baiting it there.
+func _crash_into_wall() -> void:
+	_string.clear()
+	_disarm()
+	emit_signal("exploded", global_position + Vector2(_charge_dir * Content.BOSS_W * 0.5, 0.0), 120.0, 0.0)
+	velocity = Vector2(-_charge_dir * 200.0, -180.0)
+	state = EState.RECOVER
+	st_timer = _timing(WALL_STUN, WALL_STUN * 0.8)
+	_dazed = true
 
 func _step_windup(delta: float) -> void:
 	velocity.y += Content.GRAVITY * delta
-	velocity.x = move_toward(velocity.x, 0.0, 1800.0 * delta)
+	if action_idx != Action.SLAM:
+		velocity.x = move_toward(velocity.x, 0.0, 1800.0 * delta)
 	move_and_slide()
 	st_timer -= delta
 	if st_timer <= 0.0:
@@ -303,6 +365,10 @@ func _do_charge() -> void:
 	state = EState.ATTACK
 	facing = _charge_dir
 	_charge_t = Content.BOSS_CHARGE_TIME
+	var player = _get_player()
+	if player != null:
+		var ahead: float = (player.global_position.x - global_position.x) * _charge_dir
+		_charge_t = clampf((ahead + CHARGE_OVERRUN) / Content.BOSS_CHARGE_SPEED, Content.BOSS_CHARGE_TIME, 1.5)
 	st_timer = _charge_t
 	_arm(Content.BOSS_W * 0.5 + 24.0)
 	velocity = Vector2(_charge_dir * Content.BOSS_CHARGE_SPEED, 0.0)
@@ -319,8 +385,7 @@ func _do_fan() -> void:
 		var a := base_ang + lerpf(-spread * 0.5, spread * 0.5, float(i) / maxf(1.0, float(n - 1)))
 		var v := Vector2(cos(a), sin(a)) * Content.BOSS_SHOT_SPEED
 		emit_signal("projectile_requested", "enemy", global_position + Vector2(0.0, -20.0), v, Content.BOSS_SHOT_DAMAGE * Enemy.vow_damage(), 180.0, 0, 2.6, Content.BOSS_COLOR)
-	state = EState.RECOVER
-	st_timer = 0.6 if phase == BPhase.TWO else 0.85
+	_finish_move(_timing(0.85, 0.6))
 
 func _do_slam() -> void:
 	# On landing, melee burst + shockwave projectiles
@@ -349,7 +414,8 @@ func _boss_recover(delta: float) -> void:
 	st_timer -= delta
 	if st_timer <= 0.0:
 		state = EState.SEEK
-		action_t = 0.3 if phase == BPhase.TWO else 0.55
+		_dazed = false
+		action_t = _timing(0.55, 0.3)
 
 func take_damage(amount: float, from_dir: Vector2, _kb: float, poise_dmg := 1.0) -> void:
 	if dead: return
@@ -387,6 +453,7 @@ func is_broken() -> bool:
 ## knee for BREAK_TIME. The knee strikes the floor with the slam's dust and thud.
 func _break_guard(from_dir: Vector2) -> void:
 	_disarm()
+	_string.clear()
 	state = EState.STAGGER
 	stagger_t = BREAK_TIME
 	action_t = 0.3
@@ -434,6 +501,9 @@ func visual_pose() -> Dictionary:
 		WardenArt.seat(p, 1.0 - clampf(woke / RISE_STAND, 0.0, 1.0))
 		p["eye"] = clampf(woke / 0.25, 0.0, 1.0)
 		p["crown"] = lerpf(0.3, 1.0, clampf(woke / 0.5, 0.0, 1.0))
+	if action_idx == Action.SLAM and (state == EState.WINDUP or (state == EState.ATTACK and not _slam_wave_emitted)):
+		p["marker"] = to_local(Vector2(slam_x, Content.FLOOR_Y))
+		p["marker_k"] = 1.0 if state == EState.ATTACK else float(p.progress)
 	if dead:
 		var k := clampf(_death_t / SHATTER_T, 0.0, 1.0)
 		p["dying"] = k

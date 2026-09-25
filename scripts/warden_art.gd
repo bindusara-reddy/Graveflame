@@ -167,6 +167,12 @@ static func paint(b,p: Dictionary) -> void:
 	var stride := sin(t*8.0)*5.0*walk if b.is_on_floor() else 2.0
 	var breathe := sin(t*2.2)*1.2
 	VFX.draw_contact_shadow(ci,Vector2(0,60),88.0,14.0,clampf(b._air_time/0.3,0.0,1.0))
+	if p.has("marker"):
+		# Where the leap-slam will land: a scorch that burns brighter as it falls.
+		var mk: float = p.marker_k
+		var rx := lerpf(40.0,70.0,mk)
+		VFX.draw_ellipse(ci,p.marker,rx,rx*0.16,Color(fire,0.2+0.4*mk))
+		VFX.draw_ellipse_ring(ci,p.marker,rx,rx*0.16,Color(INK,0.7),2.0)
 	var jitter: Vector2 = p.get("jitter", Vector2.ZERO)
 	ci.draw_set_transform(Vector2(jitter.x,breathe+jitter.y),float(p.lean)*face,Vector2(face,1))
 	# A broad flowing back mass, not separate armour ornaments.
