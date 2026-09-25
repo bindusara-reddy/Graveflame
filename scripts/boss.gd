@@ -1,7 +1,8 @@
 class_name Boss
 extends Enemy
-## Phased boss: lunge, projectile fan, ground slam, arena charge. Phase 2 below
-## 50% HP: faster, relentless, and it calls two wisps to the throne room.
+## Phased boss: lunge, projectile fan, ground slam, arena charge. It waits
+## seated on the Ember Throne and rises to meet the knight. Phase 2 below 50%
+## HP: faster, relentless, and it calls two wisps to the throne room.
 ## Hits never cancel a committed move; they wear down its poise, and a broken
 ## guard (or any parry) drops it to one knee for a real punish window.
 
@@ -39,6 +40,22 @@ const BREAK_TIME := 1.2
 const BREAK_DAMAGE_MUL := 1.3
 var _poise: float = POISE[BPhase.ONE]
 var _poise_regen_t := 0.0
+## Where the Warden sits on the Ember Throne (room._throne, x 640): haunches on
+## the seat, feet on the top dais step.
+const THRONE_SEAT := Vector2(640.0, Content.FLOOR_Y - 86.0)
+## A seated Warden wakes when the knight comes this close, when WAKE_AFTER
+## seconds have passed (half that once it has been felled before), or when hit.
+const WAKE_RANGE := 310.0
+const WAKE_AFTER := 3.0
+## After waking it stands on the dais this long, lifting RISE_LIFT px so its
+## feet clear the top step, then steps down toward the knight.
+const RISE_STAND := 0.6
+const RISE_LIFT := 17.0
+## Set by the room before _ready: start seated on the throne, not standing.
+var seated := false
+var _seated_t := 0.0
+## Seconds since waking from the throne; negative while it never sat.
+var _rise_t := -1.0
 
 func _ready() -> void:
 	hp_max = Content.BOSS_HP
@@ -75,16 +92,7 @@ func _physics_process(delta: float) -> void:
 	_anim_t += delta
 	queue_redraw()
 	if phase == BPhase.INTRO:
-		intro_t -= delta
-		velocity.y += Content.GRAVITY * delta
-		move_and_slide()
-		if intro_t <= 0.0:
-			phase = BPhase.ONE
-			state = EState.SEEK
-			action_t = 0.55
-			emit_signal("phase_changed", 1)
-			if Enemy.vows.has("v_pyre"):
-				_ignite()
+		_step_intro(delta)
 		return
 	_regen_poise(delta)
 	_check_phase2()
@@ -95,6 +103,66 @@ func _physics_process(delta: float) -> void:
 		EState.RECOVER: _boss_recover(delta)
 		EState.STAGGER: _step_stagger(delta)
 		EState.DEAD: pass
+
+## Before the fight: seated and dormant, then rising off the throne. A Warden
+## that never sat (tests, captures) just stands for intro_t.
+func _step_intro(delta: float) -> void:
+	if seated:
+		_sit(delta)
+		return
+	if _rise_t >= 0.0:
+		_rise(delta)
+		return
+	intro_t -= delta
+	velocity.y += Content.GRAVITY * delta
+	move_and_slide()
+	if intro_t <= 0.0:
+		_end_intro()
+
+## Dormant on the throne, turned toward the knight, until something wakes it.
+## The Vow of the Pyre wakes it at once: it is already burning.
+func _sit(delta: float) -> void:
+	_seated_t += delta
+	var wait := WAKE_AFTER * (0.5 if Save.get_victories() > 0 else 1.0)
+	if Enemy.vows.has("v_pyre"):
+		wait = 0.0
+	var player = _get_player()
+	var near := false
+	if player != null:
+		var dx: float = player.global_position.x - global_position.x
+		facing = signf(dx) if absf(dx) > 4.0 else facing
+		near = absf(dx) < WAKE_RANGE
+	if near or _seated_t >= wait:
+		_wake()
+
+func _wake() -> void:
+	if seated:
+		seated = false
+		_rise_t = 0.0
+
+## Stand up on the dais, then step down toward the knight. The fight begins the
+## moment it lands, with the landing's dust and thud.
+func _rise(delta: float) -> void:
+	var was_standing := _rise_t >= RISE_STAND
+	_rise_t += delta
+	if _rise_t < RISE_STAND:
+		global_position.y = THRONE_SEAT.y - RISE_LIFT * _rise_t / RISE_STAND
+		return
+	if not was_standing:
+		velocity = Vector2(facing * 240.0, -320.0)
+	velocity.y += Content.GRAVITY * delta
+	move_and_slide()
+	if is_on_floor():
+		emit_signal("exploded", global_position + Vector2(0.0, Content.BOSS_H * 0.5), 120.0, 0.0)
+		_end_intro()
+
+func _end_intro() -> void:
+	phase = BPhase.ONE
+	state = EState.SEEK
+	action_t = 0.55
+	emit_signal("phase_changed", 1)
+	if Enemy.vows.has("v_pyre"):
+		_ignite()
 
 func _check_phase2() -> void:
 	if not _phase2_triggered and hp <= hp_max * Content.BOSS_PHASE2_AT:
@@ -294,7 +362,10 @@ func take_damage(amount: float, from_dir: Vector2, _kb: float, poise_dmg := 1.0)
 	if hp <= 0.0:
 		_die()
 		return
-	if phase == BPhase.INTRO or is_broken():
+	if phase == BPhase.INTRO:
+		_wake()
+		return
+	if is_broken():
 		return
 	# Hyper-armour: the blow lands and flashes but never cancels what the
 	# Warden is doing; it only spends poise.
@@ -356,6 +427,13 @@ func _step_death(delta: float) -> void:
 
 func visual_pose() -> Dictionary:
 	var p := WardenArt.pose(self)
+	if phase == BPhase.INTRO and state == EState.SEEK and (seated or _rise_t >= 0.0):
+		# Seated: dark eye, crown banked to embers. Waking, the eye kindles
+		# first, then the crown blooms as it stands.
+		var woke := 0.0 if seated else _rise_t
+		WardenArt.seat(p, 1.0 - clampf(woke / RISE_STAND, 0.0, 1.0))
+		p["eye"] = clampf(woke / 0.25, 0.0, 1.0)
+		p["crown"] = lerpf(0.3, 1.0, clampf(woke / 0.5, 0.0, 1.0))
 	if dead:
 		var k := clampf(_death_t / SHATTER_T, 0.0, 1.0)
 		p["dying"] = k

@@ -305,7 +305,9 @@ func _relay(foe: Enemy) -> void:
 
 func _spawn_boss() -> void:
 	boss = Boss.new()
-	boss.global_position = Vector2(900, Content.FLOOR_Y - 80)
+	# The Warden waits seated on its throne and rises when the knight comes.
+	boss.seated = true
+	boss.global_position = Boss.THRONE_SEAT
 	# Trial of the Throne: the Warden reads this as it readies, so it goes first.
 	boss.set("trial", trial)
 	add_child(boss)

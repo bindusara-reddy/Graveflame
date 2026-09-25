@@ -111,6 +111,17 @@ static func pose(b) -> Dictionary:
 		"claw_angle":claw_angle,"off_angle":off_angle,"lean":lean,
 		"windup":windup,"active":active,"progress":progress,"phase2":b.phase == 2}
 
+## Blend pose `p` toward sitting on the Ember Throne by k (1 = seated): claws
+## draped over the armrests, haunches forward, head low.
+static func seat(p: Dictionary, k: float) -> void:
+	p.sit = k
+	p.hand = (p.hand as Vector2).lerp(Vector2(66,-30),k)
+	p.elbow = (p.elbow as Vector2).lerp(Vector2(46,-20),k)
+	p.offhand = (p.offhand as Vector2).lerp(Vector2(-66,-30),k)
+	p.claw_angle = lerpf(float(p.claw_angle),1.45,k)
+	p.off_angle = lerpf(float(p.off_angle),1.9,k)
+	p.lean = lerpf(float(p.lean),0.07,k)
+
 static func shape(ci: CanvasItem, points: PackedVector2Array, color: Color, edge: Color = RIDGE) -> void:
 	ci.draw_colored_polygon(points,color)
 	var border := points.duplicate()
@@ -165,10 +176,13 @@ static func paint(b,p: Dictionary) -> void:
 	shape(ci,mantle,MANTLE.darkened(0.12),RUST)
 	ci.draw_polyline(STROKES.mantle_fold,RUST.darkened(0.25),3.0,true)
 	# Heavy haunches and three hooked toes anchor the creature to the same floor.
+	# Optional pose keys (seat, rise, roar, kneel...) all default to the plain
+	# standing Warden, so a bare pose draws exactly as it always has.
+	var sit: float = p.get("sit",0.0)
 	for side: float in [-1.0,1.0]:
 		var hip := Vector2(side*20,14)
-		var knee := Vector2(side*25+stride*side,35)
-		var foot := Vector2(side*24-stride*side,55)
+		var knee := Vector2(side*25+stride*side,35).lerp(Vector2(36+side*7,22),sit)
+		var foot := Vector2(side*24-stride*side,55).lerp(Vector2(40+side*8,38),sit)
 		ci.draw_line(hip,knee,INK,25.0,true)
 		ci.draw_line(hip,knee,CHAR,20.0,true)
 		ci.draw_line(knee,foot,INK,20.0,true)
@@ -188,13 +202,15 @@ static func paint(b,p: Dictionary) -> void:
 	shape(ci,BODY.head,rust.lightened(0.10))
 	ci.draw_colored_polygon(BODY.face,INK)
 	# Side-on eye, jaw and fangs read as a beast rather than a human death mask.
-	ci.draw_line(Vector2(11,-68),Vector2(27,-70),Color("ffdb87"),4.0,true)
-	ci.draw_line(Vector2(22,-69),Vector2(28,-71),Color.WHITE,1.5,true)
+	# A dormant Warden's eye is dark ink; it kindles as it wakes.
+	var eye: float = p.get("eye",1.0)
+	ci.draw_line(Vector2(11,-68),Vector2(27,-70),INK.lerp(Color("ffdb87"),eye),4.0,true)
+	ci.draw_line(Vector2(22,-69),Vector2(28,-71),Color(Color.WHITE,eye),1.5,true)
 	ci.draw_polyline(STROKES.jaw,RIDGE,3.5,true)
 	for x in [23.0,32.0]:
 		ci.draw_colored_polygon(PackedVector2Array([Vector2(x,-48),Vector2(x+4,-48),Vector2(x+2,-57)]),HORN)
 	# Flame crown shares the hero's warm identity but has a swept, bestial crest.
-	var crown_scale := 1.35 if phase2 else 1.0
+	var crown_scale: float = (1.35 if phase2 else 1.0)*float(p.get("crown",1.0))
 	VFX.draw_flame(ci,Vector2(-8,-75),30.0*crown_scale,12.0,t,1.0,fire,Content.PAL.attack)
 	VFX.draw_flame(ci,Vector2(8,-85),39.0*crown_scale,12.0,t,2.3,fire,Content.PAL.attack)
 	VFX.draw_flame(ci,Vector2(25,-78),26.0*crown_scale,10.0,t,4.0,fire,Content.PAL.attack)
