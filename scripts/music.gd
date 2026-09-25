@@ -1,13 +1,19 @@
 extends Node
-## Procedural score. Three original pieces in D minor, written as notes and
-## synthesized at boot from nothing but oscillators and noise:
-##   title   "Threshold"    -- a slow harp and choir over the drop
+## Procedural score in D minor, written as notes and synthesized from nothing
+## but oscillators and noise:
+##   title   "Threshold"    -- a slow harp and choir over the drop; after the
+##                            first victory it plays at dawn (title_dawn), its
+##                            question answered in D major
 ##   explore "The Descent"  -- harp ostinato, choir, a heartbeat drum; the bells
-##                            take the melody in its second half
+##                            take the melody in its second half; a combat layer
+##                            (explore_hot) rides in lockstep and rises with waves
 ##   boss    "Ember Warden" -- 132 bpm; a second layer (boss_hot) is rendered in
 ##                            lockstep and faded in when the Warden ignites
-## Every note shape is synthesized once and mixed into a circular stereo buffer,
-## so a loop's ringing tails wrap into its own head and every loop is seamless.
+##   curtain_* "Strike the Set" -- the ending's cues, one-shots and one loop that
+##                            the finale overlaps on its own clock
+## Every note shape is synthesized once and mixed into a stereo buffer. A loop's
+## buffer is circular, so its ringing tails wrap into its own head and the loop
+## is seamless; a one-shot's buffer holds its whole tail instead.
 ## Rendered on worker threads and cached under user:// after the first launch.
 
 const RATE := 16000
@@ -17,8 +23,29 @@ const CACHE_DIR := "user://audio_cache"
 const FADE_TIME := 1.4
 
 ## Track name -> target volume in dB while active.
-const LEVELS := { "title": -10.0, "explore": -12.0, "boss": -9.0, "boss_hot": -9.0 }
+const LEVELS := {
+	"title": -10.0, "title_dawn": -10.0, "explore": -12.0, "explore_hot": -12.0,
+	"boss": -9.0, "boss_hot": -9.0,
+}
+## Rendered in parallel at boot; is_ready() waits for exactly these.
 const TRACKS := ["title", "explore", "boss", "boss_hot"]
+## A base track's second layer. It starts with its base, sits at silence until
+## set_intensity() raises it, and never stops while the base plays, so the two
+## stay locked together.
+const LAYERS := { "explore": "explore_hot", "boss": "boss_hot" }
+## The ending's cues, on players of their own so one cue's tail can ring under
+## the next cue's head.
+const CUES := ["curtain_a", "curtain_hold", "curtain_b1", "curtain_b2"]
+const CUE_LEVELS := { "curtain_a": -11.0, "curtain_hold": -12.0, "curtain_b1": -9.0, "curtain_b2": -10.0 }
+const CUE_LOOP := ["curtain_hold"]
+## The score's low-pass: wide open, at the lowest flame, and behind a panel
+## that holds a run (pause, reward).
+const OPEN_HZ := 20000.0
+const LOW_FLAME_HZ := 2200.0
+const HELD_HZ := 1100.0
+## Feedback routes stinger cues here; the score's compressor listens to it, so
+## a gong or a roar pushes the music back for a breath.
+const STINGER_BUS := "Stinger"
 
 var enabled := true
 var _players: Dictionary = {}
@@ -27,10 +54,16 @@ var _tracks_ready := false
 var _current := ""
 var _tweens: Dictionary = {}
 var _intensity := 0.0
+## Pieces that must never delay the tracks (the combat layer, the ending's cues,
+## the dawn title once earned), rendered one at a time after the tracks.
+var _late_queue: Array = []
+## 0..1: how far the knight's flame has guttered.
+var _muffle := 0.0
+var _filter: AudioEffectLowPassFilter
 
 func _ready() -> void:
 	process_mode = Node.PROCESS_MODE_ALWAYS
-	for name in TRACKS:
+	for name in LEVELS.keys() + CUES:
 		var p := AudioStreamPlayer.new()
 		p.name = str(name).capitalize().replace(" ", "")
 		# Routed to the Music bus so the options mix owns the score's level;
@@ -39,41 +72,63 @@ func _ready() -> void:
 		p.volume_db = -80.0
 		add_child(p)
 		_players[name] = p
-		var cached := _load_cached(name)
-		if cached != null:
-			p.stream = cached
-		else:
-			var th := Thread.new()
-			th.start(_render_track.bind(name))
-			_threads[name] = th
+	for name in TRACKS:
+		var p: AudioStreamPlayer = _players[name]
+		p.stream = _load_cached(name)
+		if p.stream == null:
+			_start_render(name)
+	for name in ["explore_hot"] + CUES:
+		_queue_late(name)
 	_check_ready()
+	_dress_bus()
 
 func _exit_tree() -> void:
+	# A render cut short by quitting is still banked, so the next boot carries
+	# on down the queue instead of starting it over.
 	for name in _threads:
 		var th: Thread = _threads[name]
 		if th.is_started():
-			th.wait_to_finish()
+			_save_cached(name, _make_stream(th.wait_to_finish(), _loops(name)))
 	_threads.clear()
+	if _filter != null:
+		_filter.cutoff_hz = OPEN_HZ
 
 func is_ready() -> bool:
 	return _tracks_ready
 
-func _process(_delta: float) -> void:
-	if _threads.is_empty():
-		return
+func _process(delta: float) -> void:
 	for name in _threads.keys():
 		var th: Thread = _threads[name]
-		if th.is_alive():
-			continue
-		var pcm: PackedByteArray = th.wait_to_finish()
-		_threads.erase(name)
-		var stream := _make_stream(pcm)
-		(_players[name] as AudioStreamPlayer).stream = stream
-		_save_cached(name, stream)
-		# A track that was asked for before it existed starts the moment it lands.
-		if name == _current or (name == "boss_hot" and _current == "boss"):
-			play_track(_current)
+		if not th.is_alive():
+			_threads.erase(name)
+			_install(name, th.wait_to_finish())
 	_check_ready()
+	if _tracks_ready and _threads.is_empty() and not _late_queue.is_empty():
+		_start_render(_late_queue.pop_front())
+	_steer_filter(delta)
+
+func _start_render(name: String) -> void:
+	var th := Thread.new()
+	th.start(_render_track.bind(name))
+	_threads[name] = th
+
+## Load a late piece from the cache, or queue its render behind the others.
+func _queue_late(name: String) -> void:
+	var p: AudioStreamPlayer = _players[name]
+	if p.stream != null or _late_queue.has(name) or _threads.has(name):
+		return
+	p.stream = _load_cached(name)
+	if p.stream == null:
+		_late_queue.append(name)
+
+## Hand a finished render to its player and the cache. A track asked for before
+## it existed starts the moment it lands.
+func _install(name: String, pcm: PackedByteArray) -> void:
+	var stream := _make_stream(pcm, _loops(name))
+	(_players[name] as AudioStreamPlayer).stream = stream
+	_save_cached(name, stream)
+	if _current != "" and (name == _voice_of(_current) or name == LAYERS.get(_current, "")):
+		play_track(_current)
 
 func _check_ready() -> void:
 	if _tracks_ready:
@@ -83,52 +138,151 @@ func _check_ready() -> void:
 			return
 	_tracks_ready = true
 
-## Switch tracks: "title", "explore", "boss", or "" for silence.
-func play_track(track: String) -> void:
+## Switch tracks: "title", "explore", "boss", or "" for silence. `fade` is in
+## real seconds; 0 is a hard entrance on the downbeat.
+func play_track(track: String, fade: float = FADE_TIME) -> void:
+	if track != _current:
+		# A new scene never inherits the low-flame filter of the last one.
+		_muffle = 0.0
 	_current = track
-	if track != "boss":
-		_intensity = 0.0
-	for name in TRACKS:
+	if Save.get_victories() > 0:
+		_queue_late("title_dawn")
+	var voice := _voice_of(track)
+	var layer: String = LAYERS.get(track, "")
+	for name in LEVELS:
 		var p: AudioStreamPlayer = _players[name]
-		var active: bool = enabled and (name == track or (name == "boss_hot" and track == "boss"))
-		if active and p.stream != null:
-			var target := float(LEVELS.get(name, -12.0))
-			if name == "boss_hot":
-				target = lerpf(-60.0, target, _intensity) if _intensity > 0.0 else -80.0
-			if not p.playing:
-				# The hot layer rides in lockstep with the boss theme.
-				var at := 0.0
-				if name == "boss_hot" and (_players["boss"] as AudioStreamPlayer).playing:
-					at = (_players["boss"] as AudioStreamPlayer).get_playback_position()
-				elif name == "boss" and (_players["boss_hot"] as AudioStreamPlayer).playing:
-					at = (_players["boss_hot"] as AudioStreamPlayer).get_playback_position()
-				p.play(at)
-			_fade(p, target)
-		else:
-			_fade(p, -80.0)
+		if not enabled or p.stream == null or (name != voice and name != layer):
+			_fade(p, -80.0, fade)
+			continue
+		if not p.playing:
+			p.play(_partner_position(name))
+		var target := float(LEVELS[name])
+		if name == layer:
+			target = lerpf(-60.0, target, _intensity) if _intensity > 0.0 else -80.0
+		_fade(p, target, fade, name == layer)
 
-## 0..1: how much of the boss theme's second layer is up (phase two).
-func set_intensity(value: float) -> void:
+## The player that voices `track`: once the keep has fallen, the title plays at
+## dawn, with the old title standing in until that render lands.
+func _voice_of(track: String) -> String:
+	var dawn: AudioStreamPlayer = _players["title_dawn"]
+	if track == "title" and dawn.stream != null and Save.get_victories() > 0:
+		return "title_dawn"
+	return track
+
+## A layer joining its base mid-loop (or a base rejoining its layer) starts at
+## the partner's position; started together, both start at zero.
+func _partner_position(name: String) -> float:
+	var partner = LAYERS.get(name, LAYERS.find_key(name))
+	if partner != null and (_players[partner] as AudioStreamPlayer).playing:
+		return (_players[partner] as AudioStreamPlayer).get_playback_position()
+	return 0.0
+
+## 0..1: how far a track's second layer is up (a wave in progress, the Warden
+## ignited), faded over `fade` real seconds. It belongs to the moment, not the
+## track: a run's first wave is called before its track starts, and a cleared
+## chamber hands the throne a silent layer.
+func set_intensity(value: float, fade: float = FADE_TIME) -> void:
 	_intensity = clampf(value, 0.0, 1.0)
-	if _current == "boss":
-		play_track("boss")
+	if LAYERS.has(_current):
+		play_track(_current, fade)
 
 func set_enabled(value: bool) -> void:
 	enabled = value
+	if not value:
+		stop_cues()
 	play_track(_current)
 
-func _fade(p: AudioStreamPlayer, target_db: float) -> void:
+## Silence everything at once (the killing blow): tracks and cues alike.
+func cut(fade: float = 0.15) -> void:
+	play_track("", fade)
+	stop_cues(fade)
+
+## 0..1: how far the knight's flame has guttered; the score closes in with it.
+func set_muffle(amount: float) -> void:
+	_muffle = clampf(amount, 0.0, 1.0)
+
+## True when a cue can sound right now; without it the finale falls back to
+## effects and keeps its timing.
+func has_cue(name: String) -> bool:
+	return enabled and CUES.has(name) and (_players[name] as AudioStreamPlayer).stream != null
+
+## Start a cue at its level from `from` seconds. Other cues keep playing: the
+## finale overlaps one cue's tail with the next one's head.
+func play_cue(name: String, from: float = 0.0) -> void:
+	if not has_cue(name):
+		return
+	var p: AudioStreamPlayer = _players[name]
+	_fade(p, float(CUE_LEVELS[name]), 0.0)
+	p.play(from)
+
+func stop_cue(name: String, fade: float = 0.3) -> void:
+	if CUES.has(name):
+		_fade(_players[name], -80.0, fade)
+
+func stop_cues(fade: float = 0.3) -> void:
+	for name in CUES:
+		stop_cue(name, fade)
+
+## Tween a player's level over `time` real seconds: Engine.time_scale is low
+## through the beats and hit-stops, and a fade must not stretch with it.
+## Reaching silence stops the player, unless `hold` keeps a layer running in
+## step with its base.
+func _fade(p: AudioStreamPlayer, target_db: float, time: float = FADE_TIME, hold := false) -> void:
 	if _tweens.has(p) and is_instance_valid(_tweens[p]):
 		(_tweens[p] as Tween).kill()
-	if target_db <= -79.0 and not p.playing:
-		p.volume_db = -80.0
+	var silent := target_db <= -79.0
+	if time <= 0.0 or (silent and not p.playing):
+		p.volume_db = target_db
+		if silent and not hold:
+			p.stop()
 		return
 	var tween := create_tween()
 	tween.set_pause_mode(Tween.TWEEN_PAUSE_PROCESS)
-	tween.tween_property(p, "volume_db", target_db, FADE_TIME)
-	if target_db <= -79.0:
+	tween.set_ignore_time_scale(true)
+	tween.tween_property(p, "volume_db", target_db, time)
+	if silent and not hold:
 		tween.tween_callback(p.stop)
 	_tweens[p] = tween
+
+# --- The score's bus ------------------------------------------------------------
+
+## The score's inserts: a low-pass that closes as the flame gutters or while a
+## panel holds the run, and a compressor keyed from the Stinger bus. Buses
+## outlive any one game, so a later boot finds what an earlier one added.
+func _dress_bus() -> void:
+	var bus := AudioServer.get_bus_index("Music")
+	if bus < 0:
+		return
+	if AudioServer.get_bus_index(STINGER_BUS) < 0:
+		AudioServer.add_bus()
+		AudioServer.set_bus_name(AudioServer.bus_count - 1, STINGER_BUS)
+		AudioServer.set_bus_send(AudioServer.bus_count - 1, "SFX")
+	for i in range(AudioServer.get_bus_effect_count(bus)):
+		if AudioServer.get_bus_effect(bus, i) is AudioEffectLowPassFilter:
+			_filter = AudioServer.get_bus_effect(bus, i)
+			return
+	_filter = AudioEffectLowPassFilter.new()
+	_filter.cutoff_hz = OPEN_HZ
+	AudioServer.add_bus_effect(bus, _filter)
+	var duck := AudioEffectCompressor.new()
+	duck.threshold = -18.0
+	duck.ratio = 2.0
+	duck.attack_us = 5000.0
+	duck.release_ms = 400.0
+	duck.sidechain = STINGER_BUS
+	AudioServer.add_bus_effect(bus, duck)
+
+## Glide the low-pass to where it belongs over about a quarter second of real
+## time, in log frequency so the close-in sounds even.
+func _steer_filter(delta: float) -> void:
+	if _filter == null:
+		return
+	var target := OPEN_HZ * pow(LOW_FLAME_HZ / OPEN_HZ, _muffle)
+	if get_tree().paused and LAYERS.has(_current):
+		target = HELD_HZ
+	var real_dt := delta / maxf(Engine.time_scale, 0.001)
+	var k := 1.0 - exp(-real_dt / 0.08)
+	_filter.cutoff_hz = exp(lerpf(log(_filter.cutoff_hz), log(target), k))
 
 # --- Cache ---------------------------------------------------------------------
 
@@ -146,16 +300,20 @@ static func _save_cached(name: String, stream: AudioStreamWAV) -> void:
 	DirAccess.make_dir_recursive_absolute(CACHE_DIR)
 	ResourceSaver.save(stream, _cache_path(name))
 
-static func _make_stream(pcm: PackedByteArray) -> AudioStreamWAV:
+static func _make_stream(pcm: PackedByteArray, loop: bool = true) -> AudioStreamWAV:
 	var stream := AudioStreamWAV.new()
 	stream.format = AudioStreamWAV.FORMAT_16_BITS
 	stream.mix_rate = RATE
 	stream.stereo = true
 	stream.data = pcm
-	stream.loop_mode = AudioStreamWAV.LOOP_FORWARD
+	stream.loop_mode = AudioStreamWAV.LOOP_FORWARD if loop else AudioStreamWAV.LOOP_DISABLED
 	stream.loop_begin = 0
 	stream.loop_end = pcm.size() / 4
 	return stream
+
+## Tracks loop; cues play once, except the hold under the gathering.
+static func _loops(name: String) -> bool:
+	return CUE_LOOP.has(name) or not CUES.has(name)
 
 # --- Pitch ---------------------------------------------------------------------
 
@@ -164,44 +322,57 @@ static func hz(m: float) -> float:
 	return 440.0 * pow(2.0, (m - 69.0) / 12.0)
 
 # Note names used by the score (MIDI numbers).
+const D2 := 38
 const F2 := 41
 const G2 := 43
 const A2 := 45
 const Bb2 := 46
+const B2 := 47
 const C3 := 48
 const D3 := 50
 const E3 := 52
 const F3 := 53
+const Fs3 := 54
 const G3 := 55
 const A3 := 57
+const B3 := 59
+const C4 := 60
 const Cs4 := 61
+const D4 := 62
 const E4 := 64
 const F4 := 65
+const Fs4 := 66
 const G4 := 67
 const A4 := 69
 const Bb4 := 70
+const B4 := 71
 const C5 := 72
 const Cs5 := 73
 const D5 := 74
 const E5 := 76
 const F5 := 77
+const Fs5 := 78
 const G5 := 79
 const A5 := 81
 const Bb5 := 82
+const D6 := 86
 const Eb3 := 51
 
 # --- Mixing --------------------------------------------------------------------
 
-## A circular stereo mix buffer plus a cache of rendered note shapes.
+## A stereo mix buffer plus a cache of rendered note shapes. A loop's buffer is
+## circular; a one-shot's (`wrap` false) drops whatever would run off its end.
 class Mix:
 	var l := PackedFloat32Array()
 	var r := PackedFloat32Array()
 	var n := 0
 	var rate := 16000
+	var wrap := true
 	var shapes: Dictionary = {}
 
-	func _init(seconds: float, p_rate: int) -> void:
+	func _init(seconds: float, p_rate: int, p_wrap: bool = true) -> void:
 		rate = p_rate
+		wrap = p_wrap
 		n = int(seconds * rate)
 		l.resize(n)
 		r.resize(n)
@@ -212,9 +383,15 @@ class Mix:
 		var a := (clampf(pan, -1.0, 1.0) + 1.0) * PI * 0.25
 		var gl := cos(a) * gain * 1.414
 		var gr := sin(a) * gain * 1.414
-		var j := posmod(int(t * rate), n)
-		var jr := posmod(j + int(haas * rate), n)
-		for i in range(shape.size()):
+		var j := int(t * rate)
+		var jr := j + int(haas * rate)
+		var count := shape.size()
+		if wrap:
+			j = posmod(j, n)
+			jr = posmod(jr, n)
+		else:
+			count = clampi(n - jr, 0, count)
+		for i in range(count):
 			var v := shape[i]
 			l[j] += v * gl
 			r[jr] += v * gr
@@ -446,14 +623,16 @@ static func drum(mx: Mix, kind: String) -> PackedFloat32Array:
 	mx.shapes[key] = s
 	return s
 
-## Low filtered wind across the whole loop (periodic so the loop is seamless).
-static func wind(mx: Mix, gain: float) -> void:
+## Low filtered wind across the whole loop (faded at both ends so the loop is
+## seamless), or across the first `seconds` of a one-shot, clear of its tail.
+static func wind(mx: Mix, gain: float, seconds: float = 0.0) -> void:
 	var rng := RandomNumberGenerator.new()
 	rng.seed = 7331
 	var lp := 0.0
 	var lp2 := 0.0
-	var span := float(mx.n) / RATE
-	for i in range(mx.n):
+	var count := int(seconds * RATE) if seconds > 0.0 else mx.n
+	var span := float(count) / RATE
+	for i in range(count):
 		lp += 0.02 * (rng.randf() * 2.0 - 1.0 - lp)
 		lp2 += 0.05 * (lp - lp2)
 		var t := float(i) / RATE
@@ -471,16 +650,24 @@ static func randf_seeded(seed_val: int) -> float:
 
 static func _render_track(name: String) -> PackedByteArray:
 	match name:
-		"title": return _score_title()
-		"explore": return _score_explore()
+		"title": return _score_title(false)
+		"title_dawn": return _score_title(true)
+		"explore": return _score_explore(false)
+		"explore_hot": return _score_explore(true)
 		"boss": return _score_boss(false)
 		"boss_hot": return _score_boss(true)
+		"curtain_a": return _score_curtain_a()
+		"curtain_hold": return _score_curtain_hold()
+		"curtain_b1": return _score_curtain_b1()
+		"curtain_b2": return _score_curtain_b2()
 	return PackedByteArray()
 
-## Chord tones (MIDI) for the score's harmony, voiced around middle C.
+## Chord tones (MIDI) for the score's harmony, voiced around middle C. The
+## major chords after "A7" belong to the ending and the title at dawn.
 const CHORDS := {
 	"Dm": [D3, F3, A3], "Bb": [Bb2, D3, F3], "Gm": [G2, Bb2, D3], "A": [A2, Cs4 - 12, E3],
 	"F": [F2, A2, C3], "C": [C3, E3, G3], "Eb": [Eb3 - 12, G2, Bb2], "A7": [A2, Cs4 - 12, G3],
+	"D": [D3, Fs3, A3], "G": [G2, B2, D3], "Bm": [B2, D3, Fs3], "Em": [E3, G3, B3],
 }
 
 ## Rolling harp arpeggio over a chord for one bar of eighths.
@@ -498,40 +685,70 @@ static func _arp(mx: Mix, chord: Array, t0: float, beat: float, lift: int, gain:
 		mx.put(harp(mx, m, 1.6, 0.9), t0 + float(i) * beat * 0.5, gain * (1.0 if i % 4 == 0 else 0.78), pan, 0.004)
 
 ## "Threshold": 72 bpm, eight bars. A slow harp over a choir; a lone bell line.
-static func _score_title() -> PackedByteArray:
+## At dawn (after a victory) the last bars turn A7 to D major, the choir opens
+## its vowel, and the bells' hanging C# rises to D before the loop falls back
+## into the minor keep.
+static func _score_title(dawn: bool) -> PackedByteArray:
 	var beat := 60.0 / 72.0
 	var bar := beat * 4.0
 	var prog := ["Dm", "Dm", "Bb", "Bb", "Gm", "Gm", "A", "A"]
+	if dawn:
+		prog = ["Dm", "Dm", "Bb", "Bb", "Gm", "Gm", "A7", "D"]
 	var mx := Mix.new(bar * float(prog.size()), RATE)
 	var up := [0, 1, 2, 3, 4, 3, 2, 1]
 	var down := [5, 4, 2, 1, 3, 2, 1, 0]
+	var vowel := 0.6 if dawn else 0.2
 	for b in range(prog.size()):
 		var t := float(b) * bar
 		var ch: Array = CHORDS[prog[b]]
-		_arp(mx, ch, t, beat, 0, 0.32, up if b % 2 == 0 else down)
+		var sunrise := dawn and b == prog.size() - 1
+		_arp(mx, ch, t, beat, 12 if sunrise else 0, 0.24 if sunrise else 0.32, up if b % 2 == 0 else down)
 		mx.put(bass(mx, int(ch[0]) - 12, bar * 0.9), t, 0.5, 0.0)
-		if b % 2 == 0:
-			mx.put(choir(mx, [int(ch[0]) + 12, int(ch[1]) + 12, int(ch[2]) + 12], bar * 2.2, 0.2), t, 0.34, 0.0, 0.012)
+		var voiced := [int(ch[0]) + 12, int(ch[1]) + 12, int(ch[2]) + 12]
+		if dawn and b >= prog.size() - 2:
+			# A7 and D each get their own voices, not one A held across both.
+			mx.put(choir(mx, voiced, bar * 1.15, vowel), t, 0.34, 0.0, 0.012)
+		elif b % 2 == 0:
+			mx.put(choir(mx, voiced, bar * 2.2, vowel), t, 0.34, 0.0, 0.012)
 	# The bell line: a question in the first half, its answer leaning on C#.
 	var melody := [[0, A4, 3.0], [4, D5, 2.0], [6, C5, 1.0], [7, A4, 1.0], [8, F4, 3.0], [12, Bb4, 2.0], [14, A4, 1.0], [15, G4, 1.0],
-		[16, G4, 3.0], [19, Bb4, 1.0], [20, A4, 2.0], [22, G4, 1.0], [23, F4, 1.0], [24, E4, 4.0], [28, Cs5, 4.0]]
+		[16, G4, 3.0], [19, Bb4, 1.0], [20, A4, 2.0], [22, G4, 1.0], [23, F4, 1.0], [24, E4, 4.0]]
+	melody += [[27, Cs5, 1.0], [28, D5, 4.0]] if dawn else [[28, Cs5, 4.0]]
 	for n in melody:
 		mx.put(bell(mx, int(n[1]), 3.2), float(n[0]) * beat, 0.2, 0.25, 0.008)
-	wind(mx, 0.35)
+	wind(mx, 0.2 if dawn else 0.35)
 	return mx.finish(0.9)
 
 ## "The Descent": 84 bpm, sixteen bars. The harp never stops walking; the bells
-## pick up the tune when the progression comes round the second time.
-static func _score_explore() -> PackedByteArray:
+## pick up the tune when the progression comes round the second time. The hot
+## layer (a wave in progress) is taiko, a bass drive of roots, fifths and
+## octaves, brass stabs and tom fills, with no harp or choir to crowd the tune.
+static func _score_explore(hot: bool) -> PackedByteArray:
 	var beat := 60.0 / 84.0
 	var bar := beat * 4.0
 	var prog := ["Dm", "Dm", "Bb", "Bb", "F", "F", "C", "C", "Dm", "Dm", "Bb", "Bb", "Gm", "Gm", "A", "A"]
 	var mx := Mix.new(bar * float(prog.size()), RATE)
 	var pat_a := [0, 2, 4, 2, 3, 2, 4, 2]
 	var pat_b := [3, 5, 4, 5, 6, 5, 4, 2]
+	var drive := [0, 0, 12, 0, 7, 0, 12, 7]
 	for b in range(prog.size()):
 		var t := float(b) * bar
 		var ch: Array = CHORDS[prog[b]]
+		if hot:
+			var root := int(ch[0])
+			mx.put(drum(mx, "taiko"), t, 0.42, -0.15)
+			mx.put(drum(mx, "taiko"), t + beat * 2.5, 0.3, 0.15)
+			for i in range(8):
+				mx.put(bass(mx, root - 12 + int(drive[i]), beat * 0.55), t + float(i) * beat * 0.5, 0.32 if i % 2 == 0 else 0.24, -0.05)
+			var voiced := [root + 12, int(ch[1]) + 12, int(ch[2]) + 12]
+			if b % 2 == 0:
+				mx.put(brass(mx, voiced, beat * 1.2), t, 0.26, 0.0, 0.01)
+			else:
+				mx.put(brass(mx, voiced, beat * 0.6), t + beat * 2.5, 0.18, 0.0, 0.01)
+			if b % 4 == 3:
+				mx.put(drum(mx, "tom"), t + beat * 3.0, 0.3, -0.4)
+				mx.put(drum(mx, "tom"), t + beat * 3.5, 0.3, 0.4)
+			continue
 		_arp(mx, ch, t, beat, 0, 0.27, pat_a if b < 8 else pat_b)
 		mx.put(bass(mx, int(ch[0]) - 12, beat * 1.8), t, 0.55, -0.1)
 		mx.put(bass(mx, int(ch[0]) - 12, beat * 1.8), t + beat * 2.5, 0.38, -0.1)
@@ -540,6 +757,8 @@ static func _score_explore() -> PackedByteArray:
 		# Heartbeat on the frame drum: da-dum, soft.
 		mx.put(drum(mx, "frame"), t, 0.28, 0.1)
 		mx.put(drum(mx, "frame"), t + beat * 0.5, 0.17, 0.1)
+	if hot:
+		return mx.finish(0.6)
 	var melody := [[32, A4, 2.0], [34, D5, 1.0], [35, E5, 1.0], [36, F5, 3.0], [39, E5, 1.0], [40, D5, 2.0], [42, C5, 1.0], [43, Bb4, 1.0],
 		[44, Bb4, 3.0], [47, A4, 1.0], [48, G4, 2.0], [50, Bb4, 1.0], [51, D5, 1.0], [52, D5, 2.0], [54, C5, 1.0], [55, Bb4, 1.0],
 		[56, A4, 3.0], [59, G4, 1.0], [60, E4, 2.0], [62, Cs5, 2.0]]
@@ -594,3 +813,102 @@ static func _score_boss(hot: bool) -> PackedByteArray:
 		for n in motif:
 			mx.put(bell(mx, int(n[1]), 2.0), float(n[0]) * beat, 0.2, 0.3, 0.008)
 	return mx.finish(0.92 if not hot else 0.6)
+
+# --- The ending: "Strike the Set" ------------------------------------------------
+# Everything stays D minor until the knight lets go; the thrust lands the score's
+# first D major (a Picardy third), and the curtain call re-spells the title's
+# bell line in that major, so its C# finally rises to D.
+
+## "The Hoard": 66 bpm, three bars and a silent tail. The flames fall one by one
+## down a D-minor harp line; the choir leaves an open fifth, unresolved.
+static func _score_curtain_a() -> PackedByteArray:
+	var beat := 60.0 / 66.0
+	var bar := beat * 4.0
+	var mx := Mix.new(bar * 3.0 + 3.0, RATE, false)
+	for b in range(3):
+		mx.put(bass(mx, D2, bar), float(b) * bar, 0.5, 0.0)
+	mx.put(choir(mx, [D4, F4, A4], bar * 2.2, 0.0), 0.0, 0.3, 0.0, 0.012)
+	mx.put(choir(mx, [A3, E4], bar * 1.6, 0.0), bar * 2.0, 0.3, 0.0, 0.012)
+	var fall := [D5, C5, A4, F4, E4, D4, C4, A3]
+	for i in range(fall.size()):
+		mx.put(harp(mx, fall[i], 1.6, 0.9), bar + float(i) * beat, 0.3, sin(float(i) * 0.9) * 0.45, 0.004)
+	wind(mx, 0.35, bar * 3.0)
+	return mx.finish(0.9)
+
+## The hold under the gathering: two looping bars of D and A in the bass, an
+## open-fifth "oo" and the heartbeat, so every note of the question sits on it.
+static func _score_curtain_hold() -> PackedByteArray:
+	var beat := 60.0 / 66.0
+	var bar := beat * 4.0
+	var mx := Mix.new(bar * 2.0, RATE)
+	for b in range(2):
+		var t := float(b) * bar
+		mx.put(bass(mx, D2, bar), t, 0.5, -0.05)
+		mx.put(bass(mx, A2, bar), t, 0.32, 0.05)
+		# Overlapping swells, one per bar, so the drone breathes but never gaps.
+		mx.put(choir(mx, [D4, A4], bar * 2.2, 1.0), t, 0.26, 0.0, 0.012)
+		mx.put(drum(mx, "frame"), t, 0.2, 0.1)
+		mx.put(drum(mx, "frame"), t + beat * 0.5, 0.12, 0.1)
+	wind(mx, 0.3)
+	return mx.finish(0.9)
+
+## "Strike the Set": 84 bpm, ten beats and a tail. The thrust lands on D major;
+## the harp climbs D, G, B minor; cinders ring high; A7 leans into the call.
+static func _score_curtain_b1() -> PackedByteArray:
+	var beat := 60.0 / 84.0
+	var mx := Mix.new(beat * 10.0 + 4.0, RATE, false)
+	mx.put(brass(mx, [D3, Fs3, A3, D4], beat * 4.0), 0.0, 0.42, 0.0, 0.01)
+	mx.put(drum(mx, "taiko"), 0.0, 0.55, -0.1)
+	mx.put(bell(mx, D5, 3.2), 0.0, 0.22, 0.25, 0.008)
+	mx.put(bass(mx, D2, beat * 4.0), 0.0, 0.55, 0.0)
+	mx.put(choir(mx, [D4, Fs4, A4], beat * 8.0, 0.0), 0.0, 0.34, 0.0, 0.014)
+	_arp(mx, CHORDS["D"], 0.0, beat, 0, 0.26, [0, 1, 2, 3, 4, 3, 4, 5])
+	_arp(mx, CHORDS["G"], beat * 4.0, beat, 0, 0.26, [1, 2, 3, 4])
+	_arp(mx, CHORDS["Bm"], beat * 6.0, beat, 0, 0.26, [2, 3, 4, 5])
+	# Cinders: six high bells at seeded moments over the burn.
+	var cinders := [Fs5, A5, D6]
+	var rng := RandomNumberGenerator.new()
+	rng.seed = 841
+	for i in range(6):
+		var at := rng.randf_range(0.3, beat * 9.0)
+		mx.put(bell(mx, cinders[i % 3], 2.0), at, rng.randf_range(0.08, 0.12), rng.randf_range(-0.6, 0.6), 0.006)
+	# The choir swell crests on the last beat, as the curtain call comes in.
+	var a7: Array = CHORDS["A7"]
+	mx.put(brass(mx, a7, beat * 2.0), beat * 8.0, 0.4, 0.0, 0.01)
+	mx.put(choir(mx, [int(a7[0]) + 12, int(a7[1]) + 12, int(a7[2]) + 12], 2.4, 0.0), beat * 8.0, 0.45, 0.0, 0.014)
+	return mx.finish(0.9)
+
+## "Curtain Call": 84 bpm, eight bars and a downbeat. The title's bell line in
+## D major (F to F#, Bb to B) over D D G G Em Em A A; on beat 32 its C# rises
+## to D under a held D-major choir and a rolled harp.
+static func _score_curtain_b2() -> PackedByteArray:
+	var beat := 60.0 / 84.0
+	var bar := beat * 4.0
+	var prog := ["D", "D", "G", "G", "Em", "Em", "A", "A"]
+	var mx := Mix.new(beat * 32.0 + 6.0, RATE, false)
+	var up := [0, 1, 2, 3, 4, 3, 2, 1]
+	var down := [5, 4, 2, 1, 3, 2, 1, 0]
+	for b in range(prog.size()):
+		var t := float(b) * bar
+		var ch: Array = CHORDS[prog[b]]
+		_arp(mx, ch, t, beat, 0, 0.26, up if b % 2 == 0 else down)
+		mx.put(bass(mx, int(ch[0]) - 12, bar * 0.9), t, 0.5, 0.0)
+		if b % 2 == 0:
+			mx.put(choir(mx, [int(ch[0]) + 12, int(ch[1]) + 12, int(ch[2]) + 12], bar * 2.2, 0.2), t, 0.3, 0.0, 0.012)
+		if b < 6:
+			mx.put(drum(mx, "frame"), t, 0.2, 0.1)
+			mx.put(drum(mx, "frame"), t + beat * 0.5, 0.12, 0.1)
+	var melody := [[0, A4], [4, D5], [6, Cs5], [7, A4], [8, Fs4], [12, B4], [14, A4], [15, G4],
+		[16, G4], [19, B4], [20, A4], [22, G4], [23, Fs4], [24, E4], [28, Cs5]]
+	for n in melody:
+		mx.put(bell(mx, int(n[1]), 3.2), float(n[0]) * beat, 0.2, 0.25, 0.008)
+	var home := beat * 32.0
+	mx.put(bell(mx, D5, 3.2), home, 0.24, 0.25, 0.008)
+	mx.put(bell(mx, Fs5, 3.2), home, 0.16, -0.25, 0.008)
+	# Held almost to the end of the tail, then silence for the house to settle.
+	mx.put(choir(mx, [D4, Fs4, A4], 5.4, 0.2), home, 0.34, 0.0, 0.012)
+	mx.put(bass(mx, D2, 4.0), home, 0.55, 0.0)
+	var roll := [D3, Fs3, A3, D4, Fs4, A4, D5]
+	for i in range(roll.size()):
+		mx.put(harp(mx, roll[i], 2.4, 0.9), home + float(i) * 0.04, 0.26, lerpf(-0.4, 0.4, float(i) / 6.0), 0.004)
+	return mx.finish(0.9)
