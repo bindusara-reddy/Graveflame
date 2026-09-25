@@ -36,7 +36,22 @@ func run() -> void:
 	await _test_gameover_arming()
 	await _test_prompts()
 	await _test_pause_ledger()
+	await _test_chamber_banners()
 	await finish("UI_CONTRACT")
+
+
+## The HUD counts chambers and names the throne; the clear card steps aside.
+func _test_chamber_banners() -> void:
+	game.ui.set_room(3, 8)
+	check(game.ui._room_label.text == "CHAMBER IV / VII", "the HUD counts chambers (got %s)" % game.ui._room_label.text)
+	game.ui.set_room(7, 8)
+	check(game.ui._room_label.text == "THE EMBER THRONE", "the throne is named, not counted")
+	game.ui.show_room_clear("Ashen Cells")
+	await _wait_real(2.2)
+	var banner: Control = game.ui._room_clear_banner
+	check(banner.visible and banner.scale.x < 0.8 and banner.position.y < 40.0, "the clear card shrinks into the top slot")
+	game.ui.hide_room_clear()
+	check(not banner.visible and banner.scale == Vector2.ONE, "hiding the clear card resets it")
 
 
 ## The pause card shows the build, and quitting asks before abandoning it.

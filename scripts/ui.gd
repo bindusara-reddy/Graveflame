@@ -124,6 +124,8 @@ var _best_label: Label
 
 var _room_clear_banner: Control
 var _room_clear_name: Label
+var _room_clear_tween: Tween
+const ROOM_CLEAR_TOP := 148.0
 
 var _streak_panel: PanelContainer
 var _streak_kills_label: Label
@@ -252,8 +254,11 @@ func _build_hud() -> void:
 	_build_boss_status()
 	_build_boss_phase_tag()
 	_build_room_clear_banner()
-	_room_intro = _build_banner("RoomIntro", 176.0, 258.0, Vector2(420, 70), 26, 11, C_EMBER, Color("14101ceb"))
-	_boss_intro = _build_banner("BossIntro", 236.0, 372.0, Vector2(620, 118), 40, 14, C_RED, Color("1a0c11f0"))
+	# The chamber card takes the boss bar's slot, always empty outside the
+	# throne, so it never covers the platforms where enemies arrive. The boss
+	# card sits on the throne room's brick foundation, clear of the Warden.
+	_room_intro = _build_banner("RoomIntro", 18.0, 96.0, Vector2(470, 70), 26, 11, C_EMBER, Color("14101ceb"))
+	_boss_intro = _build_banner("BossIntro", 546.0, 666.0, Vector2(620, 118), 40, 14, C_RED, Color("1a0c11f0"))
 	_build_hint()
 
 
@@ -406,7 +411,7 @@ func _build_run_status() -> void:
 	_wave_label.visible = false
 	stack.add_child(_wave_label)
 	stack.add_child(_separator(C_EDGE))
-	_score_label = _make_stat_line(stack, "RUN SCORE", "0", C_TEXT)
+	_score_label = _make_stat_line(stack, "SCORE", "0", C_TEXT)
 	_cells_label = _make_stat_line(stack, "CELLS", "0", C_GOLD)
 	_best_label = _make_stat_line(stack, "BEST", "0", C_MUTED)
 
@@ -444,10 +449,10 @@ func _build_boss_phase_tag() -> void:
 
 
 func _build_room_clear_banner() -> void:
-	_room_clear_banner = _hud_strip("RoomClearBanner", Control.PRESET_TOP_WIDE, 148.0, 252.0)
+	_room_clear_banner = _hud_strip("RoomClearBanner", Control.PRESET_TOP_WIDE, ROOM_CLEAR_TOP, ROOM_CLEAR_TOP + 104.0)
 	var panel := _passive_panel(_room_clear_banner, _panel_box(Color("141020eb"), C_MINT, 10, 1, 12), Vector2(490, 88))
 	var stack := _padded_stack(panel, 24, 10, 1)
-	stack.add_child(_make_label("ROOM CLEARED", 22, C_MINT))
+	stack.add_child(_make_label("CHAMBER CLEARED", 22, C_MINT))
 	_room_clear_name = _make_label("PATH UNSEALED", 12, C_MUTED)
 	stack.add_child(_room_clear_name)
 	_room_clear_banner.visible = false
@@ -1035,7 +1040,7 @@ func _build_reward() -> void:
 
 	content.add_child(_make_label("CHAMBER CLEARED", 13, C_MINT))
 	content.add_child(_make_label("Choose a Boon", 46, C_TEXT))
-	content.add_child(_make_label("The Graveflame changes with every victory.", 15, C_MUTED))
+	content.add_child(_make_label("Every chamber feeds the flame.", 15, C_MUTED))
 	content.add_child(_ornament(C_GOLD))
 
 	_upgrade_row = HBoxContainer.new()
@@ -1081,7 +1086,7 @@ func _build_game_over() -> void:
 	var content := _dialog(panel, Vector2(760, 620), C_RED, 48, 30)
 	content.add_theme_constant_override("separation", 10)
 
-	content.add_child(_make_label("RUN ENDED", 13, C_RED))
+	content.add_child(_make_label("THE KNIGHT FALLS", 13, C_RED))
 	content.add_child(_make_label("THE FLAME FADES", 54, C_TEXT))
 	var epitaph := _make_label(Content.EPITAPHS[0], 18, C_MUTED)
 	content.add_child(epitaph)
@@ -1104,7 +1109,7 @@ func _build_victory() -> void:
 	content.add_child(closing)
 	panel.set_meta("line_label", closing)
 	content.add_child(_separator(C_MINT))
-	var again := _button("NEW RUN", "again", true, Vector2(230, 56))
+	var again := _button("DESCEND AGAIN", "again", true, Vector2(230, 56))
 	_build_run_end_body(panel, content, Color("1f5b52"), "A brighter ember waits at the beginning.", again)
 	# A first win points to the vows, just above the parting line.
 	var vows := _make_label("VOWS AWAKEN AT THE FORGE.", 14, C_GOLD)
@@ -1120,7 +1125,7 @@ func _build_victory() -> void:
 ## six equally weighted tiles. Then the cells banked, the run's statistics, a
 ## parting line, and `again` (which restarts) beside RETURN TO TITLE.
 func _build_run_end_body(panel: Control, content: VBoxContainer, tile_edge: Color, parting: String, again: Button) -> void:
-	content.add_child(_make_label("RUN SCORE", 11, C_MUTED))
+	content.add_child(_make_label("SCORE", 11, C_MUTED))
 	var score := _make_label("0", 44, C_TEXT)
 	content.add_child(score)
 	var best := _make_label("BEST  0", 12, C_MUTED)
@@ -1171,7 +1176,7 @@ func _build_forge() -> void:
 	var content := _dialog(panel, Vector2(900, 650), C_EMBER, 42, 30)
 	content.add_theme_constant_override("separation", 9)
 
-	content.add_child(_make_label("PERMANENT UPGRADES", 12, C_EMBER_HI))
+	content.add_child(_make_label("BETWEEN LIVES", 12, C_EMBER_HI))
 	content.add_child(_make_label("THE FORGE", 46, C_TEXT))
 	content.add_child(_make_label("Temper the next life with cells carried out of the keep.", 15, C_MUTED))
 
@@ -2006,8 +2011,10 @@ func set_special(value: float, maximum: float) -> void:
 	_special_value_label.text = "%d / %d" % [roundi(value), roundi(maximum)]
 
 
+## Seven chambers lead down to the throne, which is named rather than counted.
 func set_room(idx: int, total: int) -> void:
-	_room_label.text = "ROOM %02d / %02d" % [idx + 1, total]
+	var chamber := "CHAMBER %s / %s" % [_roman(idx + 1), _roman(total - 1)]
+	_room_label.text = "THE EMBER THRONE" if idx >= total - 1 else chamber
 
 
 ## Waves remaining in the current chamber, so the fight has a visible end.
@@ -2153,7 +2160,7 @@ func _upgrade_card(index: int, upgrade: Dictionary, rarity: String, rc: Color, w
 	# Rarity sits at the foot of the card, where a printed card keeps its set mark.
 	var foot := rarity.to_upper()
 	if bool(upgrade.get("unique", false)):
-		foot += "  ·  ONCE PER RUN"
+		foot += "  ·  ONCE PER DESCENT"
 	stack.add_child(_make_label(foot, 11, rc))
 	# Lift toward the hand under focus; hovering a card focuses it.
 	button.focus_entered.connect(_lift_card.bind(button, true))
@@ -2477,7 +2484,7 @@ func hide_streak() -> void:
 
 
 func show_room_intro(idx: int, total: int, room_name: String, trial: bool = false) -> void:
-	var sub := "CHAMBER %02d OF %02d" % [idx + 1, total]
+	var sub := "CHAMBER %s OF %s" % [_roman(idx + 1), _roman(total - 1)]
 	if trial:
 		sub += "  ·  TRIAL"
 	_play_banner(_room_intro, room_name.to_upper(), sub, 1.5)
@@ -2498,8 +2505,10 @@ func set_hud_faded(faded: bool) -> void:
 
 
 func show_boss_intro(boss_name: String, subtitle: String, hold: float = 2.4) -> void:
-	# The boss card owns the screen: drop any chamber card still fading out.
+	# The boss card owns the screen: drop any chamber card still fading out,
+	# and any lesson in the low strip it now covers.
 	_hide_banner(_room_intro)
+	hide_hint()
 	_play_banner(_boss_intro, boss_name.to_upper(), subtitle.to_upper(), hold)
 
 
@@ -2556,18 +2565,38 @@ func show_run_summary(stats: Dictionary, panel_name: String) -> void:
 		(labels[key] as Label).text = str(values[key])
 
 
+## The clear card lands, holds, then steps aside into a small chip in the top
+## slot, so it no longer hangs over the walk to the rifts.
 func show_room_clear(room_name: String) -> void:
+	hide_room_clear()
+	_hide_banner(_room_intro)
 	_room_clear_name.text = room_name.to_upper() if not room_name.strip_edges().is_empty() else "PATH UNSEALED"
 	_room_clear_banner.visible = true
 	_room_clear_banner.modulate = Color(1.0, 1.0, 1.0, 0.0)
-	var tween := _ui_tween()
-	tween.tween_property(_room_clear_banner, "modulate", Color.WHITE, 0.16)
+	_room_clear_banner.pivot_offset = Vector2(_room_clear_banner.size.x * 0.5, 0.0)
+	var settle := 0.0 if Feedback.motion_reduced else 0.35
+	_room_clear_tween = _ui_tween()
+	_room_clear_tween.tween_property(_room_clear_banner, "modulate", Color.WHITE, 0.16)
+	_room_clear_tween.tween_interval(1.4)
+	_room_clear_tween.tween_callback(_room_clear_to_chip)
+	_room_clear_tween.tween_property(_room_clear_banner, "scale", Vector2.ONE * 0.7, settle).set_trans(Tween.TRANS_SINE)
+	_room_clear_tween.parallel().tween_property(_room_clear_banner, "position:y", 12.0, settle).set_trans(Tween.TRANS_SINE)
+
+
+## The chip says what to do next, set larger so it stays legible once shrunk.
+func _room_clear_to_chip() -> void:
+	_room_clear_name.text = "PATH UNSEALED  ·  CHOOSE A RIFT"
+	_room_clear_name.add_theme_font_size_override("font_size", 16)
 
 
 func hide_room_clear() -> void:
 	if _room_clear_banner != null:
+		_kill_tween(_room_clear_tween)
 		_room_clear_banner.visible = false
 		_room_clear_banner.modulate = Color.WHITE
+		_room_clear_banner.scale = Vector2.ONE
+		_room_clear_banner.position.y = ROOM_CLEAR_TOP
+		_room_clear_name.add_theme_font_size_override("font_size", 12)
 
 
 # --- Internal updates --------------------------------------------------------
