@@ -253,7 +253,7 @@ func _build_hint() -> void:
 	panel.add_child(margin)
 	# This is the one line a new player must read, so it is set a step larger
 	# than the ambient HUD text rather than matching it.
-	_hint_label = _make_label("", 16, C_TEXT, HorizontalAlignment.HORIZONTAL_ALIGNMENT_CENTER)
+	_hint_label = _make_label("", 16, C_TEXT)
 	# Inside the margin, or the first glyph sits on the panel's edge.
 	margin.add_child(_hint_label)
 	_hint_panel = center
@@ -282,10 +282,10 @@ func _build_streak_meter() -> void:
 	var head := HBoxContainer.new()
 	head.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	stack.add_child(head)
-	head.add_child(_make_label("STREAK", 11, C_MUTED, HorizontalAlignment.HORIZONTAL_ALIGNMENT_LEFT))
-	_streak_kills_label = _make_label("2 KILLS", 13, C_TEXT, HorizontalAlignment.HORIZONTAL_ALIGNMENT_CENTER)
+	head.add_child(_make_label("STREAK", 11, C_MUTED, HORIZONTAL_ALIGNMENT_LEFT))
+	_streak_kills_label = _make_label("2 KILLS", 13, C_TEXT)
 	head.add_child(_streak_kills_label)
-	_streak_mult_label = _make_label("x1.25", 15, C_GOLD, HorizontalAlignment.HORIZONTAL_ALIGNMENT_RIGHT)
+	_streak_mult_label = _make_label("x1.25", 15, C_GOLD, HORIZONTAL_ALIGNMENT_RIGHT)
 	head.add_child(_streak_mult_label)
 	_streak_bar = _make_bar(C_GOLD, Color("3a2c14"), 6.0)
 	_streak_bar.max_value = 100.0
@@ -315,9 +315,9 @@ func _build_banner(node_name: String, top: float, bottom: float, minimum: Vector
 	stack.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	stack.add_theme_constant_override("separation", 1)
 	margin.add_child(stack)
-	var sub := _make_label("", sub_size, C_MUTED, HorizontalAlignment.HORIZONTAL_ALIGNMENT_CENTER)
+	var sub := _make_label("", sub_size, C_MUTED)
 	stack.add_child(sub)
-	var title := _make_label("", title_size, accent, HorizontalAlignment.HORIZONTAL_ALIGNMENT_CENTER)
+	var title := _make_label("", title_size, accent)
 	stack.add_child(title)
 	center.visible = false
 	return { "root": center, "title": title, "sub": sub, "tween": null }
@@ -363,8 +363,8 @@ func _build_player_status() -> void:
 	var hp_head := HBoxContainer.new()
 	hp_head.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	stack.add_child(hp_head)
-	hp_head.add_child(_make_label("VITALITY", 10, C_MUTED, HorizontalAlignment.HORIZONTAL_ALIGNMENT_LEFT))
-	_hp_value_label = _make_label("100 / 100", 11, C_TEXT, HorizontalAlignment.HORIZONTAL_ALIGNMENT_RIGHT)
+	hp_head.add_child(_make_label("VITALITY", 10, C_MUTED, HORIZONTAL_ALIGNMENT_LEFT))
+	_hp_value_label = _make_label("100 / 100", 11, C_TEXT, HORIZONTAL_ALIGNMENT_RIGHT)
 	hp_head.add_child(_hp_value_label)
 	var hp_pair := _trailed_bar(C_RED, Color("4a1820"), 12.0)
 	stack.add_child(hp_pair.holder)
@@ -374,8 +374,8 @@ func _build_player_status() -> void:
 	var sp_head := HBoxContainer.new()
 	sp_head.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	stack.add_child(sp_head)
-	sp_head.add_child(_make_label("GRAVEFLAME", 10, C_MUTED, HorizontalAlignment.HORIZONTAL_ALIGNMENT_LEFT))
-	_special_value_label = _make_label("0 / 100", 10, C_BLUE, HorizontalAlignment.HORIZONTAL_ALIGNMENT_RIGHT)
+	sp_head.add_child(_make_label("GRAVEFLAME", 10, C_MUTED, HORIZONTAL_ALIGNMENT_LEFT))
+	_special_value_label = _make_label("0 / 100", 10, C_BLUE, HORIZONTAL_ALIGNMENT_RIGHT)
 	sp_head.add_child(_special_value_label)
 	_special_bar = _make_bar(C_BLUE, Color("153243"), 7.0)
 	_special_bar.max_value = 100.0
@@ -386,7 +386,7 @@ func _build_player_status() -> void:
 	supplies.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	supplies.add_theme_constant_override("separation", 8)
 	stack.add_child(supplies)
-	var flask_tag := _make_label("FLASK", 10, C_MUTED, HorizontalAlignment.HORIZONTAL_ALIGNMENT_LEFT)
+	var flask_tag := _make_label("FLASK", 10, C_MUTED, HORIZONTAL_ALIGNMENT_LEFT)
 	flask_tag.size_flags_horizontal = Control.SIZE_SHRINK_BEGIN
 	supplies.add_child(flask_tag)
 	_flask_container = HBoxContainer.new()
@@ -394,7 +394,7 @@ func _build_player_status() -> void:
 	_flask_container.add_theme_constant_override("separation", 5)
 	_flask_container.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	supplies.add_child(_flask_container)
-	_flask_count_label = _make_label("3 / 3  [F]", 10, C_MINT, HorizontalAlignment.HORIZONTAL_ALIGNMENT_RIGHT)
+	_flask_count_label = _make_label("3 / 3  [F]", 10, C_MINT, HORIZONTAL_ALIGNMENT_RIGHT)
 	_flask_count_label.size_flags_horizontal = Control.SIZE_SHRINK_END
 	supplies.add_child(_flask_count_label)
 	_rebuild_flask_dots(Content.FLASK_MAX)
@@ -420,9 +420,9 @@ func _build_run_status() -> void:
 	stack.add_theme_constant_override("separation", 4)
 	margin.add_child(stack)
 
-	_room_label = _make_label("ROOM 01 / 06", 12, C_EMBER_HI, HorizontalAlignment.HORIZONTAL_ALIGNMENT_RIGHT)
+	_room_label = _make_label("ROOM 01 / 06", 12, C_EMBER_HI, HORIZONTAL_ALIGNMENT_RIGHT)
 	stack.add_child(_room_label)
-	_wave_label = _make_label("", 11, C_MUTED, HorizontalAlignment.HORIZONTAL_ALIGNMENT_RIGHT)
+	_wave_label = _make_label("", 11, C_MUTED, HORIZONTAL_ALIGNMENT_RIGHT)
 	_wave_label.visible = false
 	stack.add_child(_wave_label)
 	stack.add_child(_separator(C_EDGE))
@@ -458,9 +458,9 @@ func _build_boss_status() -> void:
 	var head := HBoxContainer.new()
 	head.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	stack.add_child(head)
-	_boss_label = _make_label("THE EMBER WARDEN", 13, Color("f2c3c6"), HorizontalAlignment.HORIZONTAL_ALIGNMENT_LEFT)
+	_boss_label = _make_label("THE EMBER WARDEN", 13, Color("f2c3c6"), HORIZONTAL_ALIGNMENT_LEFT)
 	head.add_child(_boss_label)
-	_boss_value_label = _make_label("420", 12, C_RED, HorizontalAlignment.HORIZONTAL_ALIGNMENT_RIGHT)
+	_boss_value_label = _make_label("420", 12, C_RED, HORIZONTAL_ALIGNMENT_RIGHT)
 	head.add_child(_boss_value_label)
 	var boss_pair := _trailed_bar(Color("b94350"), Color("41131b"), 13.0)
 	stack.add_child(boss_pair.holder)
@@ -475,7 +475,7 @@ func _build_boss_status() -> void:
 
 func _build_boss_phase_tag() -> void:
 	# Compact phase-2 callout pinned under the boss bar: never center-screen.
-	_boss_phase_tag = _make_label("", 13, Color("f2c3c6"), HorizontalAlignment.HORIZONTAL_ALIGNMENT_CENTER)
+	_boss_phase_tag = _make_label("", 13, Color("f2c3c6"))
 	_boss_phase_tag.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	_boss_phase_tag.set_anchors_and_offsets_preset(Control.PRESET_CENTER_TOP)
 	_boss_phase_tag.offset_left = -260.0
@@ -508,8 +508,8 @@ func _build_room_clear_banner() -> void:
 	stack.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	stack.add_theme_constant_override("separation", 1)
 	margin.add_child(stack)
-	stack.add_child(_make_label("ROOM CLEARED", 22, C_MINT, HorizontalAlignment.HORIZONTAL_ALIGNMENT_CENTER))
-	_room_clear_name = _make_label("PATH UNSEALED", 12, C_MUTED, HorizontalAlignment.HORIZONTAL_ALIGNMENT_CENTER)
+	stack.add_child(_make_label("ROOM CLEARED", 22, C_MINT))
+	_room_clear_name = _make_label("PATH UNSEALED", 12, C_MUTED)
 	stack.add_child(_room_clear_name)
 	_room_clear_banner.visible = false
 
@@ -622,7 +622,7 @@ func _build_title_controls_overlay(panel: Control) -> void:
 	var stack := VBoxContainer.new()
 	stack.add_theme_constant_override("separation", 3)
 	margin.add_child(stack)
-	stack.add_child(_make_label("CONTROLS", 20, C_TEXT, HorizontalAlignment.HORIZONTAL_ALIGNMENT_CENTER))
+	stack.add_child(_make_label("CONTROLS", 20, C_TEXT))
 	stack.add_child(_separator(C_EDGE))
 	# Rendered from the LIVE input map, so this screen can never disagree with
 	# what the game actually does -- including after a rebind.
@@ -630,11 +630,11 @@ func _build_title_controls_overlay(panel: Control) -> void:
 	header.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	header.add_theme_constant_override("separation", 12)
 	stack.add_child(header)
-	var corner := _make_label("", 11, C_EMBER_HI, HorizontalAlignment.HORIZONTAL_ALIGNMENT_LEFT)
+	var corner := _make_label("", 11, C_EMBER_HI, HORIZONTAL_ALIGNMENT_LEFT)
 	corner.size_flags_stretch_ratio = 1.1
 	header.add_child(corner)
 	for caption in ["KEYBOARD", "GAMEPAD"]:
-		header.add_child(_make_label(caption, 11, C_EMBER_HI, HorizontalAlignment.HORIZONTAL_ALIGNMENT_RIGHT))
+		header.add_child(_make_label(caption, 11, C_EMBER_HI, HORIZONTAL_ALIGNMENT_RIGHT))
 	var cells := {}
 	for row in Content.CONTROLS_ROWS:
 		var action := str(row.action)
@@ -642,15 +642,15 @@ func _build_title_controls_overlay(panel: Control) -> void:
 		line.mouse_filter = Control.MOUSE_FILTER_IGNORE
 		line.add_theme_constant_override("separation", 12)
 		stack.add_child(line)
-		var name_label := _make_label(str(row.label), 12, C_MUTED, HorizontalAlignment.HORIZONTAL_ALIGNMENT_LEFT)
+		var name_label := _make_label(str(row.label), 12, C_MUTED, HORIZONTAL_ALIGNMENT_LEFT)
 		name_label.size_flags_stretch_ratio = 1.1
 		line.add_child(name_label)
-		var key_label := _make_label("", 12, C_TEXT, HorizontalAlignment.HORIZONTAL_ALIGNMENT_RIGHT)
+		var key_label := _make_label("", 12, C_TEXT, HORIZONTAL_ALIGNMENT_RIGHT)
 		line.add_child(key_label)
-		var pad_label := _make_label("", 12, C_TEXT, HorizontalAlignment.HORIZONTAL_ALIGNMENT_RIGHT)
+		var pad_label := _make_label("", 12, C_TEXT, HORIZONTAL_ALIGNMENT_RIGHT)
 		line.add_child(pad_label)
 		cells[action] = { "key": key_label, "pad": pad_label }
-	stack.add_child(_make_label(Content.CONTROLS_HINTS, 11, C_MUTED, HorizontalAlignment.HORIZONTAL_ALIGNMENT_CENTER))
+	stack.add_child(_make_label(Content.CONTROLS_HINTS, 11, C_MUTED))
 	overlay.set_meta("control_cells", cells)
 	var close := _button("CLOSE", "close_controls", false, Vector2(200, 46))
 	close.size_flags_horizontal = Control.SIZE_SHRINK_CENTER
@@ -811,9 +811,9 @@ func _build_pause() -> void:
 	var content := _dialog(panel, Vector2(640, 600), C_BLUE, 48, 32)
 	content.add_theme_constant_override("separation", 10)
 
-	content.add_child(_make_label("RUN SUSPENDED", 13, C_BLUE, HorizontalAlignment.HORIZONTAL_ALIGNMENT_CENTER))
-	content.add_child(_make_label("PAUSED", 54, C_TEXT, HorizontalAlignment.HORIZONTAL_ALIGNMENT_CENTER))
-	content.add_child(_make_label("The keep will wait. Catch your breath.", 16, C_MUTED, HorizontalAlignment.HORIZONTAL_ALIGNMENT_CENTER))
+	content.add_child(_make_label("RUN SUSPENDED", 13, C_BLUE))
+	content.add_child(_make_label("PAUSED", 54, C_TEXT))
+	content.add_child(_make_label("The keep will wait. Catch your breath.", 16, C_MUTED))
 	content.add_child(_separator(C_EDGE))
 
 	var actions := HBoxContainer.new()
@@ -838,13 +838,13 @@ func _build_pause() -> void:
 	var options := VBoxContainer.new()
 	options.add_theme_constant_override("separation", 10)
 	options_margin.add_child(options)
-	options.add_child(_make_label("ACCESSIBILITY", 12, C_EMBER_HI, HorizontalAlignment.HORIZONTAL_ALIGNMENT_LEFT))
+	options.add_child(_make_label("ACCESSIBILITY", 12, C_EMBER_HI, HORIZONTAL_ALIGNMENT_LEFT))
 	_option_check(options, "reduced_motion", "Reduced motion", "Disables camera shake and softens particles.")
 	_option_check(options, "reduced_flash", "Reduced flash", "Reduces high-contrast impact flashes.")
-	options.add_child(_make_label("SOUND", 12, C_EMBER_HI, HorizontalAlignment.HORIZONTAL_ALIGNMENT_LEFT))
+	options.add_child(_make_label("SOUND", 12, C_EMBER_HI, HORIZONTAL_ALIGNMENT_LEFT))
 	_option_check(options, "music_on", "Music", "Procedural ambient score and boss theme.")
 
-	content.add_child(_make_label("ESC  resume", 12, C_MUTED, HorizontalAlignment.HORIZONTAL_ALIGNMENT_CENTER))
+	content.add_child(_make_label("ESC  resume", 12, C_MUTED))
 
 
 func _build_reward() -> void:
@@ -857,9 +857,9 @@ func _build_reward() -> void:
 	content.alignment = BoxContainer.ALIGNMENT_CENTER
 	content.add_theme_constant_override("separation", 6)
 
-	content.add_child(_make_label("CHAMBER CLEARED", 13, C_MINT, HorizontalAlignment.HORIZONTAL_ALIGNMENT_CENTER))
-	content.add_child(_make_label("Choose a Boon", 46, C_TEXT, HorizontalAlignment.HORIZONTAL_ALIGNMENT_CENTER))
-	content.add_child(_make_label("The Graveflame changes with every victory.", 15, C_MUTED, HorizontalAlignment.HORIZONTAL_ALIGNMENT_CENTER))
+	content.add_child(_make_label("CHAMBER CLEARED", 13, C_MINT))
+	content.add_child(_make_label("Choose a Boon", 46, C_TEXT))
+	content.add_child(_make_label("The Graveflame changes with every victory.", 15, C_MUTED))
 	content.add_child(_ornament(C_GOLD))
 
 	_upgrade_row = HBoxContainer.new()
@@ -873,7 +873,7 @@ func _build_reward() -> void:
 	gap.custom_minimum_size = Vector2(0, 6)
 	gap.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	content.add_child(gap)
-	content.add_child(_make_label("1 · 2 · 3  or  click to take a boon", 12, C_MUTED, HorizontalAlignment.HORIZONTAL_ALIGNMENT_CENTER))
+	content.add_child(_make_label("1 · 2 · 3  or  click to take a boon", 12, C_MUTED))
 
 
 ## A short rule with a lozenge at its centre, the keep's printer's mark.
@@ -903,19 +903,19 @@ func _build_game_over() -> void:
 	var content := _dialog(panel, Vector2(760, 620), C_RED, 48, 30)
 	content.add_theme_constant_override("separation", 10)
 
-	content.add_child(_make_label("RUN ENDED", 13, C_RED, HorizontalAlignment.HORIZONTAL_ALIGNMENT_CENTER))
-	content.add_child(_make_label("THE FLAME FADES", 54, C_TEXT, HorizontalAlignment.HORIZONTAL_ALIGNMENT_CENTER))
-	var epitaph := _make_label(Content.EPITAPHS[0], 18, C_MUTED, HorizontalAlignment.HORIZONTAL_ALIGNMENT_CENTER)
+	content.add_child(_make_label("RUN ENDED", 13, C_RED))
+	content.add_child(_make_label("THE FLAME FADES", 54, C_TEXT))
+	var epitaph := _make_label(Content.EPITAPHS[0], 18, C_MUTED)
 	content.add_child(epitaph)
 	panel.set_meta("line_label", epitaph)
 	content.add_child(_separator(Color("75414b")))
 	_build_run_result(content, panel)
-	var cells := _make_label("CELLS SECURED  +0", 20, C_GOLD, HorizontalAlignment.HORIZONTAL_ALIGNMENT_CENTER)
+	var cells := _make_label("CELLS SECURED  +0", 20, C_GOLD)
 	cells.visible = false
 	content.add_child(cells)
 	panel.set_meta("cells_label", cells)
 	_build_summary(content, panel, Color("75414b"))
-	content.add_child(_make_label("Return stronger, or descend again while the embers are warm.", 14, C_MUTED, HorizontalAlignment.HORIZONTAL_ALIGNMENT_CENTER))
+	content.add_child(_make_label("Return stronger, or descend again while the embers are warm.", 14, C_MUTED))
 
 	var actions := HBoxContainer.new()
 	actions.alignment = BoxContainer.ALIGNMENT_CENTER
@@ -934,19 +934,19 @@ func _build_victory() -> void:
 	var content := _dialog(panel, Vector2(760, 640), C_MINT, 48, 30)
 	content.add_theme_constant_override("separation", 10)
 
-	content.add_child(_make_label("WARDEN DEFEATED", 13, C_MINT, HorizontalAlignment.HORIZONTAL_ALIGNMENT_CENTER))
-	content.add_child(_make_label("GRAVEFLAME ENDURES", 50, C_TEXT, HorizontalAlignment.HORIZONTAL_ALIGNMENT_CENTER))
-	var closing := _make_label(Content.VICTORY_LINES[0], 17, C_MUTED, HorizontalAlignment.HORIZONTAL_ALIGNMENT_CENTER)
+	content.add_child(_make_label("WARDEN DEFEATED", 13, C_MINT))
+	content.add_child(_make_label("GRAVEFLAME ENDURES", 50, C_TEXT))
+	var closing := _make_label(Content.VICTORY_LINES[0], 17, C_MUTED)
 	content.add_child(closing)
 	panel.set_meta("line_label", closing)
 	content.add_child(_separator(C_MINT))
 	_build_run_result(content, panel)
-	var cells := _make_label("CELLS SECURED  +0", 20, C_GOLD, HorizontalAlignment.HORIZONTAL_ALIGNMENT_CENTER)
+	var cells := _make_label("CELLS SECURED  +0", 20, C_GOLD)
 	cells.visible = false
 	content.add_child(cells)
 	panel.set_meta("cells_label", cells)
 	_build_summary(content, panel, Color("1f5b52"))
-	content.add_child(_make_label("A brighter ember waits at the beginning.", 14, C_MUTED, HorizontalAlignment.HORIZONTAL_ALIGNMENT_CENTER))
+	content.add_child(_make_label("A brighter ember waits at the beginning.", 14, C_MUTED))
 
 	var actions := HBoxContainer.new()
 	actions.alignment = BoxContainer.ALIGNMENT_CENTER
@@ -964,10 +964,10 @@ func _build_victory() -> void:
 ## context, so a personal record is obvious at a glance instead of buried in
 ## the grid with six equally weighted tiles.
 func _build_run_result(content: VBoxContainer, panel: Control) -> void:
-	content.add_child(_make_label("RUN SCORE", 11, C_MUTED, HorizontalAlignment.HORIZONTAL_ALIGNMENT_CENTER))
-	var score := _make_label("0", 44, C_TEXT, HorizontalAlignment.HORIZONTAL_ALIGNMENT_CENTER)
+	content.add_child(_make_label("RUN SCORE", 11, C_MUTED))
+	var score := _make_label("0", 44, C_TEXT)
 	content.add_child(score)
-	var best := _make_label("BEST  0", 12, C_MUTED, HorizontalAlignment.HORIZONTAL_ALIGNMENT_CENTER)
+	var best := _make_label("BEST  0", 12, C_MUTED)
 	content.add_child(best)
 	panel.set_meta("score_label", score)
 	panel.set_meta("best_label", best)
@@ -997,8 +997,8 @@ func _build_summary(content: VBoxContainer, panel: Control, edge: Color) -> void
 		stack.mouse_filter = Control.MOUSE_FILTER_IGNORE
 		stack.add_theme_constant_override("separation", 0)
 		margin.add_child(stack)
-		stack.add_child(_make_label(entry[1], 10, C_MUTED, HorizontalAlignment.HORIZONTAL_ALIGNMENT_CENTER))
-		var value := _make_label("-", 17, C_TEXT, HorizontalAlignment.HORIZONTAL_ALIGNMENT_CENTER)
+		stack.add_child(_make_label(entry[1], 10, C_MUTED))
+		var value := _make_label("-", 17, C_TEXT)
 		stack.add_child(value)
 		labels[entry[0]] = value
 	panel.set_meta("summary_labels", labels)
@@ -1009,14 +1009,14 @@ func _build_forge() -> void:
 	var content := _dialog(panel, Vector2(900, 650), C_EMBER, 42, 30)
 	content.add_theme_constant_override("separation", 9)
 
-	content.add_child(_make_label("PERMANENT UPGRADES", 12, C_EMBER_HI, HorizontalAlignment.HORIZONTAL_ALIGNMENT_CENTER))
-	content.add_child(_make_label("THE FORGE", 46, C_TEXT, HorizontalAlignment.HORIZONTAL_ALIGNMENT_CENTER))
-	content.add_child(_make_label("Temper the next life with cells carried out of the keep.", 15, C_MUTED, HorizontalAlignment.HORIZONTAL_ALIGNMENT_CENTER))
+	content.add_child(_make_label("PERMANENT UPGRADES", 12, C_EMBER_HI))
+	content.add_child(_make_label("THE FORGE", 46, C_TEXT))
+	content.add_child(_make_label("Temper the next life with cells carried out of the keep.", 15, C_MUTED))
 
 	var balance_panel := PanelContainer.new()
 	balance_panel.add_theme_stylebox_override("panel", _panel_box(C_INK, Color("715026"), 9, 1, 0))
 	content.add_child(balance_panel)
-	var balance := _make_label("AVAILABLE CELLS   0", 18, C_GOLD, HorizontalAlignment.HORIZONTAL_ALIGNMENT_CENTER)
+	var balance := _make_label("AVAILABLE CELLS   0", 18, C_GOLD)
 	balance.custom_minimum_size.y = 38.0
 	balance_panel.add_child(balance)
 	panel.set_meta("balance_label", balance)
@@ -1053,8 +1053,8 @@ func _slider_row(parent: VBoxContainer, title: String, key: String, value: float
 	var head := HBoxContainer.new()
 	head.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	row.add_child(head)
-	head.add_child(_make_label(title, 14, C_TEXT, HorizontalAlignment.HORIZONTAL_ALIGNMENT_LEFT))
-	var readout := _make_label("%d%%" % roundi(value * 100.0), 12, C_MUTED, HorizontalAlignment.HORIZONTAL_ALIGNMENT_RIGHT)
+	head.add_child(_make_label(title, 14, C_TEXT, HORIZONTAL_ALIGNMENT_LEFT))
+	var readout := _make_label("%d%%" % roundi(value * 100.0), 12, C_MUTED, HORIZONTAL_ALIGNMENT_RIGHT)
 	readout.size_flags_horizontal = Control.SIZE_SHRINK_END
 	head.add_child(readout)
 	var slider := HSlider.new()
@@ -1081,20 +1081,20 @@ func _build_options() -> void:
 	var content := _dialog(panel, Vector2(680, 620), C_EMBER, 48, 30)
 	content.add_theme_constant_override("separation", 8)
 
-	content.add_child(_make_label("SETTINGS", 12, C_EMBER_HI, HorizontalAlignment.HORIZONTAL_ALIGNMENT_CENTER))
-	content.add_child(_make_label("OPTIONS", 44, C_TEXT, HorizontalAlignment.HORIZONTAL_ALIGNMENT_CENTER))
+	content.add_child(_make_label("SETTINGS", 12, C_EMBER_HI))
+	content.add_child(_make_label("OPTIONS", 44, C_TEXT))
 	content.add_child(_separator(C_EDGE))
 
-	content.add_child(_make_label("AUDIO", 12, C_EMBER_HI, HorizontalAlignment.HORIZONTAL_ALIGNMENT_LEFT))
+	content.add_child(_make_label("AUDIO", 12, C_EMBER_HI, HORIZONTAL_ALIGNMENT_LEFT))
 	_slider_row(content, "Master volume", "master", 0.9)
 	_slider_row(content, "Music", "music", 0.75)
 	_slider_row(content, "Effects", "sfx", 0.9)
 
-	content.add_child(_make_label("DISPLAY", 12, C_EMBER_HI, HorizontalAlignment.HORIZONTAL_ALIGNMENT_LEFT))
+	content.add_child(_make_label("DISPLAY", 12, C_EMBER_HI, HORIZONTAL_ALIGNMENT_LEFT))
 	_option_check(content, "fullscreen", "Fullscreen", "Fill the display instead of running in a window.")
 	_option_check(content, "vibration", "Controller vibration", "The pad rumbles with hits, parries and falls.")
 
-	content.add_child(_make_label("ACCESSIBILITY", 12, C_EMBER_HI, HorizontalAlignment.HORIZONTAL_ALIGNMENT_LEFT))
+	content.add_child(_make_label("ACCESSIBILITY", 12, C_EMBER_HI, HORIZONTAL_ALIGNMENT_LEFT))
 	_reduced_motion_check = _option_check(content, "reduced_motion", "Reduced motion", "Disables camera shake and softens particles.")
 	_option_check(content, "reduced_flash", "Reduced flash", "Reduces high-contrast impact flashes.")
 
@@ -1137,9 +1137,9 @@ func _build_keys() -> void:
 	var content := _dialog(panel, Vector2(720, 660), C_EMBER, 44, 28)
 	content.add_theme_constant_override("separation", 8)
 
-	content.add_child(_make_label("SETTINGS", 12, C_EMBER_HI, HorizontalAlignment.HORIZONTAL_ALIGNMENT_CENTER))
-	content.add_child(_make_label("KEY BINDINGS", 42, C_TEXT, HorizontalAlignment.HORIZONTAL_ALIGNMENT_CENTER))
-	content.add_child(_make_label("Choose a key, then press the one you want.  ESC cancels.", 13, C_MUTED, HorizontalAlignment.HORIZONTAL_ALIGNMENT_CENTER))
+	content.add_child(_make_label("SETTINGS", 12, C_EMBER_HI))
+	content.add_child(_make_label("KEY BINDINGS", 42, C_TEXT))
+	content.add_child(_make_label("Choose a key, then press the one you want.  ESC cancels.", 13, C_MUTED))
 	content.add_child(_separator(C_EDGE))
 
 	var scroll := ScrollContainer.new()
@@ -1154,7 +1154,7 @@ func _build_keys() -> void:
 	_key_rows.add_theme_constant_override("separation", 5)
 	scroll.add_child(_key_rows)
 
-	content.add_child(_make_label("Gamepad bindings are fixed and always live.", 12, C_MUTED, HorizontalAlignment.HORIZONTAL_ALIGNMENT_CENTER))
+	content.add_child(_make_label("Gamepad bindings are fixed and always live.", 12, C_MUTED))
 	var footer := HBoxContainer.new()
 	footer.alignment = BoxContainer.ALIGNMENT_CENTER
 	content.add_child(footer)
@@ -1177,7 +1177,7 @@ func sync_keys() -> void:
 		var line := HBoxContainer.new()
 		line.add_theme_constant_override("separation", 12)
 		_key_rows.add_child(line)
-		var label := _make_label(str(row.label), 14, C_TEXT, HorizontalAlignment.HORIZONTAL_ALIGNMENT_LEFT)
+		var label := _make_label(str(row.label), 14, C_TEXT, HORIZONTAL_ALIGNMENT_LEFT)
 		line.add_child(label)
 		# Empty cue kind: the label changing to "PRESS A KEY" is the feedback, and
 		# a confirm blip here would imply a commit that has not happened yet.
@@ -1253,13 +1253,13 @@ func _build_title_stack(text: String, size: int) -> Control:
 	stack.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	stack.size_flags_horizontal = Control.SIZE_SHRINK_CENTER
 	var font := _title_font()
-	var shadow := _make_label(text, size, VFX.VOID, HorizontalAlignment.HORIZONTAL_ALIGNMENT_CENTER)
+	var shadow := _make_label(text, size, VFX.VOID)
 	shadow.add_theme_color_override("font_outline_color", VFX.VOID)
 	shadow.add_theme_constant_override("outline_size", 4)
-	var rim := _make_label(text, size, VFX.ORANGE, HorizontalAlignment.HORIZONTAL_ALIGNMENT_CENTER)
+	var rim := _make_label(text, size, VFX.ORANGE)
 	rim.add_theme_color_override("font_outline_color", VFX.EMBER)
 	rim.add_theme_constant_override("outline_size", 2)
-	var face := _make_label(text, size, VFX.GOLD, HorizontalAlignment.HORIZONTAL_ALIGNMENT_CENTER)
+	var face := _make_label(text, size, VFX.GOLD)
 	face.add_theme_constant_override("outline_size", 0)
 	var offsets := [5.0, 2.0, 0.0]
 	var layers := [shadow, rim, face]
@@ -1272,7 +1272,7 @@ func _build_title_stack(text: String, size: int) -> Control:
 		label.offset_bottom = offsets[i]
 	# Measure the run on the font itself: a label outside the tree has no theme
 	# context yet, so its minimum size cannot be trusted here.
-	var run := font.get_string_size(text, HorizontalAlignment.HORIZONTAL_ALIGNMENT_LEFT, -1.0, size)
+	var run := font.get_string_size(text, HORIZONTAL_ALIGNMENT_LEFT, -1.0, size)
 	stack.custom_minimum_size = Vector2(run.x + 8.0, maxf(font.get_height(size), float(size) * 1.2) + 8.0)
 	_title_top_label = face
 	return stack
@@ -1380,13 +1380,13 @@ func _margin_container(left: int, right: int, top: int, bottom: int) -> MarginCo
 	return margin
 
 
-func _make_label(text: String, size: int, color: Color, alignment: HorizontalAlignment) -> Label:
+func _make_label(text: String, size: int, color: Color, alignment: HorizontalAlignment = HORIZONTAL_ALIGNMENT_CENTER) -> Label:
 	var label := Label.new()
 	label.text = text
 	label.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	label.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	label.horizontal_alignment = alignment
-	label.vertical_alignment = VerticalAlignment.VERTICAL_ALIGNMENT_CENTER
+	label.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
 	# Compact HUD labels must keep their intrinsic width inside HBoxContainers;
 	# callers that render paragraphs opt into wrapping explicitly.
 	label.autowrap_mode = TextServer.AUTOWRAP_OFF
@@ -1404,9 +1404,9 @@ func _make_stat_line(parent: VBoxContainer, title: String, value: String, value_
 	var row := HBoxContainer.new()
 	row.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	parent.add_child(row)
-	var caption := _make_label(title, 10, C_MUTED, HorizontalAlignment.HORIZONTAL_ALIGNMENT_LEFT)
+	var caption := _make_label(title, 10, C_MUTED, HORIZONTAL_ALIGNMENT_LEFT)
 	row.add_child(caption)
-	var result := _make_label(value, 12, value_color, HorizontalAlignment.HORIZONTAL_ALIGNMENT_RIGHT)
+	var result := _make_label(value, 12, value_color, HORIZONTAL_ALIGNMENT_RIGHT)
 	row.add_child(result)
 	return result
 
@@ -1837,19 +1837,19 @@ func _upgrade_card(index: int, upgrade: Dictionary, rarity: String, rc: Color) -
 	margin.add_child(stack)
 
 	# The index is a live keyboard shortcut, so printing it is not decoration.
-	var key := _make_label("%d" % (index + 1), 12, C_MUTED, HorizontalAlignment.HORIZONTAL_ALIGNMENT_RIGHT)
+	var key := _make_label("%d" % (index + 1), 12, C_MUTED, HORIZONTAL_ALIGNMENT_RIGHT)
 	stack.add_child(key)
 
 	var sigil := BoonMedallion.new()
 	sigil.setup(str(upgrade.get("id", "")), rc, epic)
 	stack.add_child(sigil)
 
-	var title := _make_label(str(upgrade.get("title", "Unknown Boon")), 25, C_TEXT, HorizontalAlignment.HORIZONTAL_ALIGNMENT_CENTER)
+	var title := _make_label(str(upgrade.get("title", "Unknown Boon")), 25, C_TEXT)
 	title.add_theme_font_override("font", _heading_font())
 	stack.add_child(title)
-	var desc := _make_label(str(upgrade.get("desc", "")), 14, C_MUTED, HorizontalAlignment.HORIZONTAL_ALIGNMENT_CENTER)
+	var desc := _make_label(str(upgrade.get("desc", "")), 14, C_MUTED)
 	desc.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-	desc.vertical_alignment = VerticalAlignment.VERTICAL_ALIGNMENT_TOP
+	desc.vertical_alignment = VERTICAL_ALIGNMENT_TOP
 	desc.custom_minimum_size = Vector2(240, 0)
 	desc.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	stack.add_child(desc)
@@ -1857,7 +1857,7 @@ func _upgrade_card(index: int, upgrade: Dictionary, rarity: String, rc: Color) -
 	var foot := rarity.to_upper()
 	if bool(upgrade.get("unique", false)):
 		foot += "  ·  ONCE PER RUN"
-	stack.add_child(_make_label(foot, 11, rc, HorizontalAlignment.HORIZONTAL_ALIGNMENT_CENTER))
+	stack.add_child(_make_label(foot, 11, rc))
 	# Lift toward the hand under the cursor or the pad's focus.
 	button.mouse_entered.connect(_lift_card.bind(button, true))
 	button.mouse_exited.connect(_lift_card.bind(button, false))
@@ -1974,11 +1974,11 @@ func setup_forge(cells: int) -> void:
 		var head := HBoxContainer.new()
 		head.add_theme_constant_override("separation", 10)
 		copy.add_child(head)
-		var name_label := _make_label(str(upgrade.get("title", "Upgrade")).to_upper(), 14, C_TEXT, HorizontalAlignment.HORIZONTAL_ALIGNMENT_LEFT)
+		var name_label := _make_label(str(upgrade.get("title", "Upgrade")).to_upper(), 14, C_TEXT, HORIZONTAL_ALIGNMENT_LEFT)
 		name_label.size_flags_horizontal = Control.SIZE_SHRINK_BEGIN
 		head.add_child(name_label)
 		head.add_child(_rank_pips(rank, max_rank))
-		copy.add_child(_make_label(str(upgrade.get("desc", "")), 12, C_MUTED, HorizontalAlignment.HORIZONTAL_ALIGNMENT_LEFT))
+		copy.add_child(_make_label(str(upgrade.get("desc", "")), 12, C_MUTED, HORIZONTAL_ALIGNMENT_LEFT))
 
 		var buy := _button("MASTERED" if mastered else "%d CELLS" % next_cost, "Buy%d" % i, false, Vector2(132, 44), "")
 		buy.disabled = mastered or cells < next_cost
@@ -2003,14 +2003,14 @@ func setup_forge(cells: int) -> void:
 ## Vows sit under the relics: burdens rather than purchases, sworn or unsworn
 ## for free once the Warden has fallen, each paying out in score and cells.
 func _build_vow_rows() -> void:
-	var head := _make_label("VOWS", 13, C_RED, HorizontalAlignment.HORIZONTAL_ALIGNMENT_LEFT)
+	var head := _make_label("VOWS", 13, C_RED, HORIZONTAL_ALIGNMENT_LEFT)
 	head.custom_minimum_size.y = 34.0
 	_forge_rows.add_child(head)
 	if not Save.vows_unlocked():
-		_forge_rows.add_child(_make_label("Defeat the Ember Warden to swear vows.", 12, C_MUTED, HorizontalAlignment.HORIZONTAL_ALIGNMENT_LEFT))
+		_forge_rows.add_child(_make_label("Defeat the Ember Warden to swear vows.", 12, C_MUTED, HORIZONTAL_ALIGNMENT_LEFT))
 		return
 	var sworn := Save.get_vows()
-	_forge_rows.add_child(_make_label("Sworn vows make the next descent harsher.  Score ×%s" % String.num(Content.vow_score_multiplier(sworn), 2), 12, C_MUTED, HorizontalAlignment.HORIZONTAL_ALIGNMENT_LEFT))
+	_forge_rows.add_child(_make_label("Sworn vows make the next descent harsher.  Score ×%s" % String.num(Content.vow_score_multiplier(sworn), 2), 12, C_MUTED, HORIZONTAL_ALIGNMENT_LEFT))
 	for i in range(Content.VOWS.size()):
 		var v: Dictionary = Content.VOWS[i]
 		var on := sworn.has(str(v.id))
@@ -2027,8 +2027,8 @@ func _build_vow_rows() -> void:
 		copy.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 		copy.add_theme_constant_override("separation", 1)
 		line.add_child(copy)
-		copy.add_child(_make_label(str(v.title).to_upper(), 14, C_RED if on else C_TEXT, HorizontalAlignment.HORIZONTAL_ALIGNMENT_LEFT))
-		copy.add_child(_make_label("%s   +%d%% score" % [str(v.desc), roundi(float(v.score) * 100.0)], 12, C_MUTED, HorizontalAlignment.HORIZONTAL_ALIGNMENT_LEFT))
+		copy.add_child(_make_label(str(v.title).to_upper(), 14, C_RED if on else C_TEXT, HORIZONTAL_ALIGNMENT_LEFT))
+		copy.add_child(_make_label("%s   +%d%% score" % [str(v.desc), roundi(float(v.score) * 100.0)], 12, C_MUTED, HORIZONTAL_ALIGNMENT_LEFT))
 		var toggle := _button("SWORN" if on else "SWEAR", "Vow%d" % i, on, Vector2(132, 40), "")
 		toggle.pressed.connect(vow_toggled.emit.bind(str(v.id)))
 		line.add_child(toggle)
