@@ -1,6 +1,6 @@
 extends RefCounted
 ## Shared procedural drawing helpers for the visual layer: additive radial lights,
-## vertex-shaded silhouettes, rim edges, contact shadows and slash ribbons.
+## vertex-shaded silhouettes, rim edges and contact shadows.
 ## Everything here is geometry plus tiny canvas_item shaders; no textures exist.
 ## Consumers preload this script as `VFX` so it never depends on the class cache.
 
@@ -49,7 +49,6 @@ void fragment() {
 	vec2 seed = floor(UV * vec2(640.0, 360.0)) + vec2(floor(TIME * 24.0) * 7.0, floor(TIME * 24.0) * 3.0);
 	float n = fract(sin(dot(seed, vec2(12.9898, 78.233))) * 43758.5453);
 	float g = (n - 0.5) * grain;
-	vec3 rgb = edge_color.rgb * v + vec3(0.5 + g);
 	float a = max(edge_color.a * v, grain * 0.9);
 	COLOR = vec4(mix(vec3(0.5 + g), edge_color.rgb, v), a);
 }
@@ -197,38 +196,6 @@ static func draw_rim_circle(ci: CanvasItem, center: Vector2, radius: float, faci
 	var front := 0.0 if facing >= 0.0 else PI
 	ci.draw_arc(center, radius, front - 1.25, front + 1.25, 12, Color(GOLD.r, GOLD.g, GOLD.b, 0.8 * strength), 1.5, true)
 	ci.draw_arc(center, radius, front + PI - 1.1, front + PI + 1.1, 10, Color(SLATE.r, SLATE.g, SLATE.b, 0.45 * strength), 1.5, true)
-
-## Tapered crescent for sword sweeps. The head is white-hot, the middle gold, the
-## tail dissolves into ember. `progress` reveals the sweep from tail to head.
-static func slash_ribbon(ci: CanvasItem, origin: Vector2, radius: float, arc: float, facing: float, progress: float, thickness: float, alpha: float) -> void:
-	var segs := 14
-	var sweep := arc * clampf(progress, 0.06, 1.0)
-	var dir := 1.0 if facing >= 0.0 else -1.0
-	var start := -arc * 0.5 if facing >= 0.0 else PI + arc * 0.5
-	var outer := PackedVector2Array()
-	var inner := PackedVector2Array()
-	var outer_cols := PackedColorArray()
-	var inner_cols := PackedColorArray()
-	for i in range(segs + 1):
-		var u := float(i) / float(segs)
-		var ang := start + dir * sweep * u
-		var width := maxf(1.5, thickness * (0.22 + 0.78 * u))
-		var ray := Vector2(cos(ang), sin(ang))
-		outer.append(origin + ray * radius)
-		inner.append(origin + ray * (radius - width))
-		var c: Color
-		if u < 0.5:
-			c = Color(EMBER.r, EMBER.g, EMBER.b, 0.0).lerp(GOLD, u * 2.0)
-		else:
-			c = GOLD.lerp(Color.WHITE, (u - 0.5) * 2.0)
-		c.a *= alpha
-		outer_cols.append(c)
-		inner_cols.append(Color(c.r, c.g, c.b, c.a * 0.85))
-	inner.reverse()
-	inner_cols.reverse()
-	outer.append_array(inner)
-	outer_cols.append_array(inner_cols)
-	ci.draw_polygon(outer, outer_cols)
 
 ## Small emissive: soft halo, bright core and a white-hot pinpoint.
 static func draw_ember_dot(ci: CanvasItem, pos: Vector2, radius: float, color: Color, intensity: float = 1.0) -> void:
