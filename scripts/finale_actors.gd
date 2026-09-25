@@ -36,10 +36,14 @@ static func stage_floor(x: float) -> float:
 
 ## The knight's four-tongue crown with its two hot inner tongues, as a free
 ## flame: `base` is the tongues' base line (KnightArt.head_point), `amt` the
-## flame size, `tilt` leans the whole crown.
+## flame size, `tilt` leans the whole crown. Every finale flame is drawn here,
+## so reduced flash darkens fire here once (the WardenArt convention).
 static func draw_crown(ci: CanvasItem, base: Vector2, size: float, amt: float, tilt: float, t: float, outer: Color, inner: Color) -> void:
 	if amt <= 0.02:
 		return
+	if Feedback.flash_reduced:
+		outer = outer.darkened(0.22)
+		inner = inner.darkened(0.22)
 	var up := Vector2(0.0, -size).rotated(tilt)
 	var side := Vector2(size, 0.0).rotated(tilt)
 	var body := minf(1.0, amt)
@@ -159,9 +163,7 @@ class FinaleKnight extends Node2D:
 		var target: Dictionary = want.pose
 		var rate := float(want.rate)
 		if not gesture.is_empty():
-			var held: Dictionary = GESTURES[gesture]
-			for key in held:
-				target[key] = held[key]
+			target.merge(GESTURES[gesture], true)
 		if gesture_rate > 0.0:
 			rate = gesture_rate
 		target.flame = crown
@@ -256,11 +258,7 @@ class FinaleFallen extends Node2D:
 			_gesture_t -= dt
 			if _gesture_t <= 0.0:
 				gesture = ""
-		var target := _rest.duplicate()
-		if not gesture.is_empty():
-			var held: Dictionary = GESTURES[gesture]
-			for key in held:
-				target[key] = held[key]
+		var target := _rest if gesture.is_empty() else _rest.merged(GESTURES[gesture], true)
 		for key in target:
 			if absf(float(pose[key]) - float(target[key])) > 0.002:
 				pose = KnightArt.blend(pose, target, 8.0, dt)
