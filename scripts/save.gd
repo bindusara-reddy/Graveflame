@@ -278,3 +278,108 @@ static func _improves(records: Dictionary, key: String, value: float) -> bool:
 		return true
 	var old := float(records[key])
 	return value < old if key == "fastest_win" else value > old
+# --- The finale's legacy ---
+## A victory is recorded once, at the killing blow, so quitting, skipping or
+## crashing mid-finale never loses it. Deaths are counted so the ending can raise
+## exactly the knights the Warden took since it was last mended.
+
+## Vow counts kept per victory, newest last; the oldest fall off past this.
+const ROLL_CAP := 64
+
+## One write at boot, and only for a save that predates the death count: its
+## earlier deaths are unknowable, so falls_legacy marks the count as partial.
+static func migrate_falls() -> void:
+	var d := load_save()
+	if d.has("falls"):
+		return
+	var victories := int(d.get("victories", 0))
+	var progressed: bool = int(d.cells) > 0 or int(d.best_score) > 0 or victories > 0
+	d["falls"] = 0
+	d["falls_legacy"] = progressed or not (d.meta as Array).is_empty() or not (d.learned as Array).is_empty()
+	var roll: Array = []
+	roll.resize(mini(victories, ROLL_CAP))
+	roll.fill(0)
+	d["roll"] = roll
+	save_save(d)
+
+## A death: count it and keep the epitaph it was shown, for the ending to answer.
+static func record_fall(epitaph: String) -> void:
+	var d := load_save()
+	d["falls"] = int(d.get("falls", 0)) + 1
+	d["last_epitaph"] = epitaph
+	save_save(d)
+
+## The single save write for a won descent. Returns what the finale needs:
+## first, victories, falls_since, falls_total, unknown, last_epitaph,
+## finale_seen (before this one), milestone and oath_first.
+static func record_victory(vows: Array) -> Dictionary:
+	var d := load_save()
+	var victories := int(d.get("victories", 0)) + 1
+	var falls := int(d.get("falls", 0))
+	var banked := int(d.get("falls_banked", -1))
+	var seen := int(d.get("finale_seen", 0))
+	var oath := vows.size() == Content.VOWS.size()
+	var oath_first := oath and not bool(d.get("oath_kept", false))
+	var milestones: Array = d.get("milestones_seen", [])
+	var milestone := ""
+	if oath_first:
+		milestone = "oath"
+	elif victories == 10 and not milestones.has("house_rises"):
+		milestone = "house_rises"
+	elif victories == 2 and not milestones.has("house"):
+		milestone = "house"
+	if not milestone.is_empty():
+		milestones.append(milestone)
+	var roll: Array = d.get("roll", [])
+	roll.append(vows.size())
+	var kept: Array = d.get("vows_kept_ever", [])
+	for v in vows:
+		if not kept.has(v):
+			kept.append(v)
+	var out := {
+		"first": victories == 1, "victories": victories,
+		"falls_since": falls - maxi(banked, 0), "falls_total": falls,
+		"unknown": bool(d.get("falls_legacy", false)) and banked < 0,
+		"last_epitaph": str(d.get("last_epitaph", "")), "finale_seen": seen,
+		"milestone": milestone, "oath_first": oath_first,
+	}
+	d["victories"] = victories
+	d["best_vows"] = maxi(int(d.get("best_vows", 0)), vows.size())
+	d["falls_banked"] = falls
+	d["last_epitaph"] = ""
+	d["finale_seen"] = seen + 1
+	d["roll"] = roll.slice(maxi(0, roll.size() - ROLL_CAP))
+	d["vows_kept_ever"] = kept
+	d["oath_kept"] = bool(d.get("oath_kept", false)) or oath
+	d["milestones_seen"] = milestones
+	save_save(d)
+	return out
+
+static func get_falls() -> int:
+	return int(_data().get("falls", 0))
+
+static func falls_legacy() -> bool:
+	return bool(_data().get("falls_legacy", false))
+
+static func get_roll() -> Array:
+	var roll = _data().get("roll", [])
+	return (roll as Array).map(func(n): return int(n)) if roll is Array else []
+
+static func get_vows_kept_ever() -> Array:
+	var kept = _data().get("vows_kept_ever", [])
+	return (kept as Array).duplicate() if kept is Array else []
+
+static func oath_kept() -> bool:
+	return bool(_data().get("oath_kept", false))
+
+static func get_finale_seen() -> int:
+	return int(_data().get("finale_seen", 0))
+
+## The victory count the title screen last celebrated with a new candle.
+static func get_last_celebrated() -> int:
+	return int(_data().get("last_celebrated", 0))
+
+static func set_last_celebrated(victories: int) -> void:
+	var d := load_save()
+	d["last_celebrated"] = victories
+	save_save(d)

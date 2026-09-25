@@ -604,6 +604,138 @@ const VICTORY_LINES := [
 	"The Ember Throne answers to no one tonight.",
 ]
 
+# --- The finale ("Strike the Set") ---
+## Every string the ending shows. Headings stay within 34 characters so a card
+## never wraps; the credit row can be blanked without touching the director.
+const FINALE_TEXT := {
+	"keep": "THE KEEP KEEPS WHAT IT TAKES.",
+	"back": "TONIGHT, IT GIVES THEM BACK.",
+	"cold": "THE THRONE IS COLD.",
+	"again": "AGAIN IT FALLS. AGAIN THEY RISE.",
+	"hold": "HOLD",
+	"ignite": "IGNITE",
+	"let_go": "LET GO",
+	"skip": "HOLD %s TO SKIP",
+	"bill_title": "THE DESCENT",
+	"bill_sub": "IN EIGHT CHAMBERS · EVERY ATTEMPT REMEMBERED",
+	"fallen": "THE FALLEN",
+	"warden": "THE EMBER WARDEN",
+	"warden_gloss": "Keeper of a cold throne. For now.",
+	"warden_gloss_oath": "Keeper of a cold throne.",
+	"knight": "THE KNIGHT",
+	"knight_gloss": "Who carried their flames.",
+	"knight_gloss_oath": "Who carried their flames, and every vow.",
+	"sworn": "SWORN",
+	"house": "THE HOUSE",
+	"credit": "MADE BY BINDU · Every shape cut in code. Every sound struck from nothing.",
+	"curtain": "THE CURTAIN FALLS.",
+	"curtain_answer": "The flame does not.",
+	"took_nothing": "The keep took nothing from you.",
+	"vows_awaken": "VOWS AWAKEN AT THE FORGE.",
+}
+## The ending answers the last thing a death screen said to the player.
+const EPITAPH_ANSWERS := {
+	"Ash remembers every attempt.": "Every one of them took a bow.",
+	"The keep keeps what it takes.": "Tonight, it gave them back.",
+	"A crown of fire. A crown of cinders.": "Neither. A crown they lent you.",
+	"The flame gutters. It does not go out.": "It did not go out.",
+	"Every knight before you fell here too.": "Every one of them stood up.",
+	"Even embers remember the shape of the fire.": "And the fire remembered them.",
+	"The descent is patient.": "So were you.",
+	"Somewhere below, the throne grows warmer.": "Tonight it burns for them.",
+	"The Warden stokes its throne with your flame.": "Your flame is your own again.",
+}
+## The title's bell question as [onset in seconds of held time, MIDI note]: the
+## opening contour of the title melody, still in D minor, ending on the C#.
+const GATHER_LINE := [[0.00, 69], [0.88, 74], [1.32, 72], [1.54, 69], [1.76, 65], [2.64, 64], [3.52, 73]]
+## Pitch ratios over D for the pop-up folds (D-minor pentatonic) and the
+## homecoming (D-major pentatonic).
+const FOLD_MINOR := [1.0, 1.1892, 1.3348, 1.4983, 1.7818, 2.0]
+const FOLD_MAJOR := [1.0, 1.1225, 1.2599, 1.4983, 1.6818]
+## Crowd sizes: the stage holds 16 fallen; a deathless win raises five elders;
+## a veteran whose deaths predate the count sees twelve.
+const FALLEN_CAP := 16
+const ELDERS := 5
+const UNCOUNTED_CROWD := 12
+const HOUSE_CAP := 23
+const NUMBER_WORDS := [
+	"zero", "one", "two", "three", "four", "five", "six", "seven", "eight", "nine", "ten",
+	"eleven", "twelve", "thirteen", "fourteen", "fifteen", "sixteen", "seventeen", "eighteen", "nineteen", "twenty",
+]
+const ORDINAL_WORDS := [
+	"", "FIRST", "SECOND", "THIRD", "FOURTH", "FIFTH", "SIXTH", "SEVENTH", "EIGHTH", "NINTH", "TENTH",
+	"ELEVENTH", "TWELFTH", "THIRTEENTH", "FOURTEENTH", "FIFTEENTH", "SIXTEENTH", "SEVENTEENTH", "EIGHTEENTH", "NINETEENTH", "TWENTIETH",
+]
+
+## The boon definition for an id, or {} when the id is unknown.
+static func upgrade_def(id: String) -> Dictionary:
+	for u in UPGRADES:
+		if str(u.id) == id:
+			return u
+	return {}
+
+## Spelled out to twenty, digits after: the playbill reads as print, not a HUD.
+static func number_word(n: int) -> String:
+	return NUMBER_WORDS[n] if n >= 0 and n < NUMBER_WORDS.size() else str(n)
+
+## "THE FOURTH FLAME": the victory panel's kicker counts wins as flames.
+static func flame_ordinal(n: int) -> String:
+	if n > 0 and n < ORDINAL_WORDS.size():
+		return "THE %s FLAME" % ORDINAL_WORDS[n]
+	var suffix := "TH"
+	if n % 100 < 11 or n % 100 > 13:
+		suffix = ["TH", "ST", "ND", "RD", "TH", "TH", "TH", "TH", "TH", "TH"][n % 10]
+	return "THE %d%s FLAME" % [n, suffix]
+
+## The Warden you meet was mended at your last curtain, and says so.
+static func boss_subtitle(victories: int, oath: bool) -> String:
+	if oath:
+		return "Its wires were cut. It rose anyway."
+	match victories:
+		0: return "Keeper of the Ember Throne"
+		1: return "Felled once. Mended."
+		2: return "Felled twice. Mended."
+	return "Felled %d times. Mended." % victories
+
+## THE FALLEN's gloss. An unknown count (a save older than the count) is said
+## honestly rather than guessed.
+static func fallen_gloss(falls: int, unknown: bool) -> String:
+	if unknown:
+		return "Uncounted. Each of them was you."
+	match falls:
+		0: return "Those before you. Not one was you."
+		1: return "One knight. It was you."
+	return "%d knights. Each of them was you." % falls
+
+## THE HOUSE's gloss for the past victors watching; empty on a first win.
+static func house_gloss(past: int) -> String:
+	if past <= 0:
+		return ""
+	if past == 1:
+		return "One flame, watching."
+	if past == 9:
+		return "Nine flames stand for the tenth."
+	var count := number_word(past).capitalize()
+	return "%s flames, %s." % [count, "watching" if past < 9 else "standing"]
+
+## The final card: the last epitaph quoted, then the ending's answer to it.
+## A deathless run is told it lost nothing; with nothing to answer, the curtain line.
+static func finale_answer(last_epitaph: String, falls_since: int, unknown: bool) -> Dictionary:
+	if falls_since == 0 and not unknown:
+		return { "quote": "", "answer": FINALE_TEXT.took_nothing }
+	if EPITAPH_ANSWERS.has(last_epitaph):
+		return { "quote": "“%s”" % last_epitaph, "answer": EPITAPH_ANSWERS[last_epitaph] }
+	return { "quote": FINALE_TEXT.curtain, "answer": FINALE_TEXT.curtain_answer }
+
+## Which cut of the ending plays: "full" the first time and for the first
+## Fivefold Oath, "abridged" for the 2nd and 3rd or a new milestone, else "brief".
+static func finale_tier(seen_before: int, milestone: String) -> String:
+	if seen_before <= 0 or milestone == "oath":
+		return "full"
+	if seen_before <= 2 or not milestone.is_empty():
+		return "abridged"
+	return "brief"
+
 # --- Cells meta-progression (currency kept across runs, Dead Cells-style) ---
 ## Ranked relics. `costs[r]` buys rank r+1; `value` applies once per rank owned.
 ## Costs climb so cells keep meaning something long after the first few runs.
