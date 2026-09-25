@@ -1,8 +1,8 @@
 extends "res://tests/harness.gd"
 ## Run-state contracts: the save survives a torn write and is never written from
 ## a kill, the ledger records each descent once, a dead knight cannot take a
-## rift, a Trial before the throne is paid there, and Esc on a screen opened
-## from pause steps back instead of resuming.
+## rift, a Trial before the throne is paid there, Esc on a screen opened from
+## pause steps back instead of resuming, and the camera frames the Warden.
 ## Headless; uses a scratch save.
 ##   godot4 --headless --path . --script res://tests/run_state_contract.gd
 
@@ -14,8 +14,10 @@ func run() -> void:
 	_test_ledger()
 	await _test_banking()
 	await _test_chamber_stats()
+	await _test_look_ahead()
 	await _test_dead_knight()
 	await _test_throne()
+	await _test_warden_framing()
 	await _test_pause_routing()
 	await finish("RUN_STATE")
 
@@ -114,6 +116,22 @@ func _test_chamber_stats() -> void:
 	await ticks(2)
 	check(int(game._stats.rooms) == 1 and int(game._stats.untouched_chambers) == 1, "a clear without a wound counts as cleared and untouched")
 
+## Turning on the spot never pans; running eases the frame ahead.
+func _test_look_ahead() -> void:
+	await boot()
+	await clear_room()
+	var p := game.player
+	game._look_x = 0.0
+	p.facing = -1.0
+	p.velocity.x = 0.0
+	game._ease_look_ahead(1.0)
+	check(is_zero_approx(game._look_x), "turning on the spot leaves the frame still")
+	p.velocity.x = -300.0
+	game._ease_look_ahead(0.1)
+	check(is_equal_approx(game._look_x, -Game.LOOK_EASE * 0.1), "running eases the look-ahead instead of snapping it")
+	game._ease_look_ahead(5.0)
+	check(is_equal_approx(game._look_x, -Game.LOOK_AHEAD), "the look-ahead settles at its full reach")
+
 func _test_dead_knight() -> void:
 	use_scratch_save(SCRATCH)
 	await boot()
@@ -133,6 +151,20 @@ func _test_throne() -> void:
 	var boss: Boss = game.room.boss
 	if "trial" in boss:
 		check(boss.trial, "the Warden knows it is a Trial")
+
+func _test_warden_framing() -> void:
+	await enter_throne()
+	# Both fighters stay in frame 800 px apart; the old look-ahead lost the Warden.
+	game.room.boss.global_position.x = 1300.0
+	var centre := game._camera_target_for(Vector2(500.0, Content.FLOOR_Y - 40.0)).x
+	var half := Content.VIEW_W * 0.5 / Content.CAM_ZOOM
+	check(absf(1300.0 - centre) < half and absf(500.0 - centre) < half, "the camera frames the knight and the Warden together")
+	# The Warden's windups are voiced at any range; a far minion's are not.
+	var far := game.player.global_position + Vector2(900.0, 0.0)
+	game._telegraph_at.clear()
+	game._on_enemy_telegraphed("fan", far, true)
+	game._on_enemy_telegraphed("stalker", far, false)
+	check(game._telegraph_at.has("tell_fan") and not game._telegraph_at.has("tell_stalker"), "the Warden's tells ignore the range gate")
 
 func _test_pause_routing() -> void:
 	await boot()

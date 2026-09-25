@@ -81,6 +81,19 @@ var _backdrop: Node2D
 var _lights: Node2D
 var _view_center := Vector2(Content.VIEW_W, Content.VIEW_H) * 0.5
 var _atmo_t := 0.0
+## Camera look-ahead (see _ease_look_ahead): px ahead of the knight, shorter
+## beside a foe, eased at LOOK_EASE px/s and only while running faster than
+## LOOK_RUN_SPEED.
+const LOOK_AHEAD := 56.0
+const LOOK_AHEAD_NEAR := 20.0
+const LOOK_NEAR_RANGE := 320.0
+const LOOK_EASE := 160.0
+const LOOK_RUN_SPEED := 120.0
+var _look_x := 0.0
+## Throne-room framing: the camera leans this share of the way toward the
+## Warden, capped, which keeps both fighters in view up to ~820 px apart.
+const BOSS_FRAME_PULL := 0.38
+const BOSS_FRAME_MAX := 260.0
 ## End-of-run beat. The run's state flips the instant it ends (death or the
 ## Warden falling), but the result screen waits: the world keeps playing in slow
 ## motion under a closing camera so the moment lands before the menu does.
@@ -300,11 +313,13 @@ func _process(delta: float) -> void:
 	if state == GState.PLAYING and is_instance_valid(player):
 		# Camera follows player, clamped to room bounds
 		var cam := feedback.camera
+		_ease_look_ahead(delta)
 		var target := _camera_target_for(player.global_position)
 		cam.global_position = cam.global_position.lerp(target, 8.0 * delta)
 		# Update boss HP bar every frame
-		if is_instance_valid(room) and room.boss != null and is_instance_valid(room.boss) and not room.boss.dead:
-			ui.update_boss_bar(room.boss.hp)
+		var boss := _live_boss()
+		if boss != null:
+			ui.update_boss_bar(boss.hp)
 		# Check player death handled by signal; check fall off world
 		if player.global_position.y > Content.FLOOR_Y + 240:
 			player.fall_out_of_world()
@@ -953,6 +968,7 @@ func _advance_room() -> void:
 	player.suppress_gameplay_input()
 	_chamber_damage_mark = float(_stats.damage_taken)
 	# Snap across the rift instead of briefly lerping from the previous exit.
+	_look_x = 0.0
 	feedback.camera.global_position = _camera_target_for(entry)
 	# UI
 	ui.set_room(run.room_index, run.rooms_total())
@@ -969,9 +985,14 @@ func _advance_room() -> void:
 
 func _camera_target_for(pos: Vector2) -> Vector2:
 	var target := pos
-	# Look-ahead in the facing direction gives the swing room to land on screen.
-	if is_instance_valid(player) and state == GState.PLAYING:
-		target.x += player.facing * 56.0
+	if state == GState.PLAYING:
+		var boss := _live_boss()
+		if boss != null:
+			# The Warden is framed with the knight, so it never winds up off-screen.
+			var pull := (boss.global_position.x - pos.x) * BOSS_FRAME_PULL
+			target.x += clampf(pull, -BOSS_FRAME_MAX, BOSS_FRAME_MAX)
+		else:
+			target.x += _look_x
 	# The zoom narrows the view, so the half-width the clamp keeps inside the room
 	# is the zoomed one; the unzoomed width hid ~85px at each end of every room,
 	# where the knight and enemies could stand and fight entirely off-screen.
@@ -981,6 +1002,29 @@ func _camera_target_for(pos: Vector2) -> Vector2:
 	target.x = clampf(target.x, lim_l, lim_r)
 	target.y = clampf(target.y, 200.0, Content.FLOOR_Y - 140.0)
 	return target
+
+## Look-ahead gives a swing room to land on screen. It eases toward the facing
+## side and only follows a running knight, so turning on the spot to parry no
+## longer pans the whole frame; beside a foe it shortens to keep the fight centred.
+func _ease_look_ahead(delta: float) -> void:
+	if absf(player.velocity.x) <= LOOK_RUN_SPEED:
+		return
+	var reach := LOOK_AHEAD_NEAR if _foe_within(LOOK_NEAR_RANGE) else LOOK_AHEAD
+	_look_x = move_toward(_look_x, player.facing * reach, LOOK_EASE * delta)
+
+## Whether a live foe stands within `distance` of the knight: the fight is
+## close, so the look-ahead shortens to keep it centred.
+func _foe_within(distance: float) -> bool:
+	for e in room.enemies:
+		if is_instance_valid(e) and not e.dead and e.global_position.distance_to(player.global_position) < distance:
+			return true
+	return false
+
+## The Warden while it still fights, else null.
+func _live_boss() -> Boss:
+	if is_instance_valid(room) and is_instance_valid(room.boss) and not room.boss.dead:
+		return room.boss
+	return null
 
 func _clear_room() -> void:
 	if is_instance_valid(room):
@@ -1018,18 +1062,20 @@ func _on_enemy_damaged(amount: float, pos: Vector2, blocked: bool) -> void:
 ## Voice every windup, attenuated by distance from the player. The refractory
 ## keeps a room full of simultaneous tells readable instead of deafening.
 func _on_enemy_telegraphed(kind: String, pos: Vector2, _elite: bool) -> void:
-	# Range first: an inaudible enemy must never consume another's cue.
+	# Range first: an inaudible enemy must never consume another's cue. The
+	# Warden's own moves (Boss.Action names) carry across its whole throne room.
 	var distance := 0.0
 	if is_instance_valid(player):
 		distance = player.global_position.distance_to(pos)
-	if distance > TELEGRAPH_RANGE:
+	var boss_tell := Boss.Action.has(kind.to_upper())
+	if distance > TELEGRAPH_RANGE and not boss_tell:
 		return
 	var cue := "tell_" + kind
 	var now := float(Time.get_ticks_msec()) * 0.001
 	if now - float(_telegraph_at.get(cue, -1.0)) < TELEGRAPH_REFRACTORY:
 		return
 	_telegraph_at[cue] = now
-	var falloff := clampf(1.0 - distance / TELEGRAPH_RANGE, 0.06, 1.0)
+	var falloff := clampf(1.0 - distance / TELEGRAPH_RANGE, 0.5 if boss_tell else 0.06, 1.0)
 	feedback.play(cue, 1.0, linear_to_db(falloff))
 	# A close windup is exactly when parry timing needs to be explained. Queue
 	# it: this runs inside the enemy's physics step.
