@@ -1,18 +1,11 @@
-extends SceneTree
+extends "res://tests/harness.gd"
 ## Dev harness: boots the game in an offscreen 1280x720 viewport, drives a run,
 ## and saves screenshots of the key beats. Uses a scratch save file. Needs a
 ## display, but the OS window can be tiny:
 ##   godot4 --path . --script res://tests/screenshot_probe.gd --resolution 320x180 --position 0,0 -- OUT_DIR
 
 var out_dir := "/tmp"
-var game: Game
 var _vp: SubViewport
-
-func _init() -> void:
-	var args := OS.get_cmdline_user_args()
-	if args.size() > 0:
-		out_dir = args[0]
-	call_deferred("_run")
 
 func _shot(name: String) -> void:
 	await process_frame
@@ -33,15 +26,10 @@ func _wait(seconds: float) -> void:
 	for i in range(frames):
 		await physics_frame
 
-func _live_enemies() -> Array:
-	var out: Array = []
-	if is_instance_valid(game.room):
-		for e in game.room.enemies:
-			if is_instance_valid(e) and not e.dead:
-				out.append(e)
-	return out
-
-func _run() -> void:
+func run() -> void:
+	var args := OS.get_cmdline_user_args()
+	if args.size() > 0:
+		out_dir = args[0]
 	await process_frame
 	auto_accept_quit = false
 	root.close_requested.connect(func(): print("WINDOW CLOSE REQUESTED (ignored)"))
@@ -50,14 +38,8 @@ func _run() -> void:
 	DisplayServer.window_set_flag(DisplayServer.WINDOW_FLAG_NO_FOCUS, true)
 	DisplayServer.window_set_title("graveflame render probe")
 	Save.path = "user://graveflame_save_probe.json"
-	_vp = SubViewport.new()
-	_vp.size = Vector2i(1280, 720)
-	_vp.render_target_update_mode = SubViewport.UPDATE_ALWAYS
-	_vp.disable_3d = true
-	root.add_child(_vp)
-	var packed = load("res://main.tscn")
-	game = packed.instantiate()
-	_vp.add_child(game)
+	_vp = make_capture_viewport()
+	await load_main_scene(0, _vp)
 	await _wait(0.5)
 	await _shot("01_title")
 	game._on_start()
@@ -65,7 +47,7 @@ func _run() -> void:
 	await _shot("02_room_intro")
 	await _wait(1.2)
 	# Stand next to the first stalker and land real swings.
-	var enemies := _live_enemies()
+	var enemies := live_enemies()
 	if enemies.size() > 0:
 		game.player.global_position = enemies[0].global_position + Vector2(-70.0, -10.0)
 		game.player.facing = 1.0
@@ -75,7 +57,7 @@ func _run() -> void:
 		await _wait(0.12)
 	await _shot("03_combat_numbers")
 	# Chain the rest quickly for a streak read on the HUD.
-	for e in _live_enemies():
+	for e in live_enemies():
 		e.take_damage(99999.0, Vector2.RIGHT, 0.0)
 		await _wait(0.15)
 	await _wait(0.05)
@@ -83,7 +65,7 @@ func _run() -> void:
 	# Skip ahead: clear rooms to reach the reward screen.
 	var guard := 0
 	while not game.room.exit_open and guard < 600:
-		for e in _live_enemies():
+		for e in live_enemies():
 			e.take_damage(99999.0, Vector2.RIGHT, 0.0)
 		await physics_frame
 		guard += 1
