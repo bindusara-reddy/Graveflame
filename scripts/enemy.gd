@@ -41,6 +41,16 @@ const BREAK_DAMAGE_MUL := 1.25
 const SPAWN_GRACE := 0.7
 ## A fall onto the spikes is the knight's kill if they struck it this recently.
 const RING_OUT_CREDIT := 2.0
+## How far above the knight's head a wisp keeps its line.
+const WISP_ALTITUDE := 150.0
+## Flyers ignore the arena rails, so they are held inside these walls instead.
+const FLYER_LEFT := Content.ROOM_LEFT + 60.0
+const FLYER_RIGHT := Content.ROOM_RIGHT - 60.0
+## A hopper's forward hop lands about this far ahead; a leap up reaches this high.
+const HOP_REACH := 150.0
+const HOP_UP_REACH := 230.0
+## The deepest drop a walker will take to floor below it.
+const SAFE_DROP := 420.0
 
 ## Pyre boon damage, mirrored from the player's build by the game so a burning
 ## enemy can detonate against its neighbours without holding a player reference.
@@ -148,6 +158,8 @@ func setup(p_kind: int, p_pos: Vector2, mods: Dictionary = {}) -> void:
 		data.speed = float(data.speed) * 1.15
 		data.windup = float(data.windup) * 0.85
 		data.cd = float(data.cd) * 0.9
+		if data.has("fuse"):
+			data.fuse = float(data.fuse) * 0.85
 	elite = bool(mods.get("elite", false))
 	_poise = poise_max()
 	_elite_anim = 0.25 if elite else 0.0
@@ -186,7 +198,7 @@ func _ready() -> void:
 		collision_mask = 0
 		return
 	_build_bodies(Vector2(float(data.w), float(data.h)), Vector2(40.0, 10.0))
-	if kind == Kind.WISP or kind == Kind.CROW:
+	if _is_flyer():
 		_wisp_y = global_position.y
 		collision_mask = 0  # flyers ignore the world
 	else:
@@ -291,6 +303,9 @@ func _physics_process(delta: float) -> void:
 	if global_position.y > Content.FLOOR_Y + 220.0:
 		_die(false)
 		return
+	if kind == Kind.BRUTE and _air_time > 0.2 and is_on_floor():
+		# A brute dropping from a ledge lands like a falling bell: dust and a jolt.
+		exploded.emit(global_position + Vector2(0.0, float(data.h) * 0.5), 70.0, 0.0)
 	_air_time = 0.0 if is_on_floor() else minf(_air_time + delta, 1.0)
 	_anim_t += delta
 	queue_redraw()
@@ -301,6 +316,8 @@ func _physics_process(delta: float) -> void:
 		EState.RECOVER: _step_recover(delta)
 		EState.STAGGER: _step_stagger(delta)
 		EState.DEAD: pass
+	if _is_flyer():
+		global_position.x = clampf(global_position.x, FLYER_LEFT, FLYER_RIGHT)
 
 func _step_seek(delta: float) -> void:
 	var player = _get_player()
@@ -337,28 +354,51 @@ func _seek_stalker(to_p: Vector2, delta: float) -> void:
 	if absf(to_p.x) < 50.0 and absf(to_p.y) < 60.0 and _ready_to_strike():
 		_begin_windup()
 
+## Hop at the knight across open floor, or leap up onto the ledge they stand
+## on. It never hops where no floor waits to catch it.
 func _seek_hopper(to_p: Vector2, delta: float) -> void:
 	_close_in(to_p.x, 70.0, delta)
-	# Hop toward player when grounded and in range band
-	if is_on_floor() and cd <= 0.0 and absf(to_p.x) < 360.0 and absf(to_p.x) > 50.0:
-		velocity.y = -560.0
-		velocity.x = facing * float(data.speed) * 1.4
+	if is_on_floor() and cd <= 0.0:
+		var hop_up := to_p.y < -80.0 and to_p.y > -HOP_UP_REACH and absf(to_p.x) > 80.0 and absf(to_p.x) < 260.0
+		if hop_up:
+			_leap_onto(to_p)
+		elif absf(to_p.x) < 360.0 and absf(to_p.x) > 50.0 and _floor_below(facing * HOP_REACH):
+			velocity.y = -560.0
+			velocity.x = facing * float(data.speed) * 1.4
 	if absf(to_p.x) < 52.0 and absf(to_p.y) < 60.0 and _ready_to_strike():
 		_begin_windup()
 
+## An arc that peaks a little above the knight's ledge and comes down where
+## they stand.
+func _leap_onto(to_p: Vector2) -> void:
+	var rise := -to_p.y
+	var up := sqrt(2.0 * Content.GRAVITY * (rise + 40.0))
+	var flight := (up + sqrt(maxf(up * up - 2.0 * Content.GRAVITY * rise, 0.0))) / Content.GRAVITY
+	velocity = Vector2(to_p.x / flight, -up)
+
+## True when solid floor lies under the point `dx` ahead, within a fall this
+## creature would survive. A spike pit has none: its floor is the hazard.
+func _floor_below(dx: float) -> bool:
+	var from := global_position + Vector2(dx, 0.0)
+	var query := PhysicsRayQueryParameters2D.create(from, from + Vector2(0.0, SAFE_DROP), Content.L_WORLD, [get_rid()])
+	return not get_world_2d().direct_space_state.intersect_ray(query).is_empty()
+
+## A skirmisher: it rides a line above the knight's head, closes when far,
+## backs off when crowded, and looses a bolt whenever it has a clear angle.
 func _seek_wisp(to_p: Vector2, delta: float) -> void:
-	# Hover with sine bob, maintain distance, shoot
 	_wisp_t += delta
+	var knight_y := global_position.y + to_p.y
+	_wisp_y = move_toward(_wisp_y, clampf(knight_y - WISP_ALTITUDE, 150.0, Content.FLOOR_Y - WISP_ALTITUDE), 90.0 * delta)
 	var target_y := _wisp_y + sin(_wisp_t * 2.0) * 22.0
 	velocity.y = move_toward(velocity.y, (target_y - global_position.y) * 4.0, 800.0 * delta)
-	var desired_x: float = global_position.x
+	var want_vx := 0.0
 	if absf(to_p.x) > 420.0:
-		desired_x += facing * float(data.speed) * delta
+		want_vx = facing * float(data.speed)
 	elif absf(to_p.x) < 240.0:
-		desired_x -= facing * float(data.speed) * delta
-	velocity.x = move_toward(velocity.x, (desired_x - global_position.x) * 4.0, 800.0 * delta)
+		want_vx = -facing * float(data.speed)
+	velocity.x = move_toward(velocity.x, want_vx, 600.0 * delta)
 	global_position += velocity * delta
-	if cd <= 0.0 and absf(to_p.x) < Content.WISP_RANGE and absf(to_p.y) < 200.0:
+	if _ready_to_strike() and absf(to_p.x) < Content.WISP_RANGE and absf(to_p.y) < 260.0:
 		_begin_windup()
 
 ## Circle above the knight, drifting from side to side; commit to a dive when
@@ -366,6 +406,7 @@ func _seek_wisp(to_p: Vector2, delta: float) -> void:
 func _seek_crow(to_p: Vector2, delta: float, player) -> void:
 	_wisp_t += delta
 	var target: Vector2 = player.global_position + Vector2(sin(_wisp_t * 0.9 + float(_owner_id % 7)) * 150.0, -Content.CROW_HOVER + sin(_wisp_t * 1.8) * 16.0)
+	target.x = clampf(target.x, FLYER_LEFT, FLYER_RIGHT)
 	target.y = maxf(target.y, 90.0)
 	var want := (target - global_position)
 	var speed := float(data.speed)
@@ -393,6 +434,7 @@ func _begin_windup() -> void:
 	st_timer = float(data.windup)
 	velocity.x *= 0.2
 	if kind == Kind.BOMBER:
+		# The fuse is the bomber's only clock, so the ring it draws never lies.
 		_fuse_t = _fuse_total
 	emit_signal("telegraphed", telegraph_id(kind), global_position, elite)
 
@@ -410,17 +452,16 @@ func _step_windup(delta: float) -> void:
 		return
 	_walk(0.0, delta)
 	st_timer -= delta
-	if st_timer <= 0.0:
-		if kind == Kind.WISP:
-			_wisp_shoot()
-			_enter_recover()
-		elif kind == Kind.BOMBER:
-			# fuse ended through st_timer path (shouldn't happen, but explode)
-			_do_explosion()
-		else:
-			state = EState.ATTACK
-			st_timer = float(data.active) if data.has("active") else 0.18
-			_arm(float(data.w) * 0.5 + 20.0)
+	# An armed bomber only waits: its fuse, burning in _physics_process, sets it off.
+	if st_timer > 0.0 or kind == Kind.BOMBER:
+		return
+	if kind == Kind.WISP:
+		_wisp_shoot()
+		_enter_recover()
+	else:
+		state = EState.ATTACK
+		st_timer = float(data.active) if data.has("active") else 0.18
+		_arm(float(data.w) * 0.5 + 20.0)
 
 ## The dive: a straight line at where the knight stood when the shriek ended.
 func _begin_dive() -> void:
@@ -468,21 +509,27 @@ func _wisp_shoot() -> void:
 		var side := Vector2(-dir.y, dir.x) * 14.0
 		emit_signal("projectile_requested", "enemy", global_position + side, dir.rotated(0.16) * Content.WISP_SHOT_SPEED, Content.WISP_SHOT_DAMAGE * damage_mul, 160.0, 0, Content.WISP_SHOT_LIFE, color)
 
+## The bomber bursts. Cut down while armed (`reduced`), it pops in a smaller
+## blast that is practical to dash away from, and counts as the knight's kill;
+## a fuse that burns down is its own doing and earns nothing. Either way the
+## blast catches the knight and every creature near it, and the creatures it
+## kills are the knight's.
 func _do_explosion(reduced: bool = false) -> void:
-	# Killing an armed bomber still pops it, but rewards the player with a much
-	# smaller blast that is practical to dash away from.
 	var blast := _blast_radius * (0.55 if reduced else 1.0)
 	var blast_damage := attack_damage() * (0.4 if reduced else 1.0)
-	var player = _get_player()
-	if player != null:
-		var d: float = global_position.distance_to(player.global_position)
-		if d <= blast:
-			var kdir: Vector2 = (player.global_position - global_position).normalized()
-			if kdir == Vector2.ZERO: kdir = Vector2.UP
-			player.take_damage(blast_damage, Vector2(kdir.x, -0.5), 380.0)
 	exploded_out = true
+	_die(reduced)
+	var player = _get_player()
+	if player != null and global_position.distance_to(player.global_position) <= blast:
+		player.take_damage(blast_damage, _blast_dir(player), 380.0)
+	for foe in living_near(get_tree(), global_position, blast):
+		foe.take_damage(blast_damage, _blast_dir(foe), 380.0, 2.0)
 	emit_signal("exploded", global_position, blast, blast_damage)
-	_die()
+
+## Outward and a little up from the blast, toward `target`.
+func _blast_dir(target: Node2D) -> Vector2:
+	var away := (target.global_position - global_position).normalized()
+	return Vector2(away.x if away != Vector2.ZERO else 0.0, -0.5)
 
 func _step_recover(delta: float) -> void:
 	if kind == Kind.CROW:
@@ -561,7 +608,7 @@ func _react_to_blow(from_dir: Vector2, kb: float, poise_dmg: float) -> void:
 			return
 	# Elites shrug off hits faster so they keep pressure on.
 	_stagger(0.12 if elite else 0.18, from_dir.normalized() * kb * (0.6 if elite else 1.0))
-	if kind == Kind.WISP or kind == Kind.CROW:
+	if _is_flyer():
 		velocity.y = from_dir.y * kb * 0.5
 
 ## Past COMMIT_AT of its windup: the strike is coming whatever lands on it.
@@ -639,17 +686,41 @@ func _die(award_reward: bool = true) -> void:
 	var score := int(data.score) * (Content.ELITE_SCORE_MUL if elite else 1)
 	emit_signal("died", score if award_reward else 0)
 
+## Wisps and crows fly: no gravity, no floor, no pits.
+func _is_flyer() -> bool:
+	return kind == Kind.WISP or kind == Kind.CROW
+
 func _apply_gravity(delta: float) -> void:
-	if kind != Kind.WISP and kind != Kind.CROW:
+	if not _is_flyer():
 		velocity.y += Content.GRAVITY * delta
 
 func _move_x(speed: float, delta: float) -> void:
 	if _ledge_ray != null and speed != 0.0 and is_on_floor():
 		_ledge_ray.position = Vector2(signf(speed) * (float(data.w) * 0.5 + 12.0), float(data.h) * 0.35)
 		_ledge_ray.force_raycast_update()
-		if not _ledge_ray.is_colliding():
+		if not _ledge_ray.is_colliding() and not _drops_toward_knight(signf(speed)):
 			speed = 0.0
 	velocity.x = move_toward(velocity.x, speed, 2000.0 * delta)
+
+## A walker at a ledge's lip steps off only toward a knight waiting below, and
+## only where solid floor catches it: a spike pit is never a way down.
+func _drops_toward_knight(dir: float) -> bool:
+	var player = _get_player()
+	if player == null:
+		return false
+	var to_p: Vector2 = player.global_position - global_position
+	return to_p.y > 40.0 and signf(to_p.x) == dir and _floor_below(dir * (float(data.w) * 0.5 + 12.0))
+
+## Onto the spikes. The knight earns the kill, and a RING OUT, if they struck
+## it lately; a creature that blundered in on its own is cleared away quietly.
+func ring_out() -> void:
+	if dead or _is_flyer():
+		return
+	var credited := _since_struck <= RING_OUT_CREDIT
+	_last_hit_dir = Vector2.DOWN
+	if credited:
+		announced.emit("RING OUT", "ring_out", global_position + Vector2(0.0, -float(data.h)))
+	_die(credited)
 
 ## The knight, or null. Freed nodes leave their groups, so a non-null result is
 ## always valid.

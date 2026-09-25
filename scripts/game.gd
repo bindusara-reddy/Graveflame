@@ -958,6 +958,7 @@ func _advance_room() -> void:
 	room.enemy_spawned.connect(feedback.spawn_rift)
 	room.wave_started.connect(_on_wave_started)
 	room.telegraphed.connect(_on_enemy_telegraphed)
+	room.enemy_announced.connect(_on_enemy_announced)
 	room.prop_shattered.connect(feedback.shatter)
 	room.boss_shattered.connect(_on_boss_shattered)
 	Enemy.pyre_damage = float(run.build.get("pyre_dmg", 0.0))
@@ -1081,6 +1082,14 @@ func _on_enemy_telegraphed(kind: String, pos: Vector2, _elite: bool) -> void:
 	# it: this runs inside the enemy's physics step.
 	if distance < 260.0:
 		_queued_lesson = "parry"
+
+## A creature's beat worth naming or voicing: a broken guard, a ring-out, an
+## elite's oath. Either part may be empty.
+func _on_enemy_announced(text: String, cue: String, pos: Vector2) -> void:
+	if not cue.is_empty():
+		feedback.play(cue)
+	if not text.is_empty():
+		feedback.damage_number(pos, 0.0, "elite", text)
 
 ## The chamber's wave count is always on the HUD; only later waves call out,
 ## because the first lands under the chamber card that already names the room.

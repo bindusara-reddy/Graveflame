@@ -21,6 +21,8 @@ signal telegraphed(kind: String, pos: Vector2, elite: bool)
 signal enemy_spawned(pos: Vector2, color: Color)
 signal prop_shattered(pos: Vector2, force: Vector2, color: Color)
 signal boss_shattered(pos: Vector2)
+## A creature's named or voiced beat (see Enemy.announced).
+signal enemy_announced(text: String, cue: String, pos: Vector2)
 
 var template: Dictionary = {}
 var enemies: Array[Node] = []
@@ -125,7 +127,7 @@ func _build_geometry() -> void:
 	for hazard: Rect2 in template.get("hazards", []):
 		var area := Area2D.new()
 		area.collision_layer = Content.L_TRIGGER
-		area.collision_mask = Content.L_PLAYER_BODY
+		area.collision_mask = Content.L_PLAYER_BODY | Content.L_ENEMY_BODY
 		area.add_child(Content.rect_shape(hazard.size))
 		area.position = hazard.get_center()
 		area.body_entered.connect(_on_hazard_body)
@@ -171,10 +173,13 @@ func _build_props() -> void:
 			add_child(prop)
 			props.append(prop)
 
+## Damage and death close hitboxes, which cannot happen while the physics
+## queries that reported the contact are still running, so both are deferred.
 func _on_hazard_body(body: Node) -> void:
 	if body is Player:
-		# Damage cancels combat hitboxes; defer it until physics queries finish.
 		body.hit_hazard.call_deferred(18.0)
+	elif body is Enemy and not (body is Boss):
+		body.ring_out.call_deferred()
 
 ## The boon rift stands at the template's exit; an alternative, when offered,
 ## stands 170px nearer the room so the knight passes it on the way.
@@ -246,6 +251,7 @@ func _relay(foe: Enemy) -> void:
 	foe.exploded.connect(enemy_exploded.emit)
 	foe.pyre_burst.connect(pyre_burst.emit)
 	foe.telegraphed.connect(telegraphed.emit)
+	foe.announced.connect(enemy_announced.emit)
 
 func _spawn_boss() -> void:
 	boss = Boss.new()
