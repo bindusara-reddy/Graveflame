@@ -151,3 +151,9 @@ func _test_playbill(bill: FinaleStage.Playbill, text: FinaleStage.PlaybillText) 
 		text._process(1.0 / 60.0)
 	check(text._row_alpha[0] == 1.0, "and is fully inked within FADE")
 	check(text.size.is_equal_approx(bill.screen_rect().size), "the type covers the sheet it is set on")
+	bill.drop = 0.0
+	bill._process(1.0 / 60.0)
+	bill.drop = 1.0
+	for i in range(30):
+		bill._process(1.0 / 60.0)
+	check(bill.rotation == 0.0, "a bill hung in one step (the brief cut) hangs still")

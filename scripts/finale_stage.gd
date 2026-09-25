@@ -1046,6 +1046,9 @@ class Playbill extends Node2D:
 		if delta <= 0.0:
 			return
 		var speed := (drop - _last_drop) / delta
+		# A bill hung in one step (the brief cut fades it in) was placed, not lowered.
+		if absf(drop - _last_drop) >= 1.0:
+			speed = 0.0
 		if Feedback.motion_reduced:
 			rotation = 0.0
 			_swing_speed = 0.0
@@ -1064,10 +1067,15 @@ class Playbill extends Node2D:
 		return LOWERED * (1.0 if Feedback.motion_reduced else drop)
 
 	## Reduced motion fades the bill in already hanging.
+	func _fade() -> float:
+		return clampf(drop, 0.0, 1.0) if Feedback.motion_reduced else 1.0
+
+	## How strongly the type shows: the sheet's own fade under the director's
+	## modulate, which the renderer applies to the sheet but not to the type.
 	func ink_alpha() -> float:
 		if not is_visible_in_tree() or drop <= 0.0:
 			return 0.0
-		return modulate.a * (clampf(drop, 0.0, 1.0) if Feedback.motion_reduced else 1.0)
+		return modulate.a * _fade()
 
 	## Canvas transform of the sheet's top-left corner, swing included.
 	func sheet_transform() -> Transform2D:
@@ -1084,10 +1092,12 @@ class Playbill extends Node2D:
 		return PackedVector2Array([r.position + Vector2(c, 0.0), Vector2(r.end.x - c, r.position.y), Vector2(r.end.x, r.position.y + c), Vector2(r.end.x, r.end.y - c),
 			r.end - Vector2(c, 0.0), Vector2(r.position.x + c, r.end.y), Vector2(r.position.x, r.end.y - c), r.position + Vector2(0.0, c)])
 
+	## Painted without the modulate, which the renderer applies itself: a bill
+	## hung while faded out (the brief cut) must still be painted.
 	func _draw() -> void:
-		var a := ink_alpha() / maxf(modulate.a, 0.001)
-		if a <= 0.0:
+		if drop <= 0.0:
 			return
+		var a := _fade()
 		var top := _sheet_top()
 		var m := FinaleStage.PaperMesh.new()
 		for side: float in [-1.0, 1.0]:
