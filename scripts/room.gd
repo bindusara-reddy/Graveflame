@@ -55,6 +55,8 @@ var _elite_slot := Vector2i(-1, -1)   # (wave, index) that spawns as an elite
 var _difficulty: Dictionary = { "hp_mul": 1.0, "dmg_mul": 1.0 }
 ## Depth palette handed down by the game (see Content.MOODS).
 var mood: Dictionary = {}
+## The swaying back decor's canvas (see _ready).
+var _back_decor: Node2D
 
 func setup(tmpl: Dictionary, p_is_boss: bool, player: Node, seed_val: int) -> void:
 	template = tmpl
@@ -63,6 +65,11 @@ func setup(tmpl: Dictionary, p_is_boss: bool, player: Node, seed_val: int) -> vo
 	_rng.seed = seed_val
 
 func _ready() -> void:
+	# The back decor sways, so it repaints every frame; the stonework is fixed
+	# for the chamber, so it is painted once. Both sit behind the room's own
+	# drawing, back decor first.
+	_back_decor = _add_paint_layer("BackDecor", _draw_decor_back)
+	_add_paint_layer("Masonry", _draw_masonry_layer)
 	_difficulty = Content.difficulty_for_room(room_index)
 	_difficulty.dmg_mul = float(_difficulty.dmg_mul) * Enemy.vow_damage()
 	_build_geometry()
@@ -92,6 +99,16 @@ func _process(delta: float) -> void:
 			chosen_exit = str(exits[_near_idx].kind)
 			emit_signal("completed")
 	queue_redraw()
+	_back_decor.queue_redraw()
+
+## A child canvas drawn behind the room itself, painted by `painter(layer)`.
+func _add_paint_layer(layer_name: String, painter: Callable) -> Node2D:
+	var layer := Node2D.new()
+	layer.name = layer_name
+	layer.show_behind_parent = true
+	layer.draw.connect(painter.bind(layer))
+	add_child(layer)
+	return layer
 
 ## The chamber's physics, in this child order: platforms, walls and arena rails
 ## as solid bodies, then the hazard triggers.
@@ -361,23 +378,34 @@ func light_points() -> Array:
 func exit_center() -> Vector2:
 	return _exit_rect.get_center()
 
-func _draw() -> void:
-	var tag := str(template.get("tag", "intro"))
-	var accent := _accent_for(tag)
+## The chamber's fixed stonework, painted once onto the Masonry layer. Each
+## platform's masonry is followed by its broken ends, in template order, so a
+## later block still covers an earlier floor's ends; then the climbable walls.
+func _draw_masonry_layer(ci: CanvasItem) -> void:
+	var accent := _accent_for(str(template.get("tag", "intro")))
 	var m := _mood()
-	_draw_decor_back(tag, m)
 	# Volumetric masonry: slab courses, mortar joints, a lit rim and occlusion under the lip.
 	var platforms: Array = template.get("platforms", [])
 	for pi in range(platforms.size()):
 		var pr := Rect2(platforms[pi].position, platforms[pi].size)
-		_draw_masonry(pr, accent, pi + 1, m, true)
-		_draw_platform_dressing(pr, m, pi + 1)
+		_draw_masonry(ci, pr, accent, pi + 1, m, true)
+		_draw_platform_ends(ci, pr, m, pi + 1)
 	# climbable walls (accent edge so players know they can wall-slide)
 	var walls: Array = template.get("walls", [])
 	for wi in range(walls.size()):
 		var wr := Rect2(walls[wi].position, walls[wi].size)
-		_draw_masonry(wr, accent, 40 + wi, m)
-		draw_line(Vector2(wr.position.x, wr.position.y), Vector2(wr.position.x, wr.end.y), Color(accent.r, accent.g, accent.b, 0.65), 3.0)
+		_draw_masonry(ci, wr, accent, 40 + wi, m)
+		ci.draw_line(Vector2(wr.position.x, wr.position.y), Vector2(wr.position.x, wr.end.y), Color(accent.r, accent.g, accent.b, 0.65), 3.0)
+
+## Everything that moves or reacts, over the BackDecor and Masonry layers.
+func _draw() -> void:
+	var tag := str(template.get("tag", "intro"))
+	var accent := _accent_for(tag)
+	var m := _mood()
+	var platforms: Array = template.get("platforms", [])
+	for pi in range(platforms.size()):
+		var pr := Rect2(platforms[pi].position, platforms[pi].size)
+		_draw_platform_dressing(pr, m, pi + 1)
 	for hz in template.get("hazards", []):
 		_draw_hazard(Rect2(hz.position, hz.size), m)
 	_draw_decor_front(tag, m)
@@ -395,11 +423,11 @@ func _draw() -> void:
 ## and stone tones sit within a few percent of each other and the walkable floor
 ## was reading as the same material as the wall behind it. Knowing what you can
 ## stand on must not depend on inferring it from where the props sit.
-func _draw_masonry(pr: Rect2, accent: Color, salt: int, m: Dictionary, walkable: bool = false) -> void:
+func _draw_masonry(ci: CanvasItem, pr: Rect2, accent: Color, salt: int, m: Dictionary, walkable: bool = false) -> void:
 	var lip := 6.0
 	var stone: Color = m.stone
 	var base := stone.darkened(0.22)
-	draw_rect(pr, base)
+	ci.draw_rect(pr, base)
 	var y := pr.position.y + lip
 	var row := 0
 	while y < pr.end.y - 1.0:
@@ -419,45 +447,42 @@ func _draw_masonry(pr: Rect2, accent: Color, salt: int, m: Dictionary, walkable:
 			if x1 > x0 + 1.0:
 				var tone := (VFX.hash01(col * 13 + row * 5, salt + 11) - 0.5) * 0.10
 				if tone < -0.015:
-					draw_rect(Rect2(x0, y, x1 - x0, row_h), Color(0.0, 0.0, 0.0, -tone))
+					ci.draw_rect(Rect2(x0, y, x1 - x0, row_h), Color(0.0, 0.0, 0.0, -tone))
 				elif tone > 0.015:
-					draw_rect(Rect2(x0, y, x1 - x0, row_h), Color(1.0, 1.0, 1.0, tone * 0.5))
+					ci.draw_rect(Rect2(x0, y, x1 - x0, row_h), Color(1.0, 1.0, 1.0, tone * 0.5))
 				# Occasional crack across a slab.
 				if VFX.hash01(col * 7 + row * 3, salt + 23) > 0.86 and x1 - x0 > 30.0:
 					var cx := x0 + (x1 - x0) * 0.5
-					draw_polyline(PackedVector2Array([
+					ci.draw_polyline(PackedVector2Array([
 						Vector2(cx - 8.0, y + 2.0), Vector2(cx - 2.0, y + row_h * 0.45), Vector2(cx + 5.0, y + row_h * 0.6), Vector2(cx + 3.0, y + row_h - 2.0),
 					]), VFX.JOINT, 1.5)
 				if x + slab_w < pr.end.x - 1.0:
-					draw_line(Vector2(x + slab_w, y), Vector2(x + slab_w, y + row_h), VFX.JOINT, 2.0)
+					ci.draw_line(Vector2(x + slab_w, y), Vector2(x + slab_w, y + row_h), VFX.JOINT, 2.0)
 			x += slab_w
 			col += 1
 		if y + row_h < pr.end.y - 1.0:
-			draw_line(Vector2(pr.position.x, y + row_h), Vector2(pr.end.x, y + row_h), VFX.JOINT, 2.0)
+			ci.draw_line(Vector2(pr.position.x, y + row_h), Vector2(pr.end.x, y + row_h), VFX.JOINT, 2.0)
 		y += row_h
 		row += 1
-	VFX.draw_vgradient(self, Rect2(pr.position.x, pr.position.y + lip, pr.size.x, 12.0), Color(0.03, 0.016, 0.06, 0.7), Color(0.03, 0.016, 0.06, 0.0))
+	VFX.draw_vgradient(ci, Rect2(pr.position.x, pr.position.y + lip, pr.size.x, 12.0), Color(0.03, 0.016, 0.06, 0.7), Color(0.03, 0.016, 0.06, 0.0))
 	if walkable:
 		# A lit deck: the stone edge family is too close to the wall tone to read
 		# on its own, so the standing surface is lifted and the body below it is
 		# sunk, giving one strong value break exactly where the feet land.
 		var deck: Color = (m.edge as Color).lightened(0.22)
-		draw_rect(Rect2(pr.position, Vector2(pr.size.x, lip + 4.0)), deck)
-		draw_rect(Rect2(pr.position + Vector2(0.0, lip + 4.0), Vector2(pr.size.x, 8.0)), Color(0.0, 0.0, 0.0, 0.28))
-		draw_line(Vector2(pr.position.x, pr.position.y + 1.0), Vector2(pr.end.x, pr.position.y + 1.0), deck.lightened(0.45), 2.0)
+		ci.draw_rect(Rect2(pr.position, Vector2(pr.size.x, lip + 4.0)), deck)
+		ci.draw_rect(Rect2(pr.position + Vector2(0.0, lip + 4.0), Vector2(pr.size.x, 8.0)), Color(0.0, 0.0, 0.0, 0.28))
+		ci.draw_line(Vector2(pr.position.x, pr.position.y + 1.0), Vector2(pr.end.x, pr.position.y + 1.0), deck.lightened(0.45), 2.0)
 	else:
-		draw_rect(Rect2(pr.position, Vector2(pr.size.x, lip)), (m.edge as Color).lightened(0.12))
-	draw_rect(Rect2(pr.position + Vector2(0.0, lip), Vector2(pr.size.x, 2.0)), Color(accent.r, accent.g, accent.b, 0.28))
-	draw_line(Vector2(pr.position.x, pr.position.y + 0.75), Vector2(pr.end.x, pr.position.y + 0.75), VFX.RIM, 1.5)
-	draw_rect(Rect2(pr.position.x, pr.end.y - 2.0, pr.size.x, 2.0), VFX.JOINT)
+		ci.draw_rect(Rect2(pr.position, Vector2(pr.size.x, lip)), (m.edge as Color).lightened(0.12))
+	ci.draw_rect(Rect2(pr.position + Vector2(0.0, lip), Vector2(pr.size.x, 2.0)), Color(accent.r, accent.g, accent.b, 0.28))
+	ci.draw_line(Vector2(pr.position.x, pr.position.y + 0.75), Vector2(pr.end.x, pr.position.y + 0.75), VFX.RIM, 1.5)
+	ci.draw_rect(Rect2(pr.position.x, pr.end.y - 2.0, pr.size.x, 2.0), VFX.JOINT)
 
-## Broken ends, ash tufts, moss drips in the crypt, ember veins nearer the forge.
-func _draw_platform_dressing(pr: Rect2, m: Dictionary, salt: int) -> void:
-	var t := _decor_t()
-	var seep := float(m.ember_seep)
-	var moss := float(m.moss)
+## Jagged broken corners on ends that hang over a drop, with loose stones
+## tumbling off the lip. Fixed for the chamber, so they paint with the masonry.
+func _draw_platform_ends(ci: CanvasItem, pr: Rect2, m: Dictionary, salt: int) -> void:
 	var stone: Color = m.stone
-	# Jagged broken corners on ends that hang over a drop.
 	for side: float in [-1.0, 1.0]:
 		var ex := pr.position.x if side < 0.0 else pr.end.x
 		if ex <= Content.ROOM_LEFT + 1.0 or ex >= Content.ROOM_RIGHT - 1.0:
@@ -468,13 +493,18 @@ func _draw_platform_dressing(pr: Rect2, m: Dictionary, salt: int) -> void:
 			var u := float(i) / 5.0
 			pts.append(Vector2(ex + side * (4.0 + VFX.hash01(salt * 5 + i, 91) * 16.0), pr.position.y + 4.0 + u * depth))
 		pts.append(Vector2(ex, pr.position.y + depth + 4.0))
-		draw_colored_polygon(pts, stone.darkened(0.3))
-		draw_polyline(pts, VFX.JOINT, 1.5)
-		# Loose stones tumbling off the lip.
+		ci.draw_colored_polygon(pts, stone.darkened(0.3))
+		ci.draw_polyline(pts, VFX.JOINT, 1.5)
 		for i in range(3):
 			var sy := pr.position.y + depth + 10.0 + float(i) * 14.0 + VFX.hash01(salt + i, 92) * 8.0
 			var sx := ex + side * (6.0 + VFX.hash01(salt + i, 93) * 14.0)
-			draw_rect(Rect2(sx - 4.0, sy, 8.0 - float(i), 5.0), stone.darkened(0.35 + float(i) * 0.1))
+			ci.draw_rect(Rect2(sx - 4.0, sy, 8.0 - float(i), 5.0), stone.darkened(0.35 + float(i) * 0.1))
+
+## Ash tufts, moss drips in the crypt, ember veins nearer the forge.
+func _draw_platform_dressing(pr: Rect2, m: Dictionary, salt: int) -> void:
+	var t := _decor_t()
+	var seep := float(m.ember_seep)
+	var moss := float(m.moss)
 	# Surface dressing along the top edge.
 	var count := int(pr.size.x / 46.0)
 	for i in range(count):
@@ -617,22 +647,22 @@ func _bone_pile(base: Vector2, m: Dictionary) -> void:
 	draw_circle(base + Vector2(11.0, -15.0), 1.5, VFX.VOID)
 	draw_rect(Rect2(base.x + 5.0, base.y - 10.0, 6.0, 3.0), VFX.VOID)
 
-func _chain(from: Vector2, length: float, sway: float, weight: bool = true) -> void:
+func _chain(ci: CanvasItem, from: Vector2, length: float, sway: float, weight: bool = true) -> void:
 	var to := from + Vector2(sway, length)
-	draw_dashed_line(from, to, Color("3a3245"), 2.5, 5.0)
+	ci.draw_dashed_line(from, to, Color("3a3245"), 2.5, 5.0)
 	if weight:
-		draw_rect(Rect2(to.x - 5.0, to.y, 10.0, 8.0), Color("2a2430"))
+		ci.draw_rect(Rect2(to.x - 5.0, to.y, 10.0, 8.0), Color("2a2430"))
 
-func _banner_prop(top: Vector2, length: float, t: float, m: Dictionary, k: int) -> void:
+func _banner_prop(ci: CanvasItem, top: Vector2, length: float, t: float, m: Dictionary, k: int) -> void:
 	var sway := sin(t * 0.9 + float(k)) * 4.0
 	var bc: Color = m.banner
-	draw_line(top + Vector2(-26.0, 0.0), top + Vector2(26.0, 0.0), Color("3a3245"), 4.0)
-	draw_colored_polygon(PackedVector2Array([
+	ci.draw_line(top + Vector2(-26.0, 0.0), top + Vector2(26.0, 0.0), Color("3a3245"), 4.0)
+	ci.draw_colored_polygon(PackedVector2Array([
 		top + Vector2(-20.0, 0.0), top + Vector2(20.0, 0.0), top + Vector2(20.0 + sway, length - 20.0),
 		top + Vector2(sway, length), top + Vector2(-20.0 + sway, length - 20.0),
 	]), bc)
-	draw_line(top + Vector2(-20.0, 0.0), top + Vector2(-20.0 + sway, length - 20.0), Color(VFX.RIM, 0.15), 1.0)
-	VFX.draw_flame(self, top + Vector2(sway * 0.5, length * 0.58), 16.0, 9.0, 0.0, 0.0, Color(m.torch, 0.6), Color(VFX.GOLD, 0.4))
+	ci.draw_line(top + Vector2(-20.0, 0.0), top + Vector2(-20.0 + sway, length - 20.0), Color(VFX.RIM, 0.15), 1.0)
+	VFX.draw_flame(ci, top + Vector2(sway * 0.5, length * 0.58), 16.0, 9.0, 0.0, 0.0, Color(m.torch, 0.6), Color(VFX.GOLD, 0.4))
 
 func _brazier(base: Vector2, t: float, m: Dictionary) -> void:
 	var iron := Color("2a2430")
@@ -644,30 +674,30 @@ func _brazier(base: Vector2, t: float, m: Dictionary) -> void:
 		VFX.draw_flame(self, base + Vector2(-9.0 + float(i) * 9.0, -54.0), 30.0 - float(i % 2) * 8.0, 12.0, t, float(i) * 2.2, m.torch, VFX.GOLD)
 	draw_circle(base + Vector2(0.0, -2.0), 26.0, Color(m.torch, 0.06))
 
-func _throne(base: Vector2, m: Dictionary) -> void:
+func _throne(ci: CanvasItem, base: Vector2, m: Dictionary) -> void:
 	var stone: Color = (m.stone as Color).darkened(0.1)
 	# Dais steps.
 	for i in range(3):
 		var w := 300.0 - float(i) * 60.0
-		draw_rect(Rect2(base.x - w * 0.5, base.y - 14.0 * float(i + 1), w, 14.0), stone.lightened(0.05 * float(i)))
-		draw_line(Vector2(base.x - w * 0.5, base.y - 14.0 * float(i + 1)), Vector2(base.x + w * 0.5, base.y - 14.0 * float(i + 1)), Color(VFX.RIM, 0.2), 1.5)
+		ci.draw_rect(Rect2(base.x - w * 0.5, base.y - 14.0 * float(i + 1), w, 14.0), stone.lightened(0.05 * float(i)))
+		ci.draw_line(Vector2(base.x - w * 0.5, base.y - 14.0 * float(i + 1)), Vector2(base.x + w * 0.5, base.y - 14.0 * float(i + 1)), Color(VFX.RIM, 0.2), 1.5)
 	var seat := base + Vector2(0.0, -42.0)
 	# Back with a crown of blades.
-	draw_rect(Rect2(seat.x - 60.0, seat.y - 190.0, 120.0, 190.0), stone.darkened(0.15))
+	ci.draw_rect(Rect2(seat.x - 60.0, seat.y - 190.0, 120.0, 190.0), stone.darkened(0.15))
 	for i in range(7):
 		var x := seat.x - 54.0 + float(i) * 18.0
 		var h := 40.0 + (24.0 if i == 3 else (12.0 if i % 2 == 0 else 0.0))
-		draw_colored_polygon(PackedVector2Array([Vector2(x - 6.0, seat.y - 190.0), Vector2(x, seat.y - 190.0 - h), Vector2(x + 6.0, seat.y - 190.0)]), stone.darkened(0.05))
+		ci.draw_colored_polygon(PackedVector2Array([Vector2(x - 6.0, seat.y - 190.0), Vector2(x, seat.y - 190.0 - h), Vector2(x + 6.0, seat.y - 190.0)]), stone.darkened(0.05))
 	# Armrests and seat.
-	draw_rect(Rect2(seat.x - 78.0, seat.y - 70.0, 18.0, 70.0), stone)
-	draw_rect(Rect2(seat.x + 60.0, seat.y - 70.0, 18.0, 70.0), stone)
-	draw_rect(Rect2(seat.x - 60.0, seat.y - 30.0, 120.0, 30.0), stone.lightened(0.06))
+	ci.draw_rect(Rect2(seat.x - 78.0, seat.y - 70.0, 18.0, 70.0), stone)
+	ci.draw_rect(Rect2(seat.x + 60.0, seat.y - 70.0, 18.0, 70.0), stone)
+	ci.draw_rect(Rect2(seat.x - 60.0, seat.y - 30.0, 120.0, 30.0), stone.lightened(0.06))
 	# Ember sigil burning in the backrest.
-	draw_circle(seat + Vector2(0.0, -120.0), 22.0, Color(m.glow, 0.25))
-	VFX.draw_flame(self, seat + Vector2(0.0, -104.0), 34.0, 18.0, _decor_t(), 0.0, Color(m.torch, 0.85), VFX.GOLD)
-	draw_arc(seat + Vector2(0.0, -120.0), 30.0, 0.0, TAU, 28, Color(m.torch, 0.35), 2.0)
+	ci.draw_circle(seat + Vector2(0.0, -120.0), 22.0, Color(m.glow, 0.25))
+	VFX.draw_flame(ci, seat + Vector2(0.0, -104.0), 34.0, 18.0, _decor_t(), 0.0, Color(m.torch, 0.85), VFX.GOLD)
+	ci.draw_arc(seat + Vector2(0.0, -120.0), 30.0, 0.0, TAU, 28, Color(m.torch, 0.35), 2.0)
 
-func _gear(c: Vector2, r: float, angle: float, m: Dictionary) -> void:
+func _gear(ci: CanvasItem, c: Vector2, r: float, angle: float, m: Dictionary) -> void:
 	var iron := (m.stone as Color).darkened(0.3)
 	var teeth := int(r / 6.0)
 	var pts := PackedVector2Array()
@@ -675,33 +705,33 @@ func _gear(c: Vector2, r: float, angle: float, m: Dictionary) -> void:
 		var a := angle + TAU * float(i) / float(teeth * 2)
 		var rr := r if i % 2 == 0 else r * 0.82
 		pts.append(c + Vector2(cos(a), sin(a)) * rr)
-	draw_colored_polygon(pts, iron)
-	draw_circle(c, r * 0.5, (m.wall as Color))
-	draw_arc(c, r * 0.5, 0.0, TAU, 24, Color(VFX.RIM, 0.25), 2.0)
-	draw_circle(c, r * 0.12, iron.lightened(0.15))
+	ci.draw_colored_polygon(pts, iron)
+	ci.draw_circle(c, r * 0.5, (m.wall as Color))
+	ci.draw_arc(c, r * 0.5, 0.0, TAU, 24, Color(VFX.RIM, 0.25), 2.0)
+	ci.draw_circle(c, r * 0.12, iron.lightened(0.15))
 	for i in range(4):
 		var a := angle + float(i) * PI * 0.5
-		draw_line(c + Vector2(cos(a), sin(a)) * r * 0.14, c + Vector2(cos(a), sin(a)) * r * 0.5, iron.lightened(0.12), 5.0)
+		ci.draw_line(c + Vector2(cos(a), sin(a)) * r * 0.14, c + Vector2(cos(a), sin(a)) * r * 0.5, iron.lightened(0.12), 5.0)
 
-func _pipe(from: Vector2, to: Vector2, m: Dictionary) -> void:
+func _pipe(ci: CanvasItem, from: Vector2, to: Vector2, m: Dictionary) -> void:
 	var iron := (m.stone as Color).darkened(0.28)
-	draw_line(from, to, iron, 12.0)
-	draw_line(from + Vector2(0.0, -3.0), to + Vector2(0.0, -3.0), Color(VFX.RIM, 0.14), 2.0)
+	ci.draw_line(from, to, iron, 12.0)
+	ci.draw_line(from + Vector2(0.0, -3.0), to + Vector2(0.0, -3.0), Color(VFX.RIM, 0.14), 2.0)
 	var n := int(from.distance_to(to) / 120.0)
 	for i in range(n + 1):
 		var p := from.lerp(to, float(i) / maxf(1.0, float(n)))
-		draw_rect(Rect2(p.x - 5.0, p.y - 9.0, 10.0, 18.0), iron.lightened(0.1))
+		ci.draw_rect(Rect2(p.x - 5.0, p.y - 9.0, 10.0, 18.0), iron.lightened(0.1))
 
-func _roots(top: Vector2, t: float, m: Dictionary) -> void:
+func _roots(ci: CanvasItem, top: Vector2, t: float, m: Dictionary) -> void:
 	var root := Color("2b1d12").lerp(m.stone, 0.2)
 	for i in range(5):
 		var h := VFX.hash01(i, 111)
 		var x := top.x + (float(i) - 2.0) * 16.0
 		var len := 80.0 + h * 140.0
 		var sway := sin(t * 0.8 + float(i)) * 4.0
-		draw_polyline(PackedVector2Array([Vector2(x, top.y), Vector2(x + 6.0 + sway, top.y + len * 0.4), Vector2(x - 4.0 + sway, top.y + len * 0.75), Vector2(x + 3.0 + sway * 1.5, top.y + len)]), root, 4.0 - h * 2.0)
+		ci.draw_polyline(PackedVector2Array([Vector2(x, top.y), Vector2(x + 6.0 + sway, top.y + len * 0.4), Vector2(x - 4.0 + sway, top.y + len * 0.75), Vector2(x + 3.0 + sway * 1.5, top.y + len)]), root, 4.0 - h * 2.0)
 		if float(m.moss) > 0.05:
-			draw_circle(Vector2(x + 3.0 + sway * 1.5, top.y + len), 3.0, Color("2f6b4a", 0.6 * float(m.moss)))
+			ci.draw_circle(Vector2(x + 3.0 + sway * 1.5, top.y + len), 3.0, Color("2f6b4a", 0.6 * float(m.moss)))
 
 func _drip(x: float, y0: float, y1: float, t: float) -> void:
 	var d := fmod(t * 160.0, y1 - y0 + 40.0)
@@ -713,23 +743,23 @@ func _drip(x: float, y0: float, y1: float, t: float) -> void:
 		var r := (y - y1) / 40.0
 		draw_arc(Vector2(x, y1), 4.0 + r * 12.0, 0.0, TAU, 12, Color(0.7, 0.85, 1.0, 0.5 * (1.0 - r)), 1.0)
 
-func _gallows(top: Vector2, t: float, m: Dictionary) -> void:
+func _gallows(ci: CanvasItem, top: Vector2, t: float, m: Dictionary) -> void:
 	var wood := Color("2b1d12").lerp(m.stone, 0.25)
-	draw_rect(Rect2(top.x - 6.0, top.y - 130.0, 12.0, 130.0), wood)
-	draw_rect(Rect2(top.x - 6.0, top.y - 130.0, 90.0, 10.0), wood)
-	draw_line(Vector2(top.x + 4.0, top.y - 96.0), Vector2(top.x + 40.0, top.y - 124.0), wood, 6.0)
+	ci.draw_rect(Rect2(top.x - 6.0, top.y - 130.0, 12.0, 130.0), wood)
+	ci.draw_rect(Rect2(top.x - 6.0, top.y - 130.0, 90.0, 10.0), wood)
+	ci.draw_line(Vector2(top.x + 4.0, top.y - 96.0), Vector2(top.x + 40.0, top.y - 124.0), wood, 6.0)
 	var sway := sin(t * 0.7) * 5.0
 	var hook := Vector2(top.x + 70.0, top.y - 120.0)
-	_chain(hook, 44.0, sway, false)
+	_chain(ci, hook, 44.0, sway, false)
 	# Hanging cage.
 	var cage := hook + Vector2(sway, 44.0)
 	var iron := Color("2a2430")
-	draw_arc(cage + Vector2(0.0, 8.0), 14.0, PI, TAU, 12, iron, 2.5)
+	ci.draw_arc(cage + Vector2(0.0, 8.0), 14.0, PI, TAU, 12, iron, 2.5)
 	for i in range(5):
 		var cx := cage.x - 12.0 + float(i) * 6.0
-		draw_line(Vector2(cx, cage.y + 8.0), Vector2(cx + sway * 0.1, cage.y + 40.0), iron, 2.0)
-	draw_line(cage + Vector2(-14.0, 40.0), cage + Vector2(14.0, 40.0), iron, 3.0)
-	draw_circle(cage + Vector2(0.0, 24.0), 4.0, Color("bdb3a3").darkened(0.3))
+		ci.draw_line(Vector2(cx, cage.y + 8.0), Vector2(cx + sway * 0.1, cage.y + 40.0), iron, 2.0)
+	ci.draw_line(cage + Vector2(-14.0, 40.0), cage + Vector2(14.0, 40.0), iron, 3.0)
+	ci.draw_circle(cage + Vector2(0.0, 24.0), 4.0, Color("bdb3a3").darkened(0.3))
 
 func _stain(base: Vector2, w: float, color: Color) -> void:
 	VFX.draw_ellipse(self, base + Vector2(0.0, -1.0), w * 0.5, 4.0, color)
@@ -739,30 +769,32 @@ func _fallen_blade(base: Vector2) -> void:
 	draw_line(base + Vector2(-16.0, -3.0), base + Vector2(14.0, -12.0), Color("7f8896"), 3.0, true)
 	draw_line(base + Vector2(-13.0, -8.0), base + Vector2(-9.0, 0.0), Color("8a6a3a"), 3.0, true)
 
-func _draw_decor_back(tag: String, m: Dictionary) -> void:
+func _draw_decor_back(ci: CanvasItem) -> void:
+	var tag := str(template.get("tag", "intro"))
+	var m := _mood()
 	var t := _decor_t()
 	var fy := Content.FLOOR_Y
 	match tag:
 		"tiers":
-			_banner_prop(Vector2(430.0, fy - 134.0), 90.0, t, m, 1)
-			_banner_prop(Vector2(850.0, fy - 134.0), 90.0, t, m, 2)
+			_banner_prop(ci, Vector2(430.0, fy - 134.0), 90.0, t, m, 1)
+			_banner_prop(ci, Vector2(850.0, fy - 134.0), 90.0, t, m, 2)
 		"platforms":
-			_gear(Vector2(640.0, fy - 430.0), 74.0, t * 0.35, m)
-			_gear(Vector2(768.0, fy - 372.0), 46.0, -t * 0.56 + 0.3, m)
-			_gear(Vector2(536.0, fy - 356.0), 38.0, -t * 0.68 + 1.1, m)
-			_pipe(Vector2(Content.ROOM_LEFT, fy - 96.0), Vector2(470.0, fy - 96.0), m)
-			_pipe(Vector2(810.0, fy - 96.0), Vector2(Content.ROOM_RIGHT, fy - 96.0), m)
-			_pipe(Vector2(470.0, fy - 96.0), Vector2(470.0, fy + 40.0), m)
-			_pipe(Vector2(810.0, fy - 96.0), Vector2(810.0, fy + 40.0), m)
+			_gear(ci, Vector2(640.0, fy - 430.0), 74.0, t * 0.35, m)
+			_gear(ci, Vector2(768.0, fy - 372.0), 46.0, -t * 0.56 + 0.3, m)
+			_gear(ci, Vector2(536.0, fy - 356.0), 38.0, -t * 0.68 + 1.1, m)
+			_pipe(ci, Vector2(Content.ROOM_LEFT, fy - 96.0), Vector2(470.0, fy - 96.0), m)
+			_pipe(ci, Vector2(810.0, fy - 96.0), Vector2(Content.ROOM_RIGHT, fy - 96.0), m)
+			_pipe(ci, Vector2(470.0, fy - 96.0), Vector2(470.0, fy + 40.0), m)
+			_pipe(ci, Vector2(810.0, fy - 96.0), Vector2(810.0, fy + 40.0), m)
 		"chamber":
-			_roots(Vector2(400.0, 100.0), t, m)
-			_roots(Vector2(880.0, 100.0), t, m)
+			_roots(ci, Vector2(400.0, 100.0), t, m)
+			_roots(ci, Vector2(880.0, 100.0), t, m)
 		"crossfire":
-			_gallows(Vector2(640.0, fy - 360.0), t, m)
+			_gallows(ci, Vector2(640.0, fy - 360.0), t, m)
 		"boss":
-			_throne(Vector2(640.0, fy), m)
-			_banner_prop(Vector2(120.0, 120.0), 230.0, t, m, 3)
-			_banner_prop(Vector2(1160.0, 120.0), 230.0, t, m, 4)
+			_throne(ci, Vector2(640.0, fy), m)
+			_banner_prop(ci, Vector2(120.0, 120.0), 230.0, t, m, 3)
+			_banner_prop(ci, Vector2(1160.0, 120.0), 230.0, t, m, 4)
 
 func _draw_decor_front(tag: String, m: Dictionary) -> void:
 	var t := _decor_t()
@@ -774,8 +806,8 @@ func _draw_decor_front(tag: String, m: Dictionary) -> void:
 			_fallen_blade(Vector2(700.0, fy))
 			_bone_pile(Vector2(1320.0, fy), m)
 		"gap":
-			_chain(Vector2(606.0, fy + 8.0), 90.0, sin(t * 0.8) * 6.0)
-			_chain(Vector2(874.0, fy + 8.0), 120.0, sin(t * 0.7 + 1.0) * 6.0)
+			_chain(self, Vector2(606.0, fy + 8.0), 90.0, sin(t * 0.8) * 6.0)
+			_chain(self, Vector2(874.0, fy + 8.0), 120.0, sin(t * 0.7 + 1.0) * 6.0)
 			_candles(Vector2(150.0, fy), 3, t, m)
 			_bone_pile(Vector2(1240.0, fy), m)
 		"tiers":
