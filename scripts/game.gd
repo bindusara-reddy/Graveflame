@@ -1550,11 +1550,16 @@ func _opening_inscription() -> Array:
 	var first := Save.get_falls() == 0 and Save.get_victories() == 0 and not Save.falls_legacy()
 	return Content.INSCRIPTION if first else []
 
+## Carved once a sitting at most: a knight who turns back and descends again
+## before its first fall is not stopped to read it twice.
+static var _inscribed := false
+
 ## Without its own card the inscription borrows the lesson strip, and holds
 ## the first lesson back until it has been read.
 func _inscribe(lines: Array) -> void:
-	if lines.is_empty():
+	if lines.is_empty() or _inscribed:
 		return
+	_inscribed = true
 	if ui.has_method("show_inscription"):
 		ui.call("show_inscription", lines)
 	else:

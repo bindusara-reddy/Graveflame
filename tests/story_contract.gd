@@ -17,6 +17,9 @@ func run() -> void:
 	check(game._opening_inscription() == Content.INSCRIPTION, "the first descent ever opens on the inscription")
 	if not cards:
 		check(game.ui._hint_label.text.contains("Yours got up."), "without its card the inscription reads on the lesson strip")
+		game.ui.hide_banners()
+		game._inscribe(game._opening_inscription())
+		check(not game.ui._hint_panel.visible, "the inscription is carved once a sitting")
 	_check_litany(cards)
 	_check_phase_tag()
 	await _check_hoard(cards)
