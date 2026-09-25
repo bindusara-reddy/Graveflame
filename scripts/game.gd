@@ -1566,11 +1566,9 @@ func _inscribe(lines: Array) -> void:
 		ui.show_hint("  ".join(lines), STORY_HOLD)
 		_hint_cooldown = STORY_HOLD
 
-## The ending the knight last chose at the throne ("", "crown", "given" or
-## "ended"), once the save keeps one.
+## The ending the knight last chose at the throne ("", "crown", "given" or "ended").
 func _last_ending() -> String:
-	var save: Script = Save
-	return str(save.call("get_last_ending")) if save.has_method("get_last_ending") else ""
+	return Save.get_last_ending()
 
 ## The litany's line for the chamber just cleared: by depth, so every descent
 ## hears it in order; "" in the throne room.

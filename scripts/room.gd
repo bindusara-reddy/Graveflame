@@ -1132,8 +1132,8 @@ func _draw_set_piece(ci: CanvasItem) -> void:
 
 ## The ashpit frieze's figure as two paper cut-outs with matching points, feet
 ## at the origin, facing +x: a knight under its four-tongue crown, and the
-## Warden it becomes, hunched and swollen, the crown's outer tongues grown into
-## horns. Parts back to front: back leg, front leg, torso, arm, hand or claw,
+## Warden it becomes, hunched and swollen, the crown grown into a tall blaze.
+## Parts back to front: back leg, front leg, torso, arm, hand or claw,
 ## then the crown's four tongues. The head is a circle, `head` [centre, radius].
 const FRIEZE_KNIGHT := [
 	[Vector2(-7, -30), Vector2(-1, -30), Vector2(-3, 0), Vector2(-10, 0)],
@@ -1152,10 +1152,10 @@ const FRIEZE_BEAST := [
 	[Vector2(-17, -30), Vector2(-25, -60), Vector2(-12, -84), Vector2(12, -82), Vector2(30, -62), Vector2(16, -30)],
 	[Vector2(18, -72), Vector2(30, -64), Vector2(36, -6), Vector2(26, -6)],
 	[Vector2(23, -7), Vector2(40, -7), Vector2(44, 0)],
-	[Vector2(19, -80), Vector2(0, -108), Vector2(24, -82)],
-	[Vector2(23, -82), Vector2(24, -89), Vector2(27, -83)],
-	[Vector2(27, -83), Vector2(30, -90), Vector2(31, -82)],
-	[Vector2(31, -80), Vector2(48, -100), Vector2(35, -77)],
+	[Vector2(18, -80), Vector2(19, -97), Vector2(23, -82)],
+	[Vector2(23, -82), Vector2(25, -103), Vector2(28, -83)],
+	[Vector2(27, -83), Vector2(31, -105), Vector2(33, -82)],
+	[Vector2(32, -80), Vector2(37, -96), Vector2(36, -77)],
 ]
 const FRIEZE_HEAD := [[Vector2(0, -69), 8.0], [Vector2(27, -72), 11.0]]
 ## The crown's parts start here in the cut-outs.
@@ -1290,7 +1290,8 @@ func _grand_stair(ci: CanvasItem, m: Dictionary) -> void:
 		var foot := Vector2(-125.0 + float(i) * 70.0, fy - float(i + 1) * 22.0)
 		ci.draw_line(foot, foot + Vector2(0.0, -55.0), nosing, 2.0)
 
-## An armoured Warden carved in stone on a pedestal, hunched under its horned helm.
+## An armoured Warden carved in stone on a pedestal, hunched under its crown of
+## stone flames (the knight's four tongues, grown).
 func _warden_statue(ci: CanvasItem, base: Vector2, m: Dictionary) -> void:
 	var stone := (m.stone as Color).lightened(0.05)
 	ci.draw_rect(Rect2(base.x - 34.0, base.y - 40.0, 68.0, 40.0), stone.darkened(0.2))
@@ -1301,8 +1302,9 @@ func _warden_statue(ci: CanvasItem, base: Vector2, m: Dictionary) -> void:
 	])
 	VFX.draw_shaded_polygon(ci, body, stone)
 	VFX.draw_shaded_polygon(ci, PackedVector2Array([
-		base + Vector2(-14.0, -138.0), base + Vector2(-26.0, -176.0), base + Vector2(-10.0, -158.0), base + Vector2(0.0, -166.0),
-		base + Vector2(10.0, -158.0), base + Vector2(26.0, -176.0), base + Vector2(14.0, -138.0),
+		base + Vector2(-14.0, -138.0), base + Vector2(-17.0, -162.0), base + Vector2(-9.0, -148.0), base + Vector2(-4.0, -172.0),
+		base + Vector2(0.0, -152.0), base + Vector2(4.0, -172.0), base + Vector2(9.0, -148.0), base + Vector2(17.0, -162.0),
+		base + Vector2(14.0, -138.0),
 	]), stone)
 	ci.draw_line(base + Vector2(-8.0, -150.0), base + Vector2(8.0, -150.0), VFX.VOID, 2.0)
 	VFX.draw_rim(ci, body, 1.0, 0.5)

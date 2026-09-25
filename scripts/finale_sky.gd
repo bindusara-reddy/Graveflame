@@ -757,22 +757,6 @@ func _remnants(near: bool) -> Array[Dictionary]:
 			var base := _ring_point(top, a, LEDGE, _soffit(top))
 			out.append(_post(base, 7.0 + 5.0 * VFX.hash01(k, 82), 30.0 + 40.0 * VFX.hash01(k, 81), k))
 		return out
-	# The vault's rib springs from the left cut and snapped a third of the way
-	# over the well, tapering from its root to the burnt end.
-	var outer := PackedVector2Array()
-	var inner := PackedVector2Array()
-	var span := Vector2(HALF_RIM + 70.0, 560.0)
-	for k in range(15):
-		var f := float(k) / 14.0
-		var dir := Vector2(cos(PI - 0.95 * f), -sin(PI - 0.95 * f))
-		outer.append(Vector2(CX, RIM_Y) + dir * span)
-		inner.append(Vector2(CX, RIM_Y) + dir * (span - Vector2.ONE * lerpf(64.0, 38.0, f)))
-	var burnt := _ragged(outer[14], inner[14], 5, 3)
-	inner.reverse()
-	var rib := outer.duplicate()
-	rib.append_array(burnt.slice(1, burnt.size() - 1))
-	rib.append_array(inner)
-	out.append({ "shape": rib, "burnt": burnt })
 	out.append(_post(Vector2(CX + HALF_RIM + 90.0, RIM_Y), 70.0, 210.0, 5))
 	out.append(_post(Vector2(CX + HALF_RIM + 210.0, RIM_Y), 48.0, 118.0, 6))
 	# The keep's outer walls, burnt down to their footings along the ground.
