@@ -34,12 +34,11 @@ func _seed_save(data: Dictionary) -> void:
 	f.close()
 
 
-## A fresh game on `save`, already in the throne room with the Warden up. The
-## pause lets the last fixture's real-time hit-stop run out first.
+## A fresh game on `save`, already in the throne room with the Warden up.
 func _at_throne(save: Dictionary) -> void:
 	release(["ignite", "pause", "ui_accept", "jump"])
 	await free_game()
-	await create_timer(0.25, true, false, true).timeout
+	await _settle_time()
 	_seed_save(save)
 	await load_main_scene(1)
 	game._begin_run()
@@ -51,6 +50,15 @@ func _enter_throne() -> void:
 	game._advance_room()
 	for i in range(3):
 		await physics_frame
+
+
+## The killing blow's hit-stop runs in real time; wait (at most 1 s) for it to
+## end, so a time-scale check sees what the ending left behind, not the blow.
+func _settle_time() -> void:
+	for i in range(50):
+		if Engine.time_scale == 1.0:
+			return
+		await create_timer(0.02, true, false, true).timeout
 
 
 ## Kills the Warden and takes the director's clock over from the frame loop.
@@ -160,7 +168,7 @@ func _test_zero_input(cut: String, seen: int, limit: float) -> void:
 	check(reached.has("STRIKE") and reached.has("CALL") and reached.has("EMBER"), "%s: every act plays (%s)" % [cut, reached.keys()])
 	check((game.ui._panels["victory"] as Control).visible and paused, "%s: the results open over a paused world" % cut)
 	check(game.music._current == "title", "%s: the title theme returns" % cut)
-	await create_timer(0.3, true, false, true).timeout
+	await _settle_time()
 	check(Engine.time_scale == 1.0, "%s: real time runs at the panel" % cut)
 
 
@@ -253,7 +261,7 @@ func _test_skip() -> void:
 	for i in range(30):
 		fin.step(DT)
 	check(fin._skipping and fin.phase == Finale.Phase.EMBER and game._beat_kind.is_empty(), "a skip during the slow-motion beat ends the beat")
-	await create_timer(0.3, true, false, true).timeout
+	await _settle_time()
 	check(Engine.time_scale == 1.0, "a skip during the beat restores real time")
 
 
@@ -275,7 +283,7 @@ func _test_abort_every_phase() -> void:
 			else:
 				game._begin_run()
 			await process_frame
-			await create_timer(0.2, true, false, true).timeout
+			await _settle_time()
 			var box := game._world_container
 			var layers := game.find_children("*", "CanvasLayer", true, false).filter(func(l): return [-1, 10, 11, 45].has(l.layer))
 			# The title hides the world by itself; a new run shows it, unburned.

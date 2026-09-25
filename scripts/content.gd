@@ -667,13 +667,6 @@ const ORDINAL_WORDS := [
 	"ELEVENTH", "TWELFTH", "THIRTEENTH", "FOURTEENTH", "FIFTEENTH", "SIXTEENTH", "SEVENTEENTH", "EIGHTEENTH", "NINETEENTH", "TWENTIETH",
 ]
 
-## The boon definition for an id, or {} when the id is unknown.
-static func upgrade_def(id: String) -> Dictionary:
-	for u in UPGRADES:
-		if str(u.id) == id:
-			return u
-	return {}
-
 ## Spelled out to twenty, digits after: the playbill reads as print, not a HUD.
 static func number_word(n: int) -> String:
 	return NUMBER_WORDS[n] if n >= 0 and n < NUMBER_WORDS.size() else str(n)

@@ -417,7 +417,6 @@ func _lent() -> void:
 ## is I, the anchor for the burn, the theatre and the curtain call.
 func _strike() -> void:
 	phase = Phase.STRIKE
-	var i := clock
 	var cut: Dictionary = CUTS[tier]
 	_prompt.visible = false
 	_knight.gesture_to("thrust", 30.0)
@@ -435,7 +434,7 @@ func _strike() -> void:
 	_after(float(cut.pull_at), _move_camera.bind(THEATRE, float(cut.pull)))
 	_after(float(cut.lamps_at), _light_lamps)
 	_after(float(cut.traveler_at), _ramp.bind(_stage, "closed", 1.0, 1.6 if tier != "brief" else 1.0))
-	_b0 = i + float(cut.lead) - float(cut.call) * BEAT
+	_b0 = clock + float(cut.lead) - float(cut.call) * BEAT
 	_schedule_call()
 
 func _set_phase(p: Phase) -> void:
