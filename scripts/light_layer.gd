@@ -37,8 +37,8 @@ func _draw() -> void:
 		var flicker := 1.0
 		if moving:
 			flicker += sin(t * 9.0 + float(idx) * 1.7) * 0.06 + sin(t * 23.0 + float(idx) * 0.9) * 0.03
-		VFX.draw_radial(self, p, 110.0 * flicker, Color(torch, 0.3 * gain))
-		VFX.draw_radial(self, p, 40.0 * flicker, Color(VFX.HOT, 0.12 * gain))
+		VFX.draw_radial(self, p, 110.0 * flicker, Color(torch, 0.3 * gain * game.sconce_heat))
+		VFX.draw_radial(self, p, 40.0 * flicker, Color(VFX.HOT, 0.12 * gain * game.sconce_heat))
 		idx += 1
 	var player := game.player
 	if is_instance_valid(player) and not player.dead:

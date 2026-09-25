@@ -103,7 +103,7 @@ func _process(delta: float) -> void:
 			l.enabled = true
 			l.global_position = torches[i]
 			l.color = torch
-			l.energy = (1.2 + (sin(_t * 8.0 + float(i) * 1.7) * 0.07 + sin(_t * 21.0 + float(i)) * 0.03 if moving else 0.0)) * gain
+			l.energy = (1.2 + (sin(_t * 8.0 + float(i) * 1.7) * 0.07 + sin(_t * 21.0 + float(i)) * 0.03 if moving else 0.0)) * gain * game.sconce_heat
 		else:
 			l.enabled = false
 	# Room lights, rift and boss.

@@ -493,11 +493,14 @@ func _paint_backdrop(ci: CanvasItem) -> void:
 	var bloom := Vector2(_plane_x(0.1, 184.0), horizon - 60.0)
 	for i in range(4, 0, -1):
 		ci.draw_circle(bloom, 90.0 + float(i) * 72.0, Color(m.glow, (0.016 + float(5 - i) * 0.012) * (1.0 + seep)))
-	_draw_spires(ci, horizon)
-	_draw_arches(ci, horizon)
-	_draw_light_shafts(ci, top, horizon)
-	_draw_buttresses(ci, horizon)
-	_draw_rubble(ci, horizon)
+	if _in_throne_room():
+		_paint_throne_apse(ci, horizon)
+	else:
+		_draw_spires(ci, horizon)
+		_draw_arches(ci, horizon)
+		_draw_light_shafts(ci, top, horizon)
+		_draw_buttresses(ci, horizon)
+		_draw_rubble(ci, horizon)
 	_draw_undercroft(ci, horizon)
 	_draw_fog(ci, horizon)
 
@@ -532,9 +535,12 @@ func torch_positions() -> PackedVector2Array:
 	if frame == _torch_frame:
 		return _torch_cache
 	var out := PackedVector2Array()
-	var r := _plane_range(0.65, 320.0, 160.0)
-	for k in range(r.x, r.y + 1):
-		out.append(Vector2(_plane_x(0.65, float(k) * 320.0), TORCH_Y - 12.0))
+	if _in_throne_room():
+		out = _apse_sconces()
+	else:
+		var r := _plane_range(0.65, 320.0, 160.0)
+		for k in range(r.x, r.y + 1):
+			out.append(Vector2(_plane_x(0.65, float(k) * 320.0), TORCH_Y - 12.0))
 	_torch_cache = out
 	_torch_frame = frame
 	return out
@@ -758,7 +764,7 @@ func _draw_buttresses(ci: CanvasItem, horizon: float) -> void:
 			sconce + Vector2(-10.0, -4.0), sconce + Vector2(10.0, -4.0), sconce + Vector2(5.0, 6.0), sconce + Vector2(-5.0, 6.0),
 		]), VFX.MORTAR)
 		var t := _atmo_t if moving else 0.0
-		VFX.draw_flame(ci, sconce + Vector2(0.0, -4.0), 24.0, 12.0, t, float(k) * 2.1, torch, VFX.GOLD)
+		VFX.draw_flame(ci, sconce + Vector2(0.0, -4.0), 24.0 * sconce_heat, 12.0 * sconce_heat, t, float(k) * 2.1, torch, VFX.GOLD)
 		# Soot streak above the sconce.
 		ci.draw_rect(Rect2(sconce.x - 5.0, sconce.y - 70.0, 10.0, 44.0), Color(0.0, 0.0, 0.0, 0.18))
 
@@ -843,6 +849,139 @@ func _draw_fog(ci: CanvasItem, horizon: float) -> void:
 			var ry := h * (0.35 + VFX.hash01(k, 40 + b) * 0.25)
 			var yy := y + sin(_atmo_t * 0.3 + float(k) * 1.3) * 6.0
 			VFX.draw_ellipse(ci, Vector2(x, yy), rx, ry, col)
+
+# --- Throne apse ---
+## The Ember Throne's hall is a closed apse and the finale's stage: a rose window
+## over the throne, colossal columns carrying the sconces, and kneeling statues
+## of past bearers. Offsets are from the throne with the view centred on it.
+const APSE_COLUMNS := [-560.0, -300.0, 300.0, 560.0]
+const APSE_STATUES := [-420.0, 420.0]
+## A kneeling stone knight facing +x, feet at the origin, back to front: plinth,
+## kneeling leg, the arm raising a torch cup, torso, planted leg, the sword set
+## point-down and the hand resting on its pommel.
+const STATUE := [
+	[Vector2(-64, 0), Vector2(66, 0), Vector2(60, -24), Vector2(-58, -24)],
+	[Vector2(-58, -24), Vector2(-4, -24), Vector2(-8, -40), Vector2(-54, -36)],
+	[Vector2(-12, -26), Vector2(8, -34), Vector2(-14, -104), Vector2(-38, -98)],
+	[Vector2(-24, -192), Vector2(-8, -186), Vector2(-20, -246), Vector2(-36, -244)],
+	[Vector2(-40, -92), Vector2(16, -104), Vector2(34, -172), Vector2(16, -194), Vector2(-22, -186), Vector2(-44, -140)],
+	[Vector2(-26, -98), Vector2(38, -104), Vector2(44, -86), Vector2(-18, -76)],
+	[Vector2(22, -24), Vector2(54, -24), Vector2(46, -38), Vector2(42, -96), Vector2(22, -90)],
+	[Vector2(58, -120), Vector2(66, -120), Vector2(64, -30), Vector2(62, -22), Vector2(60, -30)],
+	[Vector2(46, -127), Vector2(78, -127), Vector2(78, -120), Vector2(46, -120)],
+	[Vector2(60, -146), Vector2(64, -146), Vector2(64, -127), Vector2(60, -127)],
+	[Vector2(6, -188), Vector2(26, -182), Vector2(64, -158), Vector2(58, -146), Vector2(16, -164)],
+]
+const STATUE_CUP := [Vector2(-46, -266), Vector2(-12, -266), Vector2(-20, -250), Vector2(-38, -250)]
+## Flame scale of every wall sconce; the finale sinks it when the throne goes cold.
+var sconce_heat := 1.0
+
+func _in_throne_room() -> bool:
+	return is_instance_valid(room) and room.is_boss
+
+## World x of an apse element `offset` from the throne on the plane at `depth`:
+## exact with the view centred on the throne, parallaxing like every plane.
+func _centred_x(depth: float, offset: float) -> float:
+	return 640.0 + offset + (_view_center.x - 640.0) * (1.0 - depth)
+
+## The throne's sconces hang on its columns, so its torch lights do too.
+func _apse_sconces() -> PackedVector2Array:
+	var out := PackedVector2Array()
+	for offset in APSE_COLUMNS:
+		out.append(Vector2(_centred_x(0.5, offset), TORCH_Y - 12.0))
+	return out
+
+## The throne room's mid planes, in place of the crypt's open colonnade: the
+## vault is closed, so no sky, moon or spires show behind the Warden.
+func _paint_throne_apse(ci: CanvasItem, horizon: float) -> void:
+	var t := _atmo_t if not Feedback.motion_reduced else 0.0
+	var wall: Color = _haze(mood.wall, 0.35)
+	var left := Content.ROOM_LEFT - 240.0
+	var span := Content.ROOM_RIGHT + 240.0 - left
+	VFX.draw_vgradient(ci, Rect2(left, -560.0, span, horizon + 620.0), wall.darkened(0.55), wall)
+	for i in range(1, 11):
+		var y := horizon - 56.0 * float(i)
+		ci.draw_line(Vector2(left, y), Vector2(left + span, y), Color(_haze(mood.edge, 0.35), 0.3), 1.5)
+	_draw_rose_window(ci, Vector2(_centred_x(0.35, 0.0), horizon - 300.0), 150.0, t)
+	for i in range(APSE_COLUMNS.size()):
+		_draw_apse_column(ci, _centred_x(0.5, APSE_COLUMNS[i]), horizon, t, float(i) * 2.1)
+	for offset in APSE_STATUES:
+		_draw_statue(ci, Vector2(_centred_x(0.65, offset), horizon + 4.0), -signf(offset))
+
+## The rose window in its recessed bay: twelve glass petals round a roundel that
+## holds the Warden's sigil, burning as the throne's own sigil does, so it
+## gutters and relights gold with it. The glass backlights the Warden.
+func _draw_rose_window(ci: CanvasItem, c: Vector2, radius: float, t: float) -> void:
+	var edge: Color = _haze(mood.edge, 0.35)
+	var glass: Color = _haze(mood.glass, 0.35)
+	# A pointed bay cut into the apse: two arcs meeting over the window.
+	var half := radius + 50.0
+	var bay := PackedVector2Array([Vector2(c.x - half, c.y + 360.0)])
+	for i in range(7):
+		var a := PI + PI / 3.0 * float(i) / 6.0
+		bay.append(Vector2(c.x + half, c.y) + Vector2(cos(a), sin(a)) * half * 2.0)
+	for i in range(1, 7):
+		var a := -PI / 3.0 + PI / 3.0 * float(i) / 6.0
+		bay.append(Vector2(c.x - half, c.y) + Vector2(cos(a), sin(a)) * half * 2.0)
+	bay.append(Vector2(c.x + half, c.y + 360.0))
+	ci.draw_colored_polygon(bay, _haze(mood.wall, 0.35).darkened(0.35))
+	ci.draw_polyline(bay, edge, 3.0)
+	ci.draw_circle(c, radius * 1.18, Color(glass, 0.08))
+	ci.draw_circle(c, radius, Color("0a0508"))
+	var r0 := radius * 0.4
+	var reach := radius * 0.9 - r0
+	var w := radius * 0.13
+	for i in range(12):
+		var a := TAU * float(i) / 12.0 - PI * 0.5
+		var dir := Vector2(cos(a), sin(a))
+		var side := Vector2(-dir.y, dir.x)
+		var petal := PackedVector2Array()
+		for q: Vector2 in [Vector2(0.0, 0.0), Vector2(0.35, 0.7), Vector2(0.75, 1.0), Vector2(1.0, 0.45), Vector2(1.0, -0.45), Vector2(0.75, -1.0), Vector2(0.35, -0.7)]:
+			petal.append(c + dir * (r0 + reach * q.x) + side * w * q.y)
+		ci.draw_colored_polygon(petal, Color(glass, 0.55 + 0.1 * sin(t * 1.3 + float(i))))
+		petal.append(petal[0])
+		ci.draw_polyline(petal, edge.darkened(0.3), 2.0)
+	var heat: float = room.sigil_flare()
+	var fire: Color = (mood.torch as Color).lerp(VFX.GOLD, room.sigil_gold)
+	ci.draw_circle(c, radius * 0.34, Color(glass, 0.35))
+	if heat > 0.02:
+		VFX.draw_flame(ci, c + Vector2(0.0, radius * 0.2), radius * 0.4 * heat, radius * 0.2, t, 0.0, Color(fire, minf(1.0, 0.9 * heat)), VFX.GOLD.lerp(VFX.HOT, room.sigil_gold))
+	ci.draw_arc(c, radius * 0.34, 0.0, TAU, 32, edge, 6.0)
+	ci.draw_arc(c, radius, 0.0, TAU, 48, edge, 14.0)
+
+## A colossal column rising into the dark, bound by chains, with the cresset
+## whose flame sinks with sconce_heat.
+func _draw_apse_column(ci: CanvasItem, x: float, horizon: float, t: float, phase: float) -> void:
+	var stone: Color = _haze(mood.stone, 0.5)
+	var chain: Color = _haze(mood.edge, 0.5).darkened(0.2)
+	_draw_shaft(ci, x - 42.0, 84.0, -560.0, horizon + 60.0, stone)
+	ci.draw_line(Vector2(x - 42.0, -560.0), Vector2(x - 42.0, horizon), Color(VFX.RIM, 0.16), 1.5)
+	ci.draw_rect(Rect2(x - 52.0, horizon - 84.0, 104.0, 14.0), stone.lightened(0.08))
+	ci.draw_rect(Rect2(x - 60.0, horizon - 70.0, 120.0, 70.0), stone.lightened(0.04))
+	for i in range(3):
+		var y := horizon - 170.0 - 150.0 * float(i)
+		ci.draw_dashed_line(Vector2(x - 44.0, y), Vector2(x + 44.0, y - 46.0), chain, 3.0, 7.0)
+	ci.draw_dashed_line(Vector2(x + 44.0, horizon - 516.0), Vector2(x + 30.0, -560.0), chain, 3.0, 7.0)
+	var at := Vector2(x, TORCH_Y)
+	ci.draw_rect(Rect2(at.x - 4.0, at.y, 8.0, 26.0), Color("1a1024"))
+	ci.draw_colored_polygon(PackedVector2Array([at + Vector2(-16.0, -6.0), at + Vector2(16.0, -6.0), at + Vector2(9.0, 6.0), at + Vector2(-9.0, 6.0)]), VFX.MORTAR)
+	VFX.draw_flame(ci, at + Vector2(0.0, -6.0), 30.0 * sconce_heat, 16.0 * sconce_heat, t, phase, mood.torch, VFX.GOLD)
+
+## A kneeling stone knight, a past bearer of the flame, turned toward the throne
+## (`side` +1 faces right). The torch cup it raises is charred and cold.
+func _draw_statue(ci: CanvasItem, foot: Vector2, side: float) -> void:
+	var stone: Color = _haze(mood.stone, 0.65)
+	ci.draw_set_transform(foot, 0.0, Vector2(side, 1.0))
+	for part in STATUE:
+		var pts := PackedVector2Array(part)
+		VFX.draw_shaded_polygon(ci, pts, stone)
+		VFX.draw_rim(ci, pts, 1.0, 0.5, mood.torch)
+	ci.draw_circle(Vector2(24.0, -204.0), 17.0, stone)
+	ci.draw_line(Vector2(28.0, -206.0), Vector2(40.0, -204.0), VFX.VOID, 2.0)
+	ci.draw_circle(Vector2(62.0, -150.0), 5.0, stone.darkened(0.2))
+	ci.draw_colored_polygon(PackedVector2Array(STATUE_CUP), Color("1a1216"))
+	ci.draw_polyline(PackedVector2Array(STATUE_CUP), Color(VFX.SLATE, 0.5), 1.5)
+	ci.draw_set_transform(Vector2.ZERO, 0.0, Vector2.ONE)
 
 # --- Run lifecycle ---
 ## Clear every trace of the current run: its closing beat, the camera, the

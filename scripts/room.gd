@@ -5,6 +5,8 @@ extends Node2D
 const VFX := preload("res://scripts/vfx.gd")
 const CryptProp := preload("res://scripts/crypt_prop.gd")
 const Severed := preload("res://scripts/severed.gd")
+## Past victories shown as candles on the throne dais, at most.
+const MAX_DAIS_CANDLES := 12
 
 signal completed
 signal cleared(room_name: String)
@@ -77,6 +79,23 @@ var _difficulty: Dictionary = { "hp_mul": 1.0, "dmg_mul": 1.0 }
 var mood: Dictionary = {}
 ## The swaying back decor's canvas (see _ready).
 var _back_decor: Node2D
+## The throne room is the finale's stage, and the finale plays it: the Warden's
+## sigil gutters out (heat 0) and relights gold, the braziers sink, and every
+## past victory stands a candle on the dais. The braziers' and the sigil's
+## lights follow the heat, so each change rebuilds the light list.
+var sigil_heat := 1.0:
+	set(value):
+		sigil_heat = value
+		_light_points_dirty = true
+var sigil_gold := 0.0:
+	set(value):
+		sigil_gold = value
+		_light_points_dirty = true
+var fire_heat := 1.0:
+	set(value):
+		fire_heat = value
+		_light_points_dirty = true
+var victory_candles := 0
 
 func setup(tmpl: Dictionary, p_is_boss: bool, player: Node, seed_val: int) -> void:
 	template = tmpl
@@ -161,9 +180,13 @@ func _add_solid(r: Rect2) -> void:
 	add_child(body)
 
 ## Geometry-derived, deterministic dressing uses no encounter RNG draws.
+## The throne is left clear for the finale: its only dressing is the candles.
 func _build_props() -> void:
 	# The candles placed here join the light list.
 	_light_points_dirty = true
+	if is_boss:
+		victory_candles = mini(Save.get_victories(), MAX_DAIS_CANDLES)
+		return
 	var entry: Vector2 = template.get("entry", Vector2.ZERO)
 	var exit: Vector2 = template.get("exit", Vector2.ZERO)
 	var walls: Array = template.get("walls", [])
@@ -441,9 +464,9 @@ func light_points() -> Array:
 		"crossfire":
 			out.append({ "pos": Vector2(640.0, Content.FLOOR_Y - 300.0), "radius": 80.0, "color": Content.PAL.special, "alpha": 0.12, "rate": 2.0, "phase": 0.0 })
 		"boss":
-			out.append({ "pos": Vector2(300.0, Content.FLOOR_Y - 58.0), "radius": 160.0, "color": torch, "alpha": 0.36, "rate": 8.0, "phase": 0.0 })
-			out.append({ "pos": Vector2(980.0, Content.FLOOR_Y - 58.0), "radius": 160.0, "color": torch, "alpha": 0.36, "rate": 8.0, "phase": 1.7 })
-			out.append({ "pos": Vector2(640.0, Content.FLOOR_Y - 150.0), "radius": 220.0, "color": m.glow, "alpha": 0.16, "rate": 3.0, "phase": 0.5 })
+			out.append({ "pos": Vector2(300.0, Content.FLOOR_Y - 58.0), "radius": 160.0, "color": torch, "alpha": 0.36 * fire_heat, "rate": 8.0, "phase": 0.0 })
+			out.append({ "pos": Vector2(980.0, Content.FLOOR_Y - 58.0), "radius": 160.0, "color": torch, "alpha": 0.36 * fire_heat, "rate": 8.0, "phase": 1.7 })
+			out.append({ "pos": Vector2(640.0, Content.FLOOR_Y - 150.0), "radius": 220.0, "color": (m.glow as Color).lerp(VFX.GOLD, sigil_gold), "alpha": 0.16 * sigil_flare(), "rate": 3.0, "phase": 0.5 })
 	# Fixed room lights retain priority in the small PointLight pool. Every candle
 	# also gets its inexpensive halo from LightLayer, including those outside it.
 	for prop in props:
@@ -749,31 +772,46 @@ func _brazier(base: Vector2, t: float, m: Dictionary) -> void:
 	draw_colored_polygon(PackedVector2Array([base + Vector2(-22.0, -40.0), base + Vector2(22.0, -40.0), base + Vector2(14.0, -56.0), base + Vector2(-14.0, -56.0)]), iron.lightened(0.1))
 	draw_arc(base + Vector2(0.0, -40.0), 22.0, PI, TAU, 16, iron.lightened(0.2), 3.0)
 	for i in range(3):
-		VFX.draw_flame(self, base + Vector2(-9.0 + float(i) * 9.0, -54.0), 30.0 - float(i % 2) * 8.0, 12.0, t, float(i) * 2.2, m.torch, VFX.GOLD)
-	draw_circle(base + Vector2(0.0, -2.0), 26.0, Color(m.torch, 0.06))
+		VFX.draw_flame(self, base + Vector2(-9.0 + float(i) * 9.0, -54.0), (30.0 - float(i % 2) * 8.0) * fire_heat, 12.0, t, float(i) * 2.2, m.torch, VFX.GOLD)
+	draw_circle(base + Vector2(0.0, -2.0), 26.0, Color(m.torch, 0.06 * fire_heat))
 
 func _throne(ci: CanvasItem, base: Vector2, m: Dictionary) -> void:
 	var stone: Color = (m.stone as Color).darkened(0.1)
-	# Dais steps.
+	# Dais steps with gilt nosing and a crimson runner up to the seat.
 	for i in range(3):
 		var w := 300.0 - float(i) * 60.0
-		ci.draw_rect(Rect2(base.x - w * 0.5, base.y - 14.0 * float(i + 1), w, 14.0), stone.lightened(0.05 * float(i)))
-		ci.draw_line(Vector2(base.x - w * 0.5, base.y - 14.0 * float(i + 1)), Vector2(base.x + w * 0.5, base.y - 14.0 * float(i + 1)), Color(VFX.RIM, 0.2), 1.5)
+		var y := base.y - 14.0 * float(i + 1)
+		ci.draw_rect(Rect2(base.x - w * 0.5, y, w, 14.0), stone.lightened(0.05 * float(i)))
+		ci.draw_rect(Rect2(base.x - 30.0, y, 60.0, 14.0), (m.banner as Color).lightened(0.1))
+		ci.draw_line(Vector2(base.x - w * 0.5, y), Vector2(base.x + w * 0.5, y), Color(VFX.GOLD, 0.5), 2.0)
 	var seat := base + Vector2(0.0, -42.0)
-	# Back with a crown of blades.
-	ci.draw_rect(Rect2(seat.x - 60.0, seat.y - 190.0, 120.0, 190.0), stone.darkened(0.15))
+	# Back with a crown of blades, cut and bevelled like the rest of the set.
+	var back := PackedVector2Array([seat + Vector2(-60.0, 0.0), seat + Vector2(-60.0, -190.0), seat + Vector2(60.0, -190.0), seat + Vector2(60.0, 0.0)])
+	VFX.draw_shaded_polygon(ci, back, stone.darkened(0.15))
+	VFX.draw_rim(ci, back, 1.0, 0.6, m.torch)
 	for i in range(7):
 		var x := seat.x - 54.0 + float(i) * 18.0
 		var h := 40.0 + (24.0 if i == 3 else (12.0 if i % 2 == 0 else 0.0))
-		ci.draw_colored_polygon(PackedVector2Array([Vector2(x - 6.0, seat.y - 190.0), Vector2(x, seat.y - 190.0 - h), Vector2(x + 6.0, seat.y - 190.0)]), stone.darkened(0.05))
+		var blade := PackedVector2Array([Vector2(x - 6.0, seat.y - 190.0), Vector2(x, seat.y - 190.0 - h), Vector2(x + 6.0, seat.y - 190.0)])
+		ci.draw_colored_polygon(blade, stone.darkened(0.05))
+		VFX.draw_rim(ci, blade, 1.0, 0.6, m.torch)
 	# Armrests and seat.
 	ci.draw_rect(Rect2(seat.x - 78.0, seat.y - 70.0, 18.0, 70.0), stone)
 	ci.draw_rect(Rect2(seat.x + 60.0, seat.y - 70.0, 18.0, 70.0), stone)
 	ci.draw_rect(Rect2(seat.x - 60.0, seat.y - 30.0, 120.0, 30.0), stone.lightened(0.06))
-	# Ember sigil burning in the backrest.
-	ci.draw_circle(seat + Vector2(0.0, -120.0), 22.0, Color(m.glow, 0.25))
-	VFX.draw_flame(ci, seat + Vector2(0.0, -104.0), 34.0, 18.0, _decor_t(), 0.0, Color(m.torch, 0.85), VFX.GOLD)
-	ci.draw_arc(seat + Vector2(0.0, -120.0), 30.0, 0.0, TAU, 28, Color(m.torch, 0.35), 2.0)
+	# Ember sigil burning in the backrest: the Warden's red, or the knight's gold.
+	var heat := sigil_flare()
+	var fire: Color = (m.torch as Color).lerp(VFX.GOLD, sigil_gold)
+	ci.draw_circle(seat + Vector2(0.0, -120.0), 22.0, Color((m.glow as Color).lerp(VFX.GOLD, sigil_gold), 0.25 * heat))
+	if heat > 0.02:
+		VFX.draw_flame(ci, seat + Vector2(0.0, -104.0), 34.0 * heat, 18.0, _decor_t(), 0.0, Color(fire, minf(1.0, 0.85 * heat)), VFX.GOLD.lerp(VFX.HOT, sigil_gold))
+	ci.draw_arc(seat + Vector2(0.0, -120.0), 30.0, 0.0, TAU, 28, Color(fire, 0.35 * heat), 2.0)
+
+
+## Sigil heat as drawn (the apse window shares it): reduced flash caps the
+## finale's flare.
+func sigil_flare() -> float:
+	return minf(sigil_heat, 1.2) if Feedback.flash_reduced else sigil_heat
 
 func _gear(ci: CanvasItem, c: Vector2, r: float, angle: float, m: Dictionary) -> void:
 	var iron := (m.stone as Color).darkened(0.3)
@@ -907,6 +945,10 @@ func _draw_decor_front(tag: String, m: Dictionary) -> void:
 		"boss":
 			_brazier(Vector2(300.0, fy), t, m)
 			_brazier(Vector2(980.0, fy), t, m)
+			# One candle per past victory on the top step: the Warden is fought
+			# in front of the knight's own tally.
+			if victory_candles > 0:
+				_candles(Vector2(640.0, fy - 42.0), victory_candles, t, m)
 			_stain(Vector2(640.0, fy), 200.0, Color(0.32, 0.05, 0.08, 0.35))
 			_bone_pile(Vector2(-40.0, fy), m)
 			_bone_pile(Vector2(1330.0, fy), m)
