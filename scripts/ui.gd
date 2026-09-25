@@ -1600,6 +1600,7 @@ func lock_until_released(panel_name: String, actions: Array) -> void:
 		button.focus_mode = Control.FOCUS_NONE
 
 
+## Polled every frame, paused or not, ahead of the title-only work in _process.
 func _poll_input_lock() -> void:
 	if _input_lock.is_empty():
 		return
@@ -1611,6 +1612,8 @@ func _poll_input_lock() -> void:
 	_focus_first_control(panel)
 
 
+## Hand the locked panel's buttons back, whether the keys lifted or a new lock
+## (or none) replaces this one.
 func _lift_input_lock() -> void:
 	if _input_lock.is_empty():
 		return

@@ -33,7 +33,9 @@ func _check_title(ui: UI) -> void:
 	# The third win is new: it strikes once as the reveal lifts, then burns.
 	var strikes := [0]
 	tableau.candle_struck.connect(func() -> void: strikes[0] += 1)
-	check(tableau._kindled(2) == 0.0 and tableau._kindled(1) == 1.0, "only the new candle waits to strike")
+	ui.hide_all_panels()
+	ui.show_panel("title")
+	check(tableau.is_visible_in_tree() and tableau._kindled(2) == 0.0 and tableau._kindled(1) == 1.0, "only the new candle waits to strike")
 	for i in range(5):
 		tableau._process(0.5)
 	check(strikes[0] == 1 and tableau._kindled(2) == 1.0, "the new candle strikes once and catches (strikes %d)" % strikes[0])

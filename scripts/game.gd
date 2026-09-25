@@ -70,6 +70,9 @@ var _enemy_shot_frame := -1
 # Visual layers. Lights and ambience are inserted before World so they draw above
 # the backdrop but beneath platforms, actors and combat VFX.
 const TORCH_Y := Content.FLOOR_Y - 200.0
+## Flame scale of every wall sconce and its light; the finale sinks it when the
+## throne goes cold.
+var sconce_heat := 1.0
 var _light_layer: Node2D
 var _atmosphere: Node2D
 var _vignette: CanvasLayer
@@ -873,9 +876,8 @@ const STATUE := [
 	[Vector2(6, -188), Vector2(26, -182), Vector2(64, -158), Vector2(58, -146), Vector2(16, -164)],
 ]
 const STATUE_CUP := [Vector2(-46, -266), Vector2(-12, -266), Vector2(-20, -250), Vector2(-38, -250)]
-## Flame scale of every wall sconce; the finale sinks it when the throne goes cold.
-var sconce_heat := 1.0
 
+## The boss room paints the throne apse and hangs its sconces there.
 func _in_throne_room() -> bool:
 	return is_instance_valid(room) and room.is_boss
 
