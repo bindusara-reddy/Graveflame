@@ -5,13 +5,22 @@ extends Node2D
 const VFX := preload("res://scripts/vfx.gd")
 const KnightArt := preload("res://scripts/knight_art.gd")
 
+## Per-kind [drag, gravity]: light hangs where it flared, debris falls, smoke and
+## embers rise. Any kind not listed falls like a spark.
+const MOTION := {
+	"ring": [3.0, 0.0], "afterimage": [3.0, 0.0], "parry_ring": [3.0, 0.0], "ground_ring": [3.0, 0.0],
+	"slash": [3.0, 0.0], "flash": [3.0, 0.0], "riposte": [3.0, 0.0],
+	"shard": [2.2, 400.0], "hitspark": [3.0, 400.0], "number": [4.0, 240.0],
+	"puff": [4.5, -15.0], "ember": [1.5, -40.0],
+}
+const SPARK_MOTION := [3.0, 600.0]
+
 var camera: Camera2D
 var shake_amp := 0.0
 var shake_time := 0.0
-var reduced_motion := false
-var reduced_flash := false
-## Global mirrors so visual-only nodes (projectiles, backdrop, title) can honor the
-## accessibility switches without holding a reference to this instance.
+## Accessibility switches, static so visual-only nodes can honor them without a
+## reference to this instance; write them through set_reduced_motion /
+## set_reduced_flash, which also clear effects.
 static var motion_reduced := false
 static var flash_reduced := false
 ## Controller vibration switch (Options). Off means the pad never rumbles.
@@ -68,7 +77,7 @@ func _apply_time_scale() -> void:
 ## Reduced motion keeps real time: a sudden world slowdown is exactly the kind
 ## of motion change that setting exists to remove.
 func slow_motion(scale: float, duration: float) -> void:
-	if reduced_motion or not is_inside_tree():
+	if motion_reduced or not is_inside_tree():
 		return
 	if _slowmo_tween != null and _slowmo_tween.is_valid():
 		_slowmo_tween.kill()
@@ -164,7 +173,7 @@ func play(name: String, pitch: float = 1.0, volume_db: float = 0.0) -> void:
 ## Rift bloom where an enemy is pulled into the chamber: ring plus rising embers.
 func spawn_rift(pos: Vector2, color: Color) -> void:
 	_add_ring(pos, color, 4.0, 48.0, 0.36, 3.0)
-	if reduced_motion:
+	if motion_reduced:
 		return
 	var effect_color := _accessible_color(color)
 	for i in range(12):
@@ -204,7 +213,7 @@ func damage_number(pos: Vector2, amount: float, kind: String = "hit", text: Stri
 				color = VFX.GOLD.lerp(VFX.HOT, 0.5)
 				size = 30.0
 	var vel := Vector2(randf_range(-26.0, 26.0), -randf_range(120.0, 170.0))
-	if reduced_motion:
+	if motion_reduced:
 		vel = Vector2(0.0, -40.0)
 	_push_particle({
 		"kind": "number", "pos": pos + Vector2(randf_range(-8.0, 8.0), 0.0), "vel": vel,
@@ -214,7 +223,7 @@ func damage_number(pos: Vector2, amount: float, kind: String = "hit", text: Stri
 ## Briefly slows the world, measured in real time so restoration is reliable.
 ## Overlapping calls extend the current stop instead of racing separate timers.
 func hit_stop(duration: float) -> void:
-	if duration <= 0.0 or reduced_motion or not is_inside_tree():
+	if duration <= 0.0 or motion_reduced or not is_inside_tree():
 		return
 	var until := Time.get_ticks_usec() + int(duration * 1000000.0)
 	_hit_stop_until_usec = maxi(_hit_stop_until_usec, until)
@@ -248,12 +257,12 @@ func rumble(weak: float, strong: float, duration: float) -> void:
 		Input.start_joy_vibration(pad, clampf(weak, 0.0, 1.0), clampf(strong, 0.0, 1.0), duration)
 
 func shake(amp: float, time: float) -> void:
-	if reduced_motion: return
+	if motion_reduced: return
 	shake_amp = maxf(shake_amp, amp)
 	shake_time = maxf(shake_time, time)
 
 func burst(pos: Vector2, count: int, color: Color, speed: float = 220.0) -> void:
-	if reduced_motion:
+	if motion_reduced:
 		count = maxi(2, count / 4)
 		speed *= 0.35
 	var effect_color := _accessible_color(color)
@@ -270,9 +279,9 @@ func burst(pos: Vector2, count: int, color: Color, speed: float = 220.0) -> void
 ## Ceramic/brass fragments follow the blow, with no loot or explosion flash.
 func shatter(pos: Vector2, force: Vector2, color: Color) -> void:
 	play("shatter")
-	var count := 3 if reduced_motion else 12
+	var count := 3 if motion_reduced else 12
 	for i in range(count):
-		var speed := 0.18 if reduced_motion else 1.0
+		var speed := 0.18 if motion_reduced else 1.0
 		var size := randf_range(3.0, 7.0)
 		_push_particle({
 			"kind": "shard", "pos": pos + Vector2(randf_range(-10.0, 10.0), randf_range(-12.0, 10.0)),
@@ -292,14 +301,14 @@ func flash_death(pos: Vector2, color: Color, big: bool = false) -> void:
 	# stays light; the big deaths keep the full shower.
 	var shards := 32 if big else 9
 	var sparks := 20 if big else 12
-	if reduced_motion:
+	if motion_reduced:
 		shards = 5
 		sparks = 3
 	var outline := _accessible_color(VFX.EMBER.lerp(color, 0.35))
 	for i in range(shards):
 		if _particles.size() >= MAX_PARTICLES: break
 		var a := randf() * TAU
-		var s := randf_range(220.0, 480.0) * (0.35 if reduced_motion else 1.0)
+		var s := randf_range(220.0, 480.0) * (0.35 if motion_reduced else 1.0)
 		var corners := 3 + (i % 3)
 		var size := randf_range(3.0, 11.0)
 		var shape := PackedVector2Array()
@@ -312,12 +321,12 @@ func flash_death(pos: Vector2, color: Color, big: bool = false) -> void:
 			"shape": shape, "rot": randf() * TAU, "angvel": randf_range(-12.0, 12.0)
 		})
 	burst_sparks(pos, sparks, 320.0, color)
-	if not reduced_motion and not reduced_flash:
+	if not motion_reduced and not flash_reduced:
 		_add_ring(pos, color, 12.0, 54.0, 0.28, 4.0)
 
 ## Directional sparks that stretch along their velocity and ramp white -> tint -> ember.
 func burst_sparks(pos: Vector2, count: int, speed: float, tint: Color = VFX.GOLD) -> void:
-	if reduced_motion:
+	if motion_reduced:
 		count = maxi(2, count / 4)
 		speed *= 0.35
 	var tint_col := _accessible_color(tint)
@@ -334,7 +343,7 @@ func burst_sparks(pos: Vector2, count: int, speed: float, tint: Color = VFX.GOLD
 ## facing right) so the glow travels the way the sword actually swung: down for
 ## the cut, up for the cleave, overhead for the finisher.
 func slash_arc(origin: Vector2, facing: float, radius: float, a0: float, a1: float, heavy: bool = false) -> void:
-	if reduced_motion:
+	if motion_reduced:
 		return
 	_push_particle({
 		"kind": "slash", "pos": origin, "vel": Vector2.ZERO, "life": 0.16, "max": 0.16,
@@ -353,26 +362,26 @@ func parry_flash(pos: Vector2) -> void:
 	var life := 0.16
 	_push_particle({
 		"kind": "parry_ring", "pos": pos, "vel": Vector2.ZERO, "life": life, "max": life,
-		"color": Color(VFX.TEAL, 0.22 if reduced_flash else 1.0), "size": 3.0,
-		"radius_from": 8.0, "radius_to": 40.0 if reduced_motion else 78.0
+		"color": Color(VFX.TEAL, 0.22 if flash_reduced else 1.0), "size": 3.0,
+		"radius_from": 8.0, "radius_to": 40.0 if motion_reduced else 78.0
 	})
 	burst_sparks(pos, 12, 300.0)
 
 ## Explosion payoff: gold flash plus an ember ring out to the blast radius.
 func blast(pos: Vector2, radius: float) -> void:
 	_flash(pos, radius * 0.5)
-	if not reduced_motion:
+	if not motion_reduced:
 		_add_ring(pos, VFX.EMBER, 12.0, radius, 0.3, 5.0)
 
 func _flash(pos: Vector2, radius: float) -> void:
-	if reduced_flash:
+	if flash_reduced:
 		return
 	_push_particle({ "kind": "flash", "pos": pos, "vel": Vector2.ZERO, "life": 0.05, "max": 0.05, "color": VFX.GOLD, "size": radius })
 
 ## Forward-moving streaks for sword swings. `facing` should be -1 or 1.
 func slash(pos: Vector2, facing: float, color: Color = Color("ffd23f"), heavy: bool = false) -> void:
 	var count := 7 if heavy else 4
-	if reduced_motion:
+	if motion_reduced:
 		count = 1
 	var effect_color := _accessible_color(color)
 	for i in range(count):
@@ -390,10 +399,10 @@ func slash(pos: Vector2, facing: float, color: Color = Color("ffd23f"), heavy: b
 ## A flat echo of the knight in the pose it held, left behind while dashing.
 ## No pose, no echo.
 func afterimage(pos: Vector2, facing: float, color: Color = Color("e8e0d0"), pose: Dictionary = {}) -> void:
-	if reduced_motion or pose.is_empty():
+	if motion_reduced or pose.is_empty():
 		return
 	var effect_color := _accessible_color(color)
-	effect_color.a = minf(effect_color.a, 0.38 if not reduced_flash else 0.16)
+	effect_color.a = minf(effect_color.a, 0.38 if not flash_reduced else 0.16)
 	_push_particle({
 		"kind": "afterimage", "pos": pos, "vel": Vector2(-facing * 28.0, 0.0),
 		"life": 0.20, "max": 0.20, "color": effect_color, "size": 1.0, "facing": facing,
@@ -403,12 +412,12 @@ func afterimage(pos: Vector2, facing: float, color: Color = Color("e8e0d0"), pos
 ## Stretched sparks plus a compact additive ring at the actual point of contact.
 func impact(pos: Vector2, color: Color = Color("ffa827"), heavy: bool = false) -> void:
 	burst_sparks(pos, 18 if heavy else 14, 380.0 if heavy else 300.0, color)
-	if not reduced_motion:
+	if not motion_reduced:
 		_add_ring(pos, color, 6.0, 36.0 if heavy else 25.0, 0.16, 4.0 if heavy else 2.5)
 
 ## Floor-hugging slam dust: a flattened expanding ring plus squashed puffs.
 func land_dust(pos: Vector2, strength: float = 1.0) -> void:
-	if reduced_motion:
+	if motion_reduced:
 		return
 	_push_particle({
 		"kind": "ground_ring", "pos": pos, "vel": Vector2.ZERO, "life": 0.38, "max": 0.38,
@@ -426,7 +435,7 @@ func land_dust(pos: Vector2, strength: float = 1.0) -> void:
 
 func _add_ring(pos: Vector2, color: Color, radius_from: float, radius_to: float, life: float, width: float) -> void:
 	var effect_color := _accessible_color(color)
-	if reduced_flash:
+	if flash_reduced:
 		effect_color.a = minf(effect_color.a, 0.22)
 	_push_particle({
 		"kind": "ring", "pos": pos, "vel": Vector2.ZERO, "life": life, "max": life,
@@ -435,7 +444,7 @@ func _add_ring(pos: Vector2, color: Color, radius_from: float, radius_to: float,
 
 func _accessible_color(color: Color) -> Color:
 	var out := color
-	if reduced_flash:
+	if flash_reduced:
 		out = out.lerp(Color(0.55, 0.52, 0.58, out.a), 0.35)
 		out.a = minf(out.a, 0.48)
 	return out
@@ -448,7 +457,7 @@ func _process(delta: float) -> void:
 	if _sfx_thread != null:
 		_collect_sfx()
 	# Shake
-	if shake_time > 0.0 and not reduced_motion:
+	if shake_time > 0.0 and not motion_reduced:
 		shake_time -= delta
 		var o := Vector2(randf_range(-1, 1), randf_range(-1, 1)) * shake_amp
 		camera.offset = o
@@ -461,29 +470,13 @@ func _process(delta: float) -> void:
 		var p: Dictionary = _particles[i]
 		var kind := String(p.get("kind", "spark"))
 		p.pos += p.vel * delta
-		match kind:
-			"ring", "afterimage", "parry_ring", "ground_ring", "slash", "flash", "riposte":
-				p.vel *= maxf(0.0, 1.0 - 3.0 * delta)
-			"shard":
-				p.vel *= maxf(0.0, 1.0 - 2.2 * delta)
-				p.vel.y += 400.0 * delta
-				p.rot = float(p.get("rot", 0.0)) + float(p.get("angvel", 0.0)) * delta
-			"puff":
-				p.vel *= maxf(0.0, 1.0 - 4.5 * delta)
-				p.vel.y -= 15.0 * delta
-			"number":
-				p.vel *= maxf(0.0, 1.0 - 4.0 * delta)
-				p.vel.y += 240.0 * delta
-			"ember":
-				p.vel *= maxf(0.0, 1.0 - 1.5 * delta)
-				p.vel.y -= 40.0 * delta
-				p.pos.x += sin(float(p.get("life", 0.0)) * 20.0) * 12.0 * delta
-			"hitspark":
-				p.vel *= maxf(0.0, 1.0 - 3.0 * delta)
-				p.vel.y += 400.0 * delta
-			_:
-				p.vel *= maxf(0.0, 1.0 - 3.0 * delta)
-				p.vel.y += 600.0 * delta
+		var motion: Array = MOTION.get(kind, SPARK_MOTION)
+		p.vel *= maxf(0.0, 1.0 - float(motion[0]) * delta)
+		p.vel.y += float(motion[1]) * delta
+		if kind == "shard":
+			p.rot = float(p.get("rot", 0.0)) + float(p.get("angvel", 0.0)) * delta
+		elif kind == "ember":
+			p.pos.x += sin(float(p.get("life", 0.0)) * 20.0) * 12.0 * delta
 		p.life -= delta
 		if p.life <= 0.0:
 			_particles.remove_at(i)
@@ -499,7 +492,7 @@ func _draw() -> void:
 		var maximum: float = maxf(float(p.get("max", 0.001)), 0.001)
 		var a := clampf(life / maximum, 0.0, 1.0)
 		var c: Color = p.get("color", Color.WHITE)
-		c.a *= a * (0.55 if reduced_flash else 1.0)
+		c.a *= a * (0.55 if flash_reduced else 1.0)
 		var pos: Vector2 = p.get("pos", Vector2.ZERO)
 		var size := float(p.get("size", 3.0))
 		match String(p.get("kind", "spark")):
@@ -558,7 +551,7 @@ func _draw() -> void:
 				# Pop in over the first 20% of life, hold, then fade over the last 40%.
 				var age := 1.0 - a
 				var pop := 1.0 + 0.4 * (1.0 - clampf(age / 0.2, 0.0, 1.0))
-				var alpha := clampf(a / 0.4, 0.0, 1.0) * (0.55 if reduced_flash else 1.0)
+				var alpha := clampf(a / 0.4, 0.0, 1.0) * (0.55 if flash_reduced else 1.0)
 				var fs := maxi(8, int(size * pop))
 				var width := font.get_string_size(txt, HORIZONTAL_ALIGNMENT_CENTER, -1, fs).x
 				var at := pos + Vector2(-width * 0.5, 0.0)
@@ -576,7 +569,7 @@ func _draw_glow() -> void:
 			continue
 		var a := clampf(float(p.get("life", 0.0)) / maxf(float(p.get("max", 0.001)), 0.001), 0.0, 1.0)
 		var c: Color = p.get("color", Color.WHITE)
-		c.a *= a * (0.55 if reduced_flash else 1.0)
+		c.a *= a * (0.55 if flash_reduced else 1.0)
 		var pos: Vector2 = p.get("pos", Vector2.ZERO)
 		var size := float(p.get("size", 3.0))
 		match kind:
@@ -606,8 +599,7 @@ func _draw_glow() -> void:
 				_glow.draw_circle(pos, size, Color(c.r, c.g, c.b, c.a * 0.8))
 
 func set_reduced_motion(v: bool) -> void:
-	reduced_motion = v
-	Feedback.motion_reduced = v
+	motion_reduced = v
 	if v:
 		shake_amp = 0.0
 		shake_time = 0.0
@@ -619,8 +611,7 @@ func set_reduced_motion(v: bool) -> void:
 		_glow.queue_redraw()
 
 func set_reduced_flash(v: bool) -> void:
-	reduced_flash = v
-	Feedback.flash_reduced = v
+	flash_reduced = v
 	queue_redraw()
 	if _glow != null:
 		_glow.queue_redraw()
