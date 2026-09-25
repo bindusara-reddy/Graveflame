@@ -21,7 +21,6 @@ const CAM_ZOOM := 1.15
 ## World pixels per rendered pixel. The whole frame renders vector-native at
 ## full resolution: no pixel grid, no nearest filtering, smooth sub-pixel art.
 const PIXEL_SCALE := 1.0
-const TILE := 64
 const FLOOR_Y := 600.0
 const ROOM_LEFT := -200.0
 const ROOM_RIGHT := 1480.0
@@ -70,7 +69,6 @@ const P_WALL_JUMP_VEL := Vector2(560.0, -760.0)
 const P_WALL_STICK_TIME := 0.12
 
 # --- Parry (timed block) ---
-const PARRY_INPUT := "parry"
 const PARRY_WINDOW := 0.16       # active deflect window
 const PARRY_COOLDOWN := 0.5
 const PARRY_RANGE := 78.0
@@ -98,7 +96,6 @@ const COMBO := [
 	{ "name": "cleave","startup": 0.08, "active": 0.10, "recover": 0.20, "damage": 16.0, "knock": 300.0, "range": 74.0,  "arc": 1.8,  "window": 0.34, "lunge": 185.0 },
 	{ "name": "finish","startup": 0.10, "active": 0.12, "recover": 0.26, "damage": 24.0, "knock": 460.0, "range": 84.0,  "arc": 2.05, "window": 0.0, "lunge": 235.0 },
 ]
-const COMBO_RESET := 0.55
 
 # --- Enemy archetypes ---
 enum EnemyKind { STALKER, HOPPER, WISP, BRUTE, BOMBER, CROW }
@@ -110,10 +107,9 @@ const ENEMY := {
 	EnemyKind.BOMBER:  { "hp": 22.0,  "speed": 170.0, "damage": 20.0, "knock": 100.0, "cd": 1.4, "windup": 0.80, "recover": 0.0,  "score": 20, "w": 34.0, "h": 36.0, "color": Color("b85c2e"), "explodes": true, "fuse": 0.8, "blast_radius": 90.0 },
 	## Carrion crow: circles overhead, shrieks while it hangs in the air, then
 	## dives along a line it commits to. Sidestep the line or parry it down.
-	EnemyKind.CROW:    { "hp": 24.0,  "speed": 230.0, "damage": 13.0, "knock": 220.0, "cd": 1.9, "windup": 0.55, "recover": 0.55, "score": 18, "w": 34.0, "h": 26.0, "color": Color("5a4a78"), "dive_speed": 760.0, "flies": true },
+	EnemyKind.CROW:    { "hp": 24.0,  "speed": 230.0, "damage": 13.0, "knock": 220.0, "cd": 1.9, "windup": 0.55, "recover": 0.55, "score": 18, "w": 34.0, "h": 26.0, "color": Color("5a4a78"), "dive_speed": 760.0 },
 }
 const CROW_HOVER := 165.0
-const ENEMY_RANGED := EnemyKind.WISP
 const WISP_SHOT_SPEED := 460.0
 const WISP_SHOT_LIFE := 2.4
 const WISP_SHOT_DAMAGE := 10.0
@@ -193,30 +189,12 @@ static func streak_tier(kills: int) -> int:
 
 # --- Palettes ---
 const PAL := {
-	# Backdrop: deep void above, crypt navy through the arches, a faint warm
-	# horizon at the floor line, then the pit falls away to near-black.
-	"bg_top": Color("07050b"),
-	"bg_mid": Color("130d21"),
-	"bg_bot": Color("1a112b"),
-	"bg_pit": Color("050308"),
-	"tyrian": Color("221538"),
-	"mortar": Color("312347"),
-	"slate": Color("5e4b75"),
-	"rim": Color("7e639e"),
-	"platform": Color("1f1430"),
-	"platform_edge": Color("4d3866"),
-	"hazard": Color("6a2230"),
 	"player": Color("e8e0d0"),
 	"player_accent": Color("ff7a18"),
-	"enemy_hurt": Color("ffffff"),
 	"attack": Color("ffa827"),
-	"flame_gold": Color("ffa827"),
-	"core_orange": Color("ff5500"),
-	"ember": Color("ff2a00"),
 	"special": Color("7fd4ff"),
 	"exit": Color("2be4c8"),
 	"text": Color("e8e0d0"),
-	"text_dim": Color("9a8fa6"),
 	"hurt_number": Color("ff6b6b"),
 	"heal_number": Color("2be4c8"),
 }
@@ -227,18 +205,17 @@ const MOODS := [
 	{
 		"name": "crypt", "ambient": Color(0.5, 0.56, 0.78), "bg_top": Color("060812"), "bg_mid": Color("0e1526"), "bg_bot": Color("172238"), "pit": Color("04060c"),
 		"fog": Color("1a2440"), "stone": Color("222c44"), "wall": Color("141c30"), "edge": Color("2a3652"), "spire": Color("090c18"),
-		"tile_tint": Color(1.0, 1.0, 1.0), "layer_tint": Color(1.0, 1.0, 1.0),
 		"torch": Color("ffa827"), "glow": Color(0.85, 0.25, 0.08), "moon": Color("c9d2ee"), "moon_alpha": 0.9,
 		"banner": Color("1d3a45"), "glass": Color("3a7f9a"), "stars": 1.0, "ember_seep": 0.0, "moss": 0.8,
 	},
 	{
-		"name": "forge", "ambient": Color(0.7, 0.52, 0.46), "tile_tint": Color(1.08, 0.86, 0.72), "layer_tint": Color(1.05, 0.84, 0.7), "bg_top": Color("0a0509"), "bg_mid": Color("1d0d16"), "bg_bot": Color("2b1412"), "pit": Color("0a0405"),
+		"name": "forge", "ambient": Color(0.7, 0.52, 0.46), "bg_top": Color("0a0509"), "bg_mid": Color("1d0d16"), "bg_bot": Color("2b1412"), "pit": Color("0a0405"),
 		"fog": Color("3a1410"), "stone": Color("2a1522"), "wall": Color("1e0f18"), "edge": Color("35192a"), "spire": Color("120710"),
 		"torch": Color("ff7a18"), "glow": Color(1.0, 0.4, 0.08), "moon": Color("ff9a4a"), "moon_alpha": 0.7,
 		"banner": Color("4a2a12"), "glass": Color("c9662a"), "stars": 0.35, "ember_seep": 0.6, "moss": 0.2,
 	},
 	{
-		"name": "throne", "ambient": Color(0.72, 0.42, 0.46), "tile_tint": Color(1.12, 0.72, 0.68), "layer_tint": Color(1.1, 0.68, 0.66), "bg_top": Color("0b0407"), "bg_mid": Color("200a11"), "bg_bot": Color("35101a"), "pit": Color("0c0406"),
+		"name": "throne", "ambient": Color(0.72, 0.42, 0.46), "bg_top": Color("0b0407"), "bg_mid": Color("200a11"), "bg_bot": Color("35101a"), "pit": Color("0c0406"),
 		"fog": Color("46101a"), "stone": Color("2e1320"), "wall": Color("240c15"), "edge": Color("3f1524"), "spire": Color("15060c"),
 		"torch": Color("ff5a2a"), "glow": Color(1.0, 0.22, 0.1), "moon": Color("ff5f4a"), "moon_alpha": 0.8,
 		"banner": Color("5c1220"), "glass": Color("b8283c"), "stars": 0.0, "ember_seep": 1.0, "moss": 0.0,
@@ -318,9 +295,7 @@ static var ROOM_TEMPLATES: Array = [
 		"tag": "gap",
 		"name": "BROKEN CAUSEWAY",
 		"platforms": [
-			# Near floors run right up to their pit's spikes. They were authored when
-			# ROOM_LEFT was 0; measured from -200 they stopped 200px short, leaving
-			# a bottomless strip with no spikes in front of every pit.
+			# Near floors run right up to their pit's spikes, so no bottomless strip opens in front of a pit.
 			Rect2(ROOM_LEFT, FLOOR_Y, 620 - ROOM_LEFT, 120),
 			Rect2(860, FLOOR_Y, ROOM_RIGHT - 860, 120),
 			Rect2(680, FLOOR_Y - 180, 140, 40),
@@ -419,17 +394,12 @@ static var BOSS_TEMPLATE: Dictionary = {
 	"exit": Vector2(640, FLOOR_Y - 80),
 }
 
-## Authored encounter waves per route position. A short breath between waves keeps
-## combat readable while still building the gauntlet pressure of the genre.
-static func encounter_waves_for_room(room_index: int) -> Array:
-	match room_index:
-		0: return [[EnemyKind.STALKER, EnemyKind.STALKER]]
-		1: return [[EnemyKind.STALKER, EnemyKind.HOPPER], [EnemyKind.WISP, EnemyKind.STALKER]]
-		2: return [[EnemyKind.HOPPER, EnemyKind.WISP], [EnemyKind.HOPPER, EnemyKind.STALKER]]
-		3: return [[EnemyKind.WISP, EnemyKind.STALKER], [EnemyKind.BRUTE, EnemyKind.BOMBER]]
-		4: return [[EnemyKind.BRUTE, EnemyKind.WISP], [EnemyKind.BOMBER, EnemyKind.HOPPER, EnemyKind.STALKER]]
-		5: return [[EnemyKind.BOMBER, EnemyKind.HOPPER, EnemyKind.WISP], [EnemyKind.BRUTE, EnemyKind.STALKER, EnemyKind.WISP]]
-		_: return [[EnemyKind.STALKER, EnemyKind.HOPPER], [EnemyKind.WISP, EnemyKind.BRUTE]]
+## Authored encounter waves for the first two route positions. A short breath between
+## waves keeps combat readable while still building the gauntlet pressure of the genre.
+const OPENING_WAVES := [
+	[[EnemyKind.STALKER, EnemyKind.STALKER]],
+	[[EnemyKind.STALKER, EnemyKind.HOPPER], [EnemyKind.WISP, EnemyKind.STALKER]],
+]
 
 ## Threat costs used by the wave generator. Heavier archetypes unlock with depth.
 const THREAT_COST := {
@@ -452,8 +422,9 @@ static func _unlocked_kinds(room_index: int) -> Array:
 ## opening curve is stable; deeper rooms are filled from a threat budget with the
 ## room's seeded RNG, so a seed always reproduces the same gauntlet.
 static func generate_waves(room_index: int, rng: RandomNumberGenerator) -> Array:
-	if room_index <= 1:
-		return encounter_waves_for_room(room_index)
+	if room_index < OPENING_WAVES.size():
+		# Copied: rooms append a Trial wave to the array they are handed.
+		return (OPENING_WAVES[room_index] as Array).duplicate(true)
 	var wave_count := 3 if room_index >= 4 else 2
 	var budget := 5.0 + 2.2 * float(room_index)
 	var kinds := _unlocked_kinds(room_index)
@@ -482,13 +453,6 @@ static func generate_waves(room_index: int, rng: RandomNumberGenerator) -> Array
 			wave.append(EnemyKind.STALKER)
 		waves.append(wave)
 	return waves
-
-## Compatibility helper used by tests and tooling that want a flat encounter.
-static func encounter_for_room(room_index: int) -> Array:
-	var out: Array = []
-	for wave in encounter_waves_for_room(room_index):
-		out.append_array(wave)
-	return out
 
 static func room_name(template: Dictionary) -> String:
 	return str(template.get("name", str(template.get("tag", "unknown")).to_upper()))
@@ -566,17 +530,16 @@ const VICTORY_LINES := [
 
 # --- Cells meta-progression (currency kept across runs, Dead Cells-style) ---
 ## Ranked relics. `costs[r]` buys rank r+1; `value` applies once per rank owned.
-## `cost` mirrors the first rank for older callers. Costs climb so cells keep
-## meaning something long after the first few runs.
+## Costs climb so cells keep meaning something long after the first few runs.
 const META_UPGRADES: Array = [
-	{ "id": "m_max_hp",  "title": "Ember Soul",    "desc": "+10 starting health per rank.",       "cost": 5,  "costs": [5, 12, 22, 36, 55], "kind": "max_hp",        "value": 10.0 },
-	{ "id": "m_dmg",     "title": "Sharpened",     "desc": "+6% melee damage per rank.",          "cost": 7,  "costs": [7, 16, 28, 44, 64], "kind": "dmg_mul",       "value": 0.06 },
-	{ "id": "m_flask",   "title": "Potion Belt",   "desc": "+1 flask charge per rank.",           "cost": 8,  "costs": [8, 30],             "kind": "flask",         "value": 1.0 },
-	{ "id": "m_speed",   "title": "Quickened",     "desc": "+4% move speed per rank.",            "cost": 6,  "costs": [6, 14, 26],         "kind": "speed_mul",     "value": 0.04 },
-	{ "id": "m_special", "title": "Arcane Spark",  "desc": "Start each run with +20 Graveflame per rank.", "cost": 6, "costs": [6, 14, 26], "kind": "special_start", "value": 20.0 },
-	{ "id": "m_kindled", "title": "Kindled Blood", "desc": "Begin every run carrying a common boon.", "cost": 30, "costs": [30],          "kind": "start_boon",    "value": 1.0 },
-	{ "id": "m_seer",    "title": "Seer's Eye",    "desc": "Boon offers show a fourth choice.",    "cost": 45, "costs": [45],             "kind": "offer_count",   "value": 1.0 },
-	{ "id": "m_tithe",   "title": "Tithe",         "desc": "+25% cells from every source per rank.", "cost": 20, "costs": [20, 50],        "kind": "cell_mul",      "value": 0.25 },
+	{ "id": "m_max_hp",  "title": "Ember Soul",    "desc": "+10 starting health per rank.",       "costs": [5, 12, 22, 36, 55], "kind": "max_hp",        "value": 10.0 },
+	{ "id": "m_dmg",     "title": "Sharpened",     "desc": "+6% melee damage per rank.",          "costs": [7, 16, 28, 44, 64], "kind": "dmg_mul",       "value": 0.06 },
+	{ "id": "m_flask",   "title": "Potion Belt",   "desc": "+1 flask charge per rank.",           "costs": [8, 30],             "kind": "flask",         "value": 1.0 },
+	{ "id": "m_speed",   "title": "Quickened",     "desc": "+4% move speed per rank.",            "costs": [6, 14, 26],         "kind": "speed_mul",     "value": 0.04 },
+	{ "id": "m_special", "title": "Arcane Spark",  "desc": "Start each run with +20 Graveflame per rank.", "costs": [6, 14, 26], "kind": "special_start", "value": 20.0 },
+	{ "id": "m_kindled", "title": "Kindled Blood", "desc": "Begin every run carrying a common boon.", "costs": [30],          "kind": "start_boon",    "value": 1.0 },
+	{ "id": "m_seer",    "title": "Seer's Eye",    "desc": "Boon offers show a fourth choice.",    "costs": [45],             "kind": "offer_count",   "value": 1.0 },
+	{ "id": "m_tithe",   "title": "Tithe",         "desc": "+25% cells from every source per rank.", "costs": [20, 50],        "kind": "cell_mul",      "value": 0.25 },
 ]
 
 static func meta_def(id: String) -> Dictionary:
@@ -586,9 +549,9 @@ static func meta_def(id: String) -> Dictionary:
 	return {}
 
 static func meta_max_rank(u: Dictionary) -> int:
-	return (u.get("costs", [u.get("cost", 0)]) as Array).size()
+	return (u.costs as Array).size()
 
 ## Cost of the next rank, or -1 when the relic is mastered.
 static func meta_next_cost(u: Dictionary, rank: int) -> int:
-	var costs: Array = u.get("costs", [u.get("cost", 0)])
+	var costs: Array = u.costs
 	return int(costs[rank]) if rank < costs.size() else -1

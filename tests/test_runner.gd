@@ -281,7 +281,7 @@ func _test_wave_generation() -> void:
 					check(k != Content.EnemyKind.BRUTE, "brutes only appear from room 3")
 			check(brutes <= 1 and bombers <= 1, "at most one brute and one bomber per wave")
 	var r0 := RandomNumberGenerator.new()
-	check(Content.generate_waves(1, r0) == Content.encounter_waves_for_room(1), "early rooms keep their authored waves")
+	check(Content.generate_waves(1, r0) == Content.OPENING_WAVES[1], "early rooms keep their authored waves")
 	var r5 := RandomNumberGenerator.new()
 	r5.seed = 5
 	check(Content.generate_waves(5, r5).size() == 3, "deep rooms escalate to three waves")
