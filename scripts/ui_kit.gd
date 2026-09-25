@@ -6,7 +6,6 @@ extends RefCounted
 ## the contract suites keep working. Every animated piece obeys reduced motion
 ## (UiTheme.still) and sounds through emit_cue, so it needs no UI reference.
 
-const VFX := preload("res://scripts/vfx.gd")
 const T := preload("res://scripts/ui_theme.gd")
 const P := preload("res://scripts/ui_paint.gd")
 
@@ -520,7 +519,8 @@ class PaperToggle extends CheckBox:
 
 	func _process(delta: float) -> void:
 		_t += delta
-		queue_redraw()
+		if is_visible_in_tree():
+			queue_redraw()
 
 	## The room the switch and its painted title and caption need.
 	func measure() -> Vector2:
