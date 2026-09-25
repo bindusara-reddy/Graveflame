@@ -632,20 +632,25 @@ func _draw_stars(ci: CanvasItem, horizon: float) -> void:
 			ci.draw_circle(Vector2(x, y), 0.8 + h * 1.3, Color(0.85, 0.88, 1.0, (0.2 + 0.5 * tw) * vis))
 
 ## A cold moon over the crypt that reddens into a furnace sun deeper down.
+## Placed to land in the open sky between the HUD's corner panels and above the
+## chamber banner (screen x ~800-840, y ~105 on the floor), where the crescent-to-
+## furnace-sun progression can be seen. The throne's closed vault hides it.
 func _draw_moon(ci: CanvasItem, horizon: float) -> void:
-	var c := Vector2(_plane_x(0.06, 400.0), horizon - 340.0)
 	var col: Color = mood.moon
 	var a := float(mood.moon_alpha)
+	if a <= 0.01:
+		return
+	var c := Vector2(_plane_x(0.06, 195.0), horizon - 362.0)
 	for i in range(5, 0, -1):
-		ci.draw_circle(c, 78.0 + float(i) * 36.0, Color(col, 0.016 * a * float(6 - i)))
-	ci.draw_circle(c, 78.0, Color(col, 0.95 * a))
+		ci.draw_circle(c, 64.0 + float(i) * 30.0, Color(col, 0.016 * a * float(6 - i)))
+	ci.draw_circle(c, 64.0, Color(col, 0.95 * a))
 	for i in range(6):
-		var off := Vector2(VFX.hash01(i, 61) - 0.5, VFX.hash01(i, 62) - 0.5) * 104.0
-		ci.draw_circle(c + off, 5.0 + VFX.hash01(i, 63) * 13.0, Color(col.darkened(0.28), 0.5 * a))
+		var off := Vector2(VFX.hash01(i, 61) - 0.5, VFX.hash01(i, 62) - 0.5) * 85.0
+		ci.draw_circle(c + off, 4.0 + VFX.hash01(i, 63) * 11.0, Color(col.darkened(0.28), 0.5 * a))
 	# Crescent bite in the crypt; it fills in as the moods warm.
 	var bite := float(mood.stars)
 	if bite > 0.01:
-		ci.draw_circle(c + Vector2(38.0, -24.0), 72.0, Color(mood.bg_top, 0.85 * bite))
+		ci.draw_circle(c + Vector2(31.0, -20.0), 59.0, Color(mood.bg_top, 0.85 * bite))
 
 ## A vertical shaft lit by a broad source: brightest a third of the way in from
 ## the lit edge, falling away toward the rim and the shadowed return. Filling a

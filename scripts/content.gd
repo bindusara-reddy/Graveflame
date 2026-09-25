@@ -238,7 +238,7 @@ const MOODS := [
 	{
 		"name": "throne", "ambient": Color(0.72, 0.42, 0.46), "bg_top": Color("0b0407"), "bg_mid": Color("200a11"), "bg_bot": Color("35101a"), "pit": Color("0c0406"),
 		"fog": Color("46101a"), "stone": Color("2e1320"), "wall": Color("240c15"), "edge": Color("3f1524"), "spire": Color("15060c"),
-		"torch": Color("ff5a2a"), "glow": Color(1.0, 0.22, 0.1), "moon": Color("ff5f4a"), "moon_alpha": 0.8,
+		"torch": Color("ff5a2a"), "glow": Color(1.0, 0.22, 0.1), "moon": Color("ff5f4a"), "moon_alpha": 0.0,
 		"banner": Color("5c1220"), "glass": Color("b8283c"), "stars": 0.0, "ember_seep": 1.0, "moss": 0.0,
 	},
 ]
