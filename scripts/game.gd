@@ -1106,8 +1106,7 @@ func _flask_per_room() -> int:
 func _award_cells(base: int) -> int:
 	var n := maxi(1, roundi(float(base) * _cell_mul))
 	_run_cells += n
-	Save.add_cells(n)
-	ui.set_cells(Save.get_cells())
+	ui.set_cells(Save.add_cells(n))
 	return n
 
 ## tier: 0 regular, 1 elite, 2 boss.

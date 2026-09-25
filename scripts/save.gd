@@ -40,10 +40,12 @@ static func save_save(data: Dictionary) -> void:
 	f.store_string(JSON.stringify(data, "  "))
 	f.close()
 
-static func add_cells(amount: int) -> void:
+## Bank `amount` cells and return the new total.
+static func add_cells(amount: int) -> int:
 	var d := load_save()
 	d["cells"] = int(d["cells"]) + amount
 	save_save(d)
+	return int(d["cells"])
 
 static func spend_cells(amount: int) -> bool:
 	var d := load_save()
