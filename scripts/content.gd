@@ -293,7 +293,7 @@ static var UPGRADES: Array = [
 	{ "id": "slam",      "title": "Crater",     "desc": "Down-slam deals +60% damage & wider blast.", "kind": "slam_mul", "value": 0.60, "rarity": "rare" },
 	{ "id": "parry",     "title": "Riposte",    "desc": "Parry window +50% and deflects deal +12 dmg.", "kind": "parry", "value": 12.0, "rarity": "rare" },
 	{ "id": "flask",     "title": "Witch Flask","desc": "+1 flask charge, filled now.", "kind": "flask_charge", "value": 1.0, "rarity": "rare" },
-	{ "id": "dashmaster","title": "Dashmaster", "desc": "Dash cooldown halved, longer i-frames.", "kind": "dash_master", "value": 0.5, "rarity": "epic", "unique": true },
+	{ "id": "dashmaster","title": "Dashmaster", "desc": "Dash cooldown halved; it slips blows for longer.", "kind": "dash_master", "value": 0.5, "rarity": "epic", "unique": true },
 	# --- Synergy boons ---
 	{ "id": "backdraft", "title": "Backdraft",  "desc": "A successful parry refunds 30 Graveflame.", "kind": "parry_special", "value": 30.0, "rarity": "rare" },
 	{ "id": "kindling",  "title": "Kindling",   "desc": "Burn +6 dps and +2s. Finishers always ignite.", "kind": "burn", "value": 6.0, "rarity": "common" },
