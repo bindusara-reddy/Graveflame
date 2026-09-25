@@ -18,7 +18,6 @@ var _t := 0.0
 
 func _ready() -> void:
 	material = VFX.radial_material()
-	set_process(true)
 
 func _process(delta: float) -> void:
 	_t += delta

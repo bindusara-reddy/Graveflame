@@ -70,7 +70,6 @@ func _ready() -> void:
 	_setup_exit()
 	_build_props()
 	_spawn_encounter()
-	set_process(true)
 
 func _process(delta: float) -> void:
 	_ambient_t += delta

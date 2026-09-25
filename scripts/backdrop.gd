@@ -4,9 +4,6 @@ extends Node2D
 
 var game: Game
 
-func _ready() -> void:
-	set_process(true)
-
 func _process(_delta: float) -> void:
 	queue_redraw()
 

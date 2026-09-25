@@ -49,7 +49,6 @@ func _ready() -> void:
 	add_child(_glow)
 	material = VFX.unshaded_material()
 	_init_audio()
-	set_process(true)
 
 func _exit_tree() -> void:
 	if _sfx_thread != null and _sfx_thread.is_started():

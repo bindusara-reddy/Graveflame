@@ -56,7 +56,6 @@ func _ready() -> void:
 		_room_lights.append(_make_light("Room%d" % i, VFX.GOLD, 1.0, 3.0))
 	for i in range(ACTOR_POOL):
 		_actor_lights.append(_make_light("Actor%d" % i, Color.WHITE, 0.8, 2.0))
-	set_process(true)
 
 func _make_light(light_name: String, color: Color, energy: float, scale: float) -> PointLight2D:
 	var l := PointLight2D.new()

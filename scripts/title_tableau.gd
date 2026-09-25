@@ -65,7 +65,6 @@ func _ready() -> void:
 	add_child(_embers)
 	resized.connect(_relayout)
 	_relayout()
-	set_process(true)
 
 
 func _layer(layer_name: String, painter: Callable, mat: Material) -> Control:

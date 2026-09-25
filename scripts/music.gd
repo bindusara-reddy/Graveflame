@@ -47,7 +47,6 @@ func _ready() -> void:
 			th.start(_render_track.bind(name))
 			_threads[name] = th
 	_check_ready()
-	set_process(true)
 
 func _exit_tree() -> void:
 	for name in _threads:

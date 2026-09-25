@@ -194,7 +194,6 @@ func _ready() -> void:
 	_reset_stats()
 	_restore_options()
 	music.play_track("title")
-	set_process(true)
 
 
 ## Reapply the saved settings at boot so a relaunch honours them, then let the
