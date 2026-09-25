@@ -13,10 +13,14 @@ extends Control
 ##
 ## The keep remembers: every won descent lights a candle in a niche, nearest the
 ## knight first, and the knight's own crown burns gold once the Warden has
-## fallen. Keeping all five vows in one descent lets a cold dawn into the vault.
+## fallen. It remembers how the last one ended, too: after the crown was taken
+## the landing stands empty and a small red throne glows far below; after the
+## flames were given back the knight is home and a new star hangs over the
+## well; and once the keep has been put out, a cold dawn stays in the vault.
 
 const VFX := preload("res://scripts/vfx.gd")
 const KnightArt := preload("res://scripts/knight_art.gd")
+const Cast := preload("res://scripts/finale_actors.gd")
 
 ## Seconds for the arrival reveal: the furnace rises and the galleries emerge.
 const REVEAL_TIME := 1.6
@@ -42,8 +46,9 @@ signal candle_struck
 
 var time := 0.0
 var reveal := 1.0
-## What the save remembers, read once per arrival and never while drawing.
-var legacy := {"victories": 0, "roll": [], "oath": false, "celebrated": 0}
+## What the save remembers, read once per arrival and never while drawing:
+## `ending` is Save.get_last_ending(), `dawn` whether the keep was ever put out.
+var legacy := {"victories": 0, "roll": [], "celebrated": 0, "ending": "", "dawn": false}
 
 var _depth: Control
 var _glow: Control
@@ -128,8 +133,9 @@ static func _read_legacy() -> Dictionary:
 	return {
 		"victories": int(d.get("victories", 0)),
 		"roll": roll if roll is Array else [],
-		"oath": bool(d.get("oath_kept", false)),
 		"celebrated": int(d.get("last_celebrated", 0)),
+		"ending": Save.get_last_ending(),
+		"dawn": Save.ended_ever(),
 	}
 
 
@@ -444,6 +450,8 @@ func _draw_depth(ci: Control) -> void:
 		var p0: Vector2 = last.c + Vector2(cos(a) * last.rx * 0.55, sin(a) * last.ry * 0.55 + last.ry * 0.9)
 		var p1: Vector2 = last.c + Vector2(cos(a) * last.rx * 1.3, sin(a) * last.ry * 1.3 + last.ry * 2.2)
 		ci.draw_line(p0, p1, Color(VFX.GOLD, 0.5), 1.5 * k, true)
+	if legacy.ending == "crown":
+		_draw_far_throne(ci, last.c, k)
 	# Galleries: back-wall faces between consecutive ledge arcs. Cold and in the
 	# vault's shadow at the top, hazed and warmed toward the furnace.
 	for i in range(RINGS):
@@ -582,6 +590,19 @@ func _draw_depth(ci: Control) -> void:
 		ci.draw_rect(Rect2(Vector2.ZERO, s), Color(0.01, 0.005, 0.02, (1.0 - e) * 0.82))
 
 
+## The Ember Throne at the bottom of the well, small with distance: a black
+## paper seat with its crown of blades, its edges lit the Warden's red.
+func _draw_far_throne(ci: Control, base: Vector2, k: float) -> void:
+	var back := PackedVector2Array([base + Vector2(-7.0, 0.0) * k, base + Vector2(-7.0, -22.0) * k, base + Vector2(7.0, -22.0) * k, base + Vector2(7.0, 0.0) * k])
+	ci.draw_colored_polygon(back, Color("0b0507"))
+	for i in range(5):
+		var x := -6.0 + 3.0 * float(i)
+		var h := 5.0 + (3.0 if i == 2 else (1.5 if i % 2 == 0 else 0.0))
+		ci.draw_colored_polygon(PackedVector2Array([base + Vector2(x - 1.2, -22.0) * k, base + Vector2(x, -22.0 - h) * k, base + Vector2(x + 1.2, -22.0) * k]), Color("0b0507"))
+	ci.draw_rect(Rect2(base + Vector2(-10.0, -8.0) * k, Vector2(20.0, 8.0) * k), Color("0b0507"))
+	ci.draw_polyline(back, Color(Cast.WARDEN_RED, 0.8), 1.0 * k, true)
+
+
 # --- Glow: additive light -----------------------------------------------------
 
 func _draw_glow(ci: Control) -> void:
@@ -591,8 +612,8 @@ func _draw_glow(ci: Control) -> void:
 	var t := time
 	var breath := 1.0 + sin(t * 0.9) * 0.05
 	# The furnace far below: a wide ember pool climbing the lowest galleries.
-	# Once the Fivefold Oath is kept it banks low under the dawn.
-	var furnace := e * (0.3 if legacy.oath else 1.0)
+	# Once the keep has been put out it banks low under the dawn.
+	var furnace := e * (0.3 if legacy.dawn else 1.0)
 	var last: Dictionary = _rings[RINGS]
 	var origin: Vector2 = last.c + Vector2(0.0, s.y * 0.06)
 	ci.draw_set_transform(Vector2.ZERO, 0.0, Vector2(2.0, 1.0))
@@ -600,8 +621,14 @@ func _draw_glow(ci: Control) -> void:
 	VFX.draw_radial(ci, Vector2(origin.x * 0.5, origin.y + 10.0 * k), s.y * 0.34 * breath, Color(VFX.ORANGE, 0.55 * furnace))
 	ci.draw_set_transform(Vector2.ZERO, 0.0, Vector2.ONE)
 	VFX.draw_radial(ci, origin, s.y * 0.16, Color(VFX.GOLD, 0.6 * furnace))
-	if legacy.oath:
+	if legacy.dawn:
 		_draw_dawn(ci, s, e)
+	match str(legacy.ending):
+		"crown":
+			# The knight sits below now: the throne's red glow at the bottom of the well.
+			VFX.draw_radial(ci, last.c + Vector2(0.0, -6.0 * k), 34.0 * k * breath, Color(Cast.WARDEN_RED, 0.55 * e))
+		"given":
+			_draw_new_star(ci, s, e, t)
 	# Dying torches in the niches.
 	for torch in _torches:
 		var flick := 0.75 + 0.25 * sin(t * 6.0 + float(torch.seed) * 1.3) * sin(t * 2.3 + float(torch.seed))
@@ -616,6 +643,8 @@ func _draw_glow(ci: Control) -> void:
 		VFX.draw_radial(ci, slot.p + Vector2(0.0, -float(slot.h) * 1.3), float(slot.h) * 3.2, Color(VFX.GOLD, pool))
 	# The knight's own light: the only lamp on the landing, warm on the treads.
 	# A knight who has felled the Warden carries a brighter ember.
+	if legacy.ending == "crown":
+		return
 	var sc := KNIGHT_SCALE * k
 	var foot := knight_foot()
 	var head := foot + Vector2(0.0, -BODY_H * 0.5 - BODY_H * 0.52) * sc
@@ -628,8 +657,21 @@ func _draw_glow(ci: Control) -> void:
 	ci.draw_set_transform(Vector2.ZERO, 0.0, Vector2.ONE)
 
 
-## The Fivefold Oath's permanent dawn: pale light at the vault mouth and a cold
-## shaft falling into the pit. Kept right of 0.2w so the near vault stays dark.
+## One new star over the well, for the flames given back: a white-gold point
+## with a slow four-way glint, high in the open mouth.
+func _draw_new_star(ci: Control, s: Vector2, e: float, t: float) -> void:
+	var k := _k()
+	var p := Vector2(s.x * 0.655, s.y * 0.085)
+	var glint := 0.85 + 0.15 * sin(t * 1.3)
+	VFX.draw_radial(ci, p, 22.0 * k * glint, Color(VFX.GOLD, 0.35 * e))
+	VFX.draw_radial(ci, p, 5.0 * k, Color(VFX.HOT, 0.9 * e))
+	for arm: Vector2 in [Vector2(1.0, 0.0), Vector2(0.0, 1.0)]:
+		ci.draw_line(p - arm * 11.0 * k * glint, p + arm * 11.0 * k * glint, Color(VFX.HOT, 0.5 * e), 1.0 * k)
+
+
+## The keep's permanent dawn, once it has been put out: pale light at the
+## vault mouth and a cold shaft falling into the pit. Kept right of 0.2w so the
+## near vault stays dark.
 func _draw_dawn(ci: Control, s: Vector2, e: float) -> void:
 	VFX.draw_radial(ci, Vector2(s.x * 0.62, s.y * 0.02), s.y * 0.5, Color(DAWN, 0.45 * e))
 	# The radial shader fades across U, so the shaft is soft at both edges.
@@ -710,6 +752,9 @@ static func _vault_shade(y: float, height: float) -> float:
 # --- Knight: the gameplay figure's geometry, presented on the landing -----------
 
 func _draw_knight(ci: Control) -> void:
+	# After the crown was taken the landing is empty: the knight is below.
+	if legacy.ending == "crown":
+		return
 	var h := BODY_H
 	var facing := 1.0
 	var sc := KNIGHT_SCALE * _k()
@@ -726,8 +771,8 @@ func _draw_knight(ci: Control) -> void:
 	pose.arm_f = 1.14 + sin(anim * 1.9 + 0.6) * 0.03
 	pose.cape = 0.18 + sin(anim * 1.7) * 0.12
 	pose.flutter = 0.45
-	# After the Oath the knight looks up into the dawn.
-	pose.head = -0.22 if legacy.oath else -0.04
+	# Under the dawn, or with a new star over the well, the knight looks up.
+	pose.head = -0.22 if legacy.dawn or legacy.ending == "given" else -0.04
 	# A knight that has felled the Warden wears the brighter, golden ember.
 	var won := int(legacy.victories) > 0
 	if won:

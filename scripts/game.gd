@@ -414,8 +414,8 @@ func _cancel_beat() -> void:
 func in_finale() -> bool:
 	return is_instance_valid(finale)
 
-## The ending hands over to the results panel, shown over its closed-curtain
-## theatre. Held keys stay locked out until released, so a celebratory jump
+## The ending hands over to the results panel, shown over the ending's last
+## frame. Held keys stay locked out until released, so a celebratory jump
 ## cannot press NEW RUN.
 func _on_finale_finished(skipped: bool) -> void:
 	feedback.stop_world_voices()
@@ -2050,7 +2050,8 @@ func _on_last_ember() -> void:
 	if is_instance_valid(room) and room.boss != null:
 		feedback.blast(room.boss.global_position, 260.0)
 
-## The Warden comes apart: the run's last and loudest beat.
+## The Warden comes apart: the run's last and loudest beat, and the moment the
+## ending splits its costume open.
 func _on_boss_shattered(pos: Vector2) -> void:
 	feedback.flash_death(pos, Content.BOSS_COLOR, true)
 	feedback.flash_death(pos + Vector2(0.0, -40.0), Content.PAL.player_accent, true)
@@ -2061,7 +2062,7 @@ func _on_boss_shattered(pos: Vector2) -> void:
 	feedback.play("elite", 0.667)  # the gong on G, in key
 	feedback.rumble(0.8, 1.0, 0.6)
 	if in_finale():
-		finale.release_hoard(pos)
+		finale.shatter(pos)
 
 func _on_slam_landed(pos: Vector2, _radius: float) -> void:
 	feedback.shake(8.0, 0.22)

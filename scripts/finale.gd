@@ -1,48 +1,64 @@
 class_name Finale
 extends Node
-## "Strike the Set": the ending, directed from the killing blow to the results
-## panel. The Warden's hoard returns one flame to each paper knight it took; the
-## player's held IGNITE gathers their fire while the knight's crown plays the
-## title's unanswered question, and LET GO gives it to the throne; the keep
-## burns off its frame to show the stage it was always painted on, and the
-## fallen, the Warden and the knight take their bows before the curtain falls.
+## "The Warden's Crown": the ending, directed from the killing blow to the
+## results panel. The Warden splits open like a paper costume; kneeling inside
+## is the burnt-out knight who won the throne before, in the same crown. It
+## speaks once and crumbles, and its crown, cracking on the floor, pours out
+## every flame the throne swallowed, one for each knight ever lost, while the
+## fallen fold up out of the floor around the cold throne. The throne calls,
+## and the knight chooses: TAKE THE CROWN (it sits; the hall relights red),
+## GIVE THEM BACK (each flame goes home; the keep burns away to the open sky
+## and the fallen climb the well to become stars) or, sworn to all five vows,
+## END IT (it strikes the throne; every fire goes out; a grey dawn). The last
+## epitaph the knight died to is answered, and the results open.
 ##
 ## Everything runs on this node's own real-time clock (step), from an event
-## sheet anchored to the kill, the take-over, the prompt, the LET GO (I) and the
-## curtain call's downbeat (B0). The timeline never waits on audio, frame rate
-## or Engine.time_scale, and a test can drive it frame by frame (autostep off).
-## Every tween is a ramp on that clock, every layer and actor is created here,
-## and abort() puts back everything borrowed from the game, from any phase.
+## sheet anchored to the kill and to the choice. The timeline never waits on
+## audio, frame rate or Engine.time_scale; only the choice and the gather wait
+## on the player, and nothing ever picks for them. A test can drive it frame by
+## frame (autostep off). Every tween is a ramp on that clock, every layer and
+## actor is created here, and abort() puts back everything borrowed from the
+## game, from any phase.
 
 const VFX := preload("res://scripts/vfx.gd")
 const Cast := preload("res://scripts/finale_actors.gd")
 
 signal finished(skipped: bool)
 
-enum Phase { PROLOGUE, HOARD, COLD, WALK, PROMPT, GATHER, LETGO, STRIKE, BURN, CALL, CURTAIN, EMBER, DONE }
+enum Phase { PROLOGUE, REVEAL, HOARD, CALL, CHOICE, CROWN, PROMPT, GATHER, LETGO, SKY, DARK, LAST_WORD, DONE }
 
-## curtain_b2 runs at 84 bpm; every B event lands on its beats.
+## curtain_b2 runs at 84 bpm; the last word lands on its beat 32.
 const BEAT := 60.0 / 84.0
 ## Held framings as [centre, zoom]. Reduced motion cuts between exactly these.
 const HALL := [Vector2(640.0, 390.0), 1.0]
-const THRONE := [Vector2(620.0, 480.0), 1.55]
-const THEATRE := [Vector2(640.0, 300.0), 0.86]
-## The push for the knight's bow, which reduced motion leaves out.
-const BOW_FRAME := [Vector2(640.0, 440.0), 1.12]
+const THRONE := [Vector2(640.0, 470.0), 1.5]
+const BEFORE_THRONE := [Vector2(640.0, 440.0), 1.2]
+const SEATED := [Vector2(640.0, 470.0), 1.8]
+const DAWN_FRAME := [Vector2(640.0, 400.0), 1.1]
 const SIGIL := Vector2(640.0, 438.0)
 const SIGIL_FLAME := Vector2(640.0, 454.0)
-const EMBER_TOP := Vector2(640.0, 330.0)
-const WARDEN_Y := 460.0
+## The knight's body centre when seated: hips on the seat's top at y 528.
+const SEAT := Vector2(640.0, 522.0)
 const COLD_AMBIENT := Color(0.46, 0.42, 0.58)
-const CURTAIN_DARK := Color(0.01, 0.0, 0.02, 0.9)
+const STARVED_AMBIENT := Color(0.42, 0.42, 0.46)
+const DARK_AMBIENT := Color(0.07, 0.06, 0.1)
+## The cast's light once the keep is gone: grey dawn over END IT.
+const DAWN_LIGHT := Color(0.72, 0.75, 0.86)
+const DARK_EDGE := Color(0.01, 0.0, 0.02, 0.92)
+## Seconds a choice is held to be kept.
+const CHOICE_HOLD := 1.2
+const CONFIRM_KEYS := ["ui_accept", "attack", "interact", "ignite", "jump"]
 const GATHER_KEYS := ["ignite", "attack", "interact"]
-## Per cut, in seconds: when the prompt starts by itself, the burn, when and how
-## long the camera pulls back, when the footlights and the traveler go, the lead
-## from LET GO to the call, and the curtain_b2 beat the call opens on.
+## Per cut: `pace` scales travel and holds; the reveal's zoom and how long the
+## burnt knight's words hold; when it crumbles after the take-over; how long the
+## hoard takes to pour; whether the knight walks to the throne (or a dip-cut
+## puts it there); when the gather prompt starts by itself; the burn and the
+## tilt up the well (0: no tilt); the lead from LET GO to curtain_b2, the beat
+## it opens on and the beat the camera comes back down to the knight.
 const CUTS := {
-	"full": { "auto": 5.0, "burn": 4.8, "pull_at": 1.8, "pull": 5.0, "lamps_at": 3.0, "traveler_at": 5.4, "lead": 7.14, "call": 0 },
-	"abridged": { "auto": 2.5, "burn": 3.5, "pull_at": 0.4, "pull": 3.5, "lamps_at": 2.0, "traveler_at": 3.6, "lead": 7.14, "call": 16 },
-	"brief": { "auto": 0.0, "burn": 2.5, "pull_at": 0.4, "pull": 2.5, "lamps_at": 1.0, "traveler_at": 1.4, "lead": 2.5, "call": 24 },
+	"full": { "pace": 1.0, "zoom": 1.9, "words": 2.8, "crumble": 4.4, "pour": 2.4, "walk": true, "auto": 5.0, "burn": 4.8, "tilt": 5.0, "lead": 7.14, "call": 0.0, "down": 24.0 },
+	"abridged": { "pace": 0.8, "zoom": 1.7, "words": 2.2, "crumble": 3.4, "pour": 1.4, "walk": false, "auto": 2.5, "burn": 3.5, "tilt": 3.5, "lead": 7.14, "call": 16.0, "down": 26.0 },
+	"brief": { "pace": 0.6, "zoom": 1.6, "words": 1.6, "crumble": 2.4, "pour": 0.8, "walk": false, "auto": 0.0, "burn": 2.5, "tilt": 0.0, "lead": 2.5, "call": 24.0, "down": 0.0 },
 }
 
 ## Tests turn this off and call step() themselves.
@@ -52,6 +68,8 @@ var game: Game
 var ctx: Dictionary = {}
 var tier := "full"
 var phase: Phase = Phase.PROLOGUE
+## The ending chosen at the throne ("" until then): a Save.ENDINGS id.
+var ending := ""
 ## Real seconds since the killing blow.
 var clock := 0.0
 ## What the director animates and writes onto the game every step.
@@ -61,6 +79,8 @@ var ambient := Color.WHITE
 var vignette := Game.VIGNETTE_EDGE
 var burn := 0.0
 
+var _cut: Dictionary = {}
+var _offered: Array = []
 var _events: Array = []
 var _ramps: Array = []
 var _sounded: Dictionary = {}
@@ -69,37 +89,46 @@ var _ambient_live := false
 var _vignette_live := false
 var _burning := false
 var _handed_off := false
+var _light_follows := true
 var _skipping := false
 var _b0 := 0.0
 var _b2_playing := false
 var _side := -1.0
-# Layers and the theatre on them.
-var _stage_layer: CanvasLayer
+var _crowd := 0
+# Layers and what is drawn on them.
+var _sky_layer: CanvasLayer
 var _actor_layer: CanvasLayer
-var _front_layer: CanvasLayer
 var _actors: Node2D
+var _sky: FinaleSky
 var _cards: Control
 var _dip: ColorRect
 var _prompt: FinalePrompt
+var _choice: ChoicePrompt
 var _skip: SkipRing
-var _stage: FinaleStage
-var _front: FinaleStage.FinaleFront
-var _bill: FinaleStage.Playbill
 # The cast.
+var _shell: Cast.WardenShell
+var _burnt: Cast.BurntKnight
+var _relic: Cast.RelicCrown
+var _relic_held := false
 var _hoard: Cast.HoardField
 var _knight: Cast.FinaleKnight
 var _fallen: Array = []
 var _crowns: Cast.CrownField
 var _streams: Cast.FlameStream
-var _warden: Cast.FinaleWarden
 var _ash: Cast.AshField
-var _crowd := 0
-var _elder := false
+var _rostrum: Cast.Rostrum
+var _throne: Cast.ThroneProxy
+# The choice: the ending in hand (-1 none yet), how long it has been held, and
+# the keys' last states, so only fresh presses move or confirm.
+var _pick := -1
+var _pick_hold := 0.0
+var _armed := false
+var _left_was := false
+var _right_was := false
 # The gather: held time along Content.GATHER_LINE.
 var _gather_t := 0.0
 var _gather_goal := 0.0
 var _note := 0
-var _gathered := 0
 var _auto := false
 var _idle := 0.0
 var _held := false
@@ -107,28 +136,29 @@ var _letgo_t := 0.0
 var _letgo_held := false
 var _skip_hold := 0.0
 
-## Builds the layers and the hoard. The Finale starts in PROLOGUE while the
-## game's own victory beat plays out in slow motion.
+## Builds the layers. The Finale starts in PROLOGUE while the game's own victory
+## beat plays out in slow motion.
 func setup(g: Game, context: Dictionary) -> void:
 	game = g
 	ctx = context
 	tier = str(ctx.get("tier", "full"))
+	_cut = CUTS[tier]
 	process_mode = Node.PROCESS_MODE_ALWAYS
-	var unknown := bool(ctx.get("unknown", false))
-	_elder = int(ctx.get("falls_total", 0)) == 0 and not unknown
-	if unknown:
+	if bool(ctx.get("unknown", false)):
 		_crowd = Content.UNCOUNTED_CROWD
-	elif _elder:
-		_crowd = Content.ELDERS
 	else:
-		_crowd = mini(int(ctx.falls_total), Content.FALLEN_CAP)
+		_crowd = mini(int(ctx.get("falls_total", 0)), Content.FALLEN_CAP)
+	_offered = ["crown", "given"]
+	if (ctx.get("vows", []) as Array).size() == Content.VOWS.size():
+		_offered.append("ended")
 	_build_layers()
-	_hoard = Cast.HoardField.new()
-	_hoard.elder = _elder
-	_add_to_world(_hoard, 2)
 
 func phase_name() -> String:
 	return Phase.keys()[phase]
+
+## The endings the knight is offered, in order.
+func offered() -> Array:
+	return _offered.duplicate()
 
 func _process(delta: float) -> void:
 	if autostep:
@@ -141,31 +171,59 @@ func step(real_dt: float) -> void:
 		return
 	clock += real_dt
 	_poll_skip(real_dt)
+	_poll_choice(real_dt)
 	_poll_gather(real_dt)
 	while not _events.is_empty() and float(_events[0][0]) <= clock and phase != Phase.DONE:
 		(_events.pop_front()[1] as Callable).call()
 	_update_ramps()
-	var world_dt := real_dt * Engine.time_scale if phase == Phase.PROLOGUE else real_dt
 	for actor in _cast():
-		# Until the take-over the hoard hangs in the world's slow motion.
-		actor.advance(world_dt if actor == _hoard else real_dt)
-	if is_instance_valid(_knight) and not _handed_off:
+		if actor.has_method("advance"):
+			actor.advance(real_dt)
+	if _sky.has_method("advance"):
+		_sky.advance(real_dt)
+	if _relic_held and is_instance_valid(_knight):
+		_relic.position = _knight.hand_point() + Vector2(0.0, -3.0)
+	if is_instance_valid(_knight) and _light_follows:
 		game.player.global_position = _knight.position
 	_apply()
 
-# --- Act I: the hoard --------------------------------------------------------
+# --- I. Inside the Warden -------------------------------------------------------
 
-## The shatter releases the hoard: one flame per knight the Warden took.
-func release_hoard(pos: Vector2) -> void:
-	if is_instance_valid(_hoard) and not _hoard.released:
-		_hoard.release(pos, _crowd)
+## The Warden splits open like a paper costume, its halves falling away; where
+## it stood kneels the burnt-out knight who won the throne before, in the same
+## crown. Called at the Warden's shatter, inside the victory's slow motion.
+func shatter(pos: Vector2) -> void:
+	if is_instance_valid(_burnt) or _skipping or phase == Phase.DONE:
+		return
+	var boss: Boss = game.room.boss if is_instance_valid(game.room) else null
+	var face := -1.0
+	if is_instance_valid(boss):
+		face = boss.facing
+		_shell = Cast.WardenShell.new()
+		_shell.position = boss.global_position
+		_shell.setup(boss.visual_pose(), face, boss._anim_t)
+		_add_to_world(_shell, 2)
+		if Feedback.motion_reduced:
+			_ramp(_shell, "modulate:a", 0.0, 0.5)
+		else:
+			_ramp(_shell, "open", 1.0, 1.1, Tween.TRANS_QUAD, Tween.EASE_IN)
+			_after(1.1, _ramp.bind(_shell, "modulate:a", 0.0, 0.12))
+	_burnt = Cast.BurntKnight.new()
+	_burnt.setup(pos.x, face, str(ctx.get("last_ending", "")) == "crown")
+	_add_to_world(_burnt, 1)
+	_relic = Cast.RelicCrown.new()
+	_relic.position = _burnt.crown_point()
+	_add_to_world(_relic, 1)
+	_ash = Cast.AshField.new()
+	_add_to_world(_ash, 3)
 
-## The victory beat has ended: the director takes the camera and the stage.
-## The tree keeps running, so the braziers and the atmosphere live on.
+## The victory beat has ended: the director takes the camera. The tree keeps
+## running, so the braziers and the atmosphere live on. The burnt knight speaks
+## its one line, then crumbles.
 func take_over() -> void:
 	if phase != Phase.PROLOGUE or _skipping:
 		return
-	phase = Phase.HOARD
+	phase = Phase.REVEAL
 	var camera := game.feedback.camera
 	game.feedback.end_slow_motion()
 	_stand_in()
@@ -173,30 +231,15 @@ func take_over() -> void:
 	cam_zoom = camera.zoom.x
 	_owns_camera = not Feedback.motion_reduced
 	ambient = game.mood.ambient
-	release_hoard(_boss_point())
-	_hoard.gather_to_ring()
-	_spawn_crowd()
-	_cue("curtain_a")
+	if not is_instance_valid(_burnt):
+		shatter(_boss_point())
 	if int(ctx.get("finale_seen", 0)) > 0:
 		_skip.caption = Content.FINALE_TEXT.skip % str(UI._binding_text("pause").key).to_upper()
-	var n := maxi(_fallen.size(), 1)
-	match tier:
-		"full":
-			_move_camera(HALL, 3.0)
-			_after(0.2, _card.bind("keep"))
-			_after(3.6, _card.bind("back"))
-			_pop_ups(3.8, clampf(2.0 / n, 0.10, 0.30))
-			_after(7.1, _card.bind("cold"))
-			_after(7.2, _walk)
-		"abridged":
-			_move_camera(HALL, 2.0)
-			_after(0.2, _card.bind("again"))
-			_pop_ups(0.6, clampf(1.2 / n, 0.06, 0.2))
-			_after(3.2, _dip_cut.bind(_at_throne, 0.25))
-		_:
-			_move_camera(HALL, 1.0)
-			_pop_ups(0.2, 0.0)
-			_after(1.0, _dip_cut.bind(_at_throne, 0.25))
+	var kneel := _burnt.position + Vector2(0.0, -30.0)
+	_move_camera([Vector2(clampf(kneel.x, 360.0, 920.0), kneel.y), float(_cut.zoom)], 2.2 * _pace())
+	var words: String = Content.WARDEN_WORDS.get(str(ctx.get("last_ending", "")), Content.WARDEN_WORDS[""])
+	_after(0.9, _card.bind("“%s”" % words, float(_cut.words), 96.0, 26, UI.C_MUTED))
+	_after(float(_cut.crumble), _crumble)
 
 ## Swaps the real knight for the stand-in in the same pose. The player stays
 ## in the tree, hidden and still, and is moved with the stand-in so LightRig's
@@ -215,123 +258,303 @@ func _boss_point() -> Vector2:
 		return room.boss.global_position + Vector2(0.0, -24.0)
 	return Vector2(640.0, 480.0)
 
+## The burnt knight crumbles to ash from the crown down; the crown drops to the
+## floor and lies there, still faintly burning.
+func _crumble() -> void:
+	var dur := 1.6 * _pace()
+	_ramp(_burnt, "crumble", 1.0, dur)
+	game.feedback.play("burn", 0.7, -8.0)
+	for k in range(4):
+		_after(dur * float(k) / 4.0, _ash.puff.bind(_burnt.position + Vector2(0.0, -22.0 + 13.0 * float(k)), 10, Vector2(12.0, 5.0)))
+	var rest := Vector2(_burnt.position.x + 12.0 * _burnt.facing, Cast.stage_floor(_burnt.position.x) - 1.0)
+	_after(0.2, _ramp.bind(_relic, "position", rest, 0.5, Tween.TRANS_BOUNCE, Tween.EASE_OUT))
+	_after(0.2, _ramp.bind(_relic, "tilt", 0.3 * _burnt.facing, 0.5))
+	_after(dur + 0.5, _pour)
+
+# --- II. The fallen ---------------------------------------------------------------
+
 ## Stations beside the dais, filled inner to outer and alternating sides, front
-## rank first; the back rank stands smaller and darker behind. None comes within
-## 200 px of centre (the rostrum is the hero's) or 36 px of where the knight
-## stands. The outermost front pair is a spare for the ones the knight blocks.
-static func stations(knight_x: float) -> Array:
+## rank first; the back rank stands smaller and darker behind. None comes
+## within 236 px of the throne, so the knight has the dais and the space
+## before it to itself. The outermost front pair is a spare.
+static func stations() -> Array:
 	var out: Array = []
 	# [first k, last k + 1, inner x, scale, back rank]
-	for rank in [[0, 5, 200.0, 1.0, false], [0, 3, 223.0, 0.86, true], [5, 6, 200.0, 1.0, false]]:
+	for rank in [[0, 5, 236.0, 1.0, false], [0, 3, 259.0, 0.86, true], [5, 6, 236.0, 1.0, false]]:
 		for k in range(rank[0], rank[1]):
 			for side: float in [-1.0, 1.0]:
-				var x := Cast.THRONE_X + side * (float(rank[2]) + 46.0 * float(k))
-				if absf(x - knight_x) >= 36.0:
-					out.append({ "x": x, "scale": rank[3], "back": rank[4] })
+				out.append({ "x": Cast.THRONE_X + side * (float(rank[2]) + 46.0 * float(k)), "scale": rank[3], "back": rank[4] })
 	return out
 
-## Builds the crowd folded flat and hidden, back rank first so it draws behind,
-## then the one crown field over them and the stream layer.
+## The crown cracks and lets out every flame the throne swallowed, one for each
+## knight ever lost. For each, a fallen knight folds up out of the floor around
+## the throne, silent and dark.
+func _pour() -> void:
+	phase = Phase.HOARD
+	_move_camera(HALL, 3.0 * _pace())
+	_ramp(_relic, "crack", 1.0, 0.25)
+	_ramp(_relic, "burn", 0.9, 0.2)
+	_after(0.6, _ramp.bind(_relic, "burn", 0.25, 1.2))
+	game.feedback.play("shatter", 1.3, -4.0)
+	_cue("curtain_a")
+	_spawn_crowd()
+	var n := _fallen.size()
+	var stagger := clampf(float(_cut.pour) / float(maxi(n, 1)), 0.06, 0.3)
+	_hoard.pour(_relic.position + Vector2(0.0, -8.0), n, stagger)
+	for i in range(n):
+		_after(0.35 + stagger * float(i), _rise_fallen.bind(i))
+	var settled := 0.35 + stagger * float(n) + 0.7
+	_after(settled, _cool)
+	_after(settled + 1.4 * _pace(), _call)
+
+## Builds the crowd folded flat and hidden, back rank first so it draws
+## behind, then the one crown field over them, the hoard and the stream layer.
 func _spawn_crowd() -> void:
-	var places := stations(_knight.position.x).slice(0, _crowd)
+	var places := stations().slice(0, _crowd)
 	_fallen.resize(places.size())
 	for back: bool in [true, false]:
 		for i in range(places.size()):
 			if bool(places[i].back) == back:
 				var f := Cast.FinaleFallen.new()
-				f.setup(places[i], i, _elder)
+				f.setup(places[i], i)
 				f.visible = false
 				_fallen[i] = f
 				_add_to_world(f, 0)
 	_crowns = Cast.CrownField.new()
-	_crowns.elder = _elder
 	for f in _fallen:
 		_crowns.add(f)
 	_add_to_world(_crowns, 0)
+	_hoard = Cast.HoardField.new()
+	_add_to_world(_hoard, 2)
 	_streams = Cast.FlameStream.new()
 	_add_to_world(_streams, 2)
 
-## Sends the hoard down a flame at a time; each lands as the crown of a paper
-## knight folding up beneath it. The throne goes cold once the last settles.
-func _pop_ups(start: float, stagger: float) -> void:
-	for i in range(_fallen.size()):
-		_after(start + stagger * float(i), _descend.bind(i))
-	_after(start + stagger * float(maxi(_fallen.size() - 1, 0)) + 0.6, _cool)
-
-func _descend(i: int) -> void:
-	var f: Cast.FinaleFallen = _fallen[i]
-	var still := Feedback.motion_reduced
-	_hoard.descend(i, f.crown_at_rest(), 0.25 if still else 0.6, _crowns.set_lit.bind(i, 1.0, 0.0))
-	if still:
-		# Reduced motion: the page fades in already standing.
-		f.hinge = 1.0
-		f.visible = true
-		f.modulate.a = 0.0
-		_ramp(f, "modulate:a", 1.0, 0.25)
-		_crowns.set_lit(i, 1.0)
-		_fold_note(i)
-	else:
-		_after(0.28, _hinge_up.bind(i))
-
-func _hinge_up(i: int) -> void:
+## A fallen knight hinges up out of the floor, a charred stub where its flame
+## was, on a plucked note climbing a D-minor pentatonic. Under reduced motion
+## the page fades in already standing.
+func _rise_fallen(i: int) -> void:
 	var f: Cast.FinaleFallen = _fallen[i]
 	f.visible = true
-	_ramp(f, "hinge", 1.0, 0.32, Tween.TRANS_BACK, Tween.EASE_OUT)
-	_fold_note(i)
-
-## Each fold rings a plucked note climbing a D-minor pentatonic.
-func _fold_note(i: int) -> void:
+	_crowns.set_lit(i, 0.0)
+	if Feedback.motion_reduced:
+		f.hinge = 1.0
+		f.modulate.a = 0.0
+		_ramp(f, "modulate:a", 1.0, 0.25)
+	else:
+		_ramp(f, "hinge", 1.0, 0.32, Tween.TRANS_BACK, Tween.EASE_OUT)
 	game.feedback.play("fold", Content.FOLD_MINOR[i % Content.FOLD_MINOR.size()], -4.0, false)
 
-## The throne goes cold: the sigil gutters out, the fires sink to a third and
-## the hall cools toward blue.
+## With its hoard gone the throne goes cold: the sigil gutters out, the fires
+## sink to a third and the hall cools toward blue.
 func _cool() -> void:
-	phase = Phase.COLD
 	_ramp(game.room, "sigil_heat", 0.0, 1.2)
 	_ramp(game.room, "fire_heat", 0.35, 2.0)
 	_ramp(game, "sconce_heat", 0.35, 2.0)
 	_ambient_live = true
 	_ramp(self, "ambient", COLD_AMBIENT, 2.0)
 
-## Where the knight stops before the seat, on the side it came from.
+# --- III. The throne calls ----------------------------------------------------------
+
+## The throne calls: the hoard is drawn in over the cold seat, the braziers
+## lean toward it, the knight comes to stand before it and the crown drifts to
+## the knight's feet.
+func _call() -> void:
+	phase = Phase.CALL
+	var pull := 3.0 * _pace()
+	_ramp(_hoard, "ring_center", Vector2(640.0, 330.0), pull)
+	_ramp(_hoard, "ring_rx", 190.0, pull)
+	_ramp(_hoard, "ring_ry", 44.0, pull)
+	_ramp(game.room, "fire_lean", 1.0, pull)
+	_card(Content.FINALE_TEXT.cold, 3.6, 96.0)
+	_after(1.3, _card.bind(Content.FINALE_TEXT.not_cold, 2.3, 136.0))
+	var stop := _throne_stop()
+	if bool(_cut.walk):
+		_move_camera(BEFORE_THRONE, 3.0)
+		_knight.gesture_to("", 0.0)
+		_knight.walk(stop, clampf(absf(stop - _knight.position.x) / 2.6, 90.0, 300.0), -_side, _before_throne)
+	else:
+		_dip_cut(_at_throne.bind(stop), 0.3)
+
+func _at_throne(stop: float) -> void:
+	_knight.place(stop, -_side)
+	_frame_now(BEFORE_THRONE)
+	_before_throne()
+
+## Where the knight stops before the dais, on the side it came from.
 func _throne_stop() -> float:
 	_side = signf(_knight.position.x - Cast.THRONE_X)
 	if _side == 0.0:
 		_side = -1.0
-	return Cast.THRONE_X + 44.0 * _side
+	return Cast.THRONE_X + 176.0 * _side
 
-## The knight walks, unhurried, up the dais steps to the cold seat, and every
-## paper crown leans toward the throne.
-func _walk() -> void:
-	phase = Phase.WALK
-	var stop := _throne_stop()
-	_knight.gesture_to("", 0.0)
-	_knight.walk(stop, clampf(absf(stop - _knight.position.x) / 2.8, 170.0, 320.0), -_side, _arrive)
-	_move_camera(THRONE, 3.2)
-	_crowns.lean_x = Cast.THRONE_X
-	_ramp(_crowns, "lean", 0.6, 1.5)
+## The crown, lifted a little by the throne's pull, drifts to the knight's feet.
+func _before_throne() -> void:
+	var feet := Vector2(_knight.position.x - 20.0 * _side, Content.FLOOR_Y - 1.0)
+	var drift := 2.4 * _pace()
+	var over := (_relic.position + feet) * 0.5 + Vector2(0.0, -34.0)
+	_ramp(_relic, "position", over, drift * 0.5, Tween.TRANS_SINE, Tween.EASE_OUT)
+	_after(drift * 0.5, _ramp.bind(_relic, "position", feet, drift * 0.5, Tween.TRANS_SINE, Tween.EASE_IN))
+	_ramp(_relic, "tilt", 0.0, drift)
+	_after(drift + 0.4, _offer_choice)
 
-## The shorter cuts skip the walk: under a dip the knight is at the seat.
-func _at_throne() -> void:
-	phase = Phase.WALK
-	_knight.place(_throne_stop(), -_side)
-	_frame_now(THRONE)
-	_crowns.lean_x = Cast.THRONE_X
-	_crowns.lean = 0.6
-	_arrive()
+# --- IV. The choice -----------------------------------------------------------------
 
-# --- Act II: the throne -----------------------------------------------------
-
-## At the throne. The brief cut gathers by itself at double speed; the others
-## ask the player to hold IGNITE and start by themselves if nobody does.
-func _arrive() -> void:
-	if tier == "brief":
-		_begin_gather(true)
-		return
-	phase = Phase.PROMPT
-	_prompt.visible = true
+## The choice. It waits as long as the knight does; nothing picks for it.
+func _offer_choice() -> void:
+	phase = Phase.CHOICE
+	_choice.options = _offered.map(func(e): return Content.CHOICES[e])
+	_choice.visible = true
+	_choice.modulate.a = 0.0
+	_ramp(_choice, "modulate:a", 1.0, 0.6)
+	_armed = not _confirm_held()
 	_cue("curtain_hold")
-	_after(float(CUTS[tier].auto), _auto_start)
+
+func _confirm_held() -> bool:
+	return CONFIRM_KEYS.any(func(action): return Input.is_action_pressed(action))
+
+## Left and right move between the endings; a fresh press held CHOICE_HOLD
+## seconds keeps the one in hand. Letting go drains the hold three times as fast.
+func _poll_choice(dt: float) -> void:
+	if phase != Phase.CHOICE:
+		return
+	var left := Input.is_action_pressed("move_left") or Input.is_action_pressed("ui_left")
+	var right := Input.is_action_pressed("move_right") or Input.is_action_pressed("ui_right")
+	if left and not _left_was:
+		_step_pick(-1)
+	if right and not _right_was:
+		_step_pick(1)
+	_left_was = left
+	_right_was = right
+	var held := _confirm_held()
+	_armed = _armed or not held
+	if held and _armed and _pick >= 0:
+		_pick_hold += dt
+	else:
+		_pick_hold = maxf(0.0, _pick_hold - 3.0 * dt)
+	_choice.fill = _pick_hold / CHOICE_HOLD
+	if _pick_hold >= CHOICE_HOLD:
+		choose(_offered[_pick])
+
+## The first press picks the near end of that side; later ones step along.
+func _step_pick(dir: int) -> void:
+	if _pick < 0:
+		_pick = 0 if dir < 0 else mini(1, _offered.size() - 1)
+	else:
+		_pick = clampi(_pick + dir, 0, _offered.size() - 1)
+	_pick_hold = 0.0
+	_choice.selected = _pick
+	game.feedback.play("ui_move")
+
+## The knight's choice, kept in the save the moment it is made.
+func choose(choice: String) -> void:
+	if phase != Phase.CHOICE or not _offered.has(choice):
+		return
+	ending = choice
+	Save.set_last_ending(choice)
+	_ramp(_choice, "modulate:a", 0.0, 0.4)
+	game.feedback.play("grave_bell", 0.5, -6.0, false)
+	match choice:
+		"crown":
+			_take_crown()
+		"given":
+			_give_back()
+		"ended":
+			_end_it()
+
+## A skip before the choice takes the ending last chosen, if it is offered.
+func _default_ending() -> String:
+	var last := str(ctx.get("last_ending", ""))
+	return last if _offered.has(last) else "given"
+
+# --- V. TAKE THE CROWN ----------------------------------------------------------------
+
+## The knight stoops for the crown, lifts it and climbs the dais to sit.
+func _take_crown() -> void:
+	phase = Phase.CROWN
+	_stop_cue("curtain_hold", 1.2)
+	_knight.gesture_to("reach", 10.0)
+	_after(0.5 * _pace(), _lift_crown)
+	_after(1.2 * _pace(), _knight.walk.bind(Cast.THRONE_X, 110.0, -_side, _sit))
+
+func _lift_crown() -> void:
+	_relic_held = true
+	_ramp(_relic, "tilt", 0.0, 0.3)
+	_knight.gesture_to("raise", 8.0)
+	game.feedback.play("kindle", 0.8, -8.0)
+
+## Up onto the seat, legs hanging from a throne built for the Warden; then the
+## crown comes down onto the knight's head.
+func _sit() -> void:
+	_knight.grounded = false
+	_knight.gesture_to("sit", 8.0)
+	_ramp(_knight, "position", SEAT, 0.35, Tween.TRANS_BACK, Tween.EASE_OUT)
+	_move_camera(SEATED, 3.0 * _pace())
+	_after(0.7, _crown_knight)
+
+func _crown_knight() -> void:
+	_relic_held = false
+	_knight.gesture_to("", 6.0)
+	_ramp(_relic, "position", _knight.head_point(), 0.5, Tween.TRANS_SINE, Tween.EASE_IN_OUT)
+	_after(0.5, _crowned)
+
+## The crown takes: the knight's flame flares and turns the Warden's red, the
+## hoard pours into the throne, the hall relights red and the fallen kneel.
+func _crowned() -> void:
+	_relic.visible = false
+	_knight.crown = 1.5
+	_ramp(_knight, "red", 1.0, 0.8)
+	_after(0.8, _ramp.bind(_knight, "crown", 1.15, 1.0))
+	game.feedback.play("pyre", 0.8)
+	game.feedback.play("elite", 0.667)
+	game.feedback.shake(6.0, 0.4)
+	var n := _hoard.count()
+	for i in range(n):
+		_after(0.05 * float(i), _hoard.send.bind(i, SIGIL_FLAME, 0.7))
+	_after(0.05 * float(n) + 0.6, _flare.bind(Content.PAL.player_accent))
+	_after(0.05 * float(n) + 0.6, _relight_red.bind(2.0))
+	_after(0.05 * float(n) + 0.6, _cue.bind("curtain_a"))
+	_after(1.4, _kneel_all)
+	_after(3.4, _card.bind(Content.FINALE_TEXT.crowned, 3.0, 96.0))
+	_after(8.2 * _pace(), _last_word)
+
+## The sigil takes the fire and flares: a ring under reduced flash.
+func _flare(color: Color) -> void:
+	_ramp(game.room, "sigil_heat", 1.2 if Feedback.flash_reduced else 1.4, 0.2)
+	if Feedback.flash_reduced:
+		game.feedback._add_ring(SIGIL, color, 12.0, 90.0, 0.5, 4.0)
+	else:
+		game.feedback.flash_death(SIGIL, color, true)
+
+## Every fire back to full in the Warden's red.
+func _relight_red(dur: float) -> void:
+	for pair in [["sigil_heat", 1.0], ["sigil_gold", 0.0], ["fire_heat", 1.0], ["fire_lean", 0.0], ["throne_ash", 0.0]]:
+		_ramp(game.room, pair[0], pair[1], dur)
+	_ramp(game, "sconce_heat", 1.0, dur)
+	_ambient_live = true
+	_ramp(self, "ambient", game.mood.ambient, dur)
+
+## The fallen kneel to their Warden, from the wings inward.
+func _kneel_all() -> void:
+	for f in _fallen:
+		var wave := (430.0 - absf(f.position.x - Cast.THRONE_X)) / 46.0 * 0.12
+		_after(maxf(wave, 0.0), f.set.bind("gesture", "kneel"))
+
+# --- V. GIVE THEM BACK ------------------------------------------------------------
+
+## The gather: hold IGNITE and the title's question plays a note at a time,
+## each note sending the next flames home to their knights. The brief cut
+## gathers by itself at double speed; with no one lost, there is nothing to
+## give back and the knight simply lets the crown go.
+func _give_back() -> void:
+	if _fallen.is_empty():
+		phase = Phase.LETGO
+		_after(1.0, _let_go)
+	elif tier == "brief":
+		_begin_gather(true)
+	else:
+		phase = Phase.PROMPT
+		_prompt.visible = true
+		_after(float(_cut.auto), _auto_start)
 
 func _auto_start() -> void:
 	if phase == Phase.PROMPT:
@@ -339,19 +562,17 @@ func _auto_start() -> void:
 
 func _begin_gather(auto: bool) -> void:
 	phase = Phase.GATHER
+	_prompt.visible = true
 	_auto = auto
 	_ring_notes()
 
 func _gather_held() -> bool:
-	for action in GATHER_KEYS:
-		if Input.is_action_pressed(action):
-			return true
-	return false
+	return GATHER_KEYS.any(func(action): return Input.is_action_pressed(action))
 
 ## Reads the gather keys. Holding plays the question a note at a time; letting
 ## go pauses it and loses nothing, a tap always rings one more note, and a
 ## pause of 3 s resumes by itself. After the C#, letting go is LET GO: held on,
-## the fire leaves after 2.5 s anyway.
+## they are let go after 2.5 s anyway.
 func _poll_gather(dt: float) -> void:
 	var held := _gather_held()
 	var pressed := held and not _held
@@ -361,9 +582,6 @@ func _poll_gather(dt: float) -> void:
 			if pressed:
 				_begin_gather(false)
 		Phase.GATHER:
-			if pressed and tier == "brief":
-				_strike()
-				return
 			if pressed and _note < Content.GATHER_LINE.size():
 				_gather_goal = maxf(_gather_goal, float(Content.GATHER_LINE[_note][0]))
 			if held or _auto or _gather_t < _gather_goal:
@@ -371,27 +589,28 @@ func _poll_gather(dt: float) -> void:
 				_idle = 0.0
 				_knight.gesture_to("raise", 30.0)
 			else:
-				# Released: the blade dips and the stream stops, nothing is lost.
+				# Released: the blade dips and nothing more goes home, nothing is lost.
 				_idle += dt
 				_auto = _idle >= 3.0
 				_knight.gesture_to("", 12.0)
 			_ring_notes()
 		Phase.LETGO:
-			_letgo_t += dt
-			_letgo_held = _letgo_held or held
-			var limit := 2.5 if _letgo_held else (0.3 if tier == "brief" else 0.8)
-			if (_letgo_held and not held) or _letgo_t >= limit:
-				_strike()
+			if is_instance_valid(_prompt) and _prompt.let_go:
+				_letgo_t += dt
+				_letgo_held = _letgo_held or held
+				var limit := 2.5 if _letgo_held else (0.3 if tier == "brief" else 0.8)
+				if (_letgo_held and not held) or _letgo_t >= limit:
+					_let_go()
 
-## Rings every note of the question the held time has reached. Each lifts the
-## next group of flames off the paper knights' heads toward the knight's crown.
+## Rings every note of the question the held time has reached; each sends the
+## next group of flames from the hoard home to their knights.
 func _ring_notes() -> void:
 	var line := Content.GATHER_LINE
 	var n := _fallen.size()
 	while _note < line.size() and _gather_t >= float(line[_note][0]):
 		game.feedback.play("grave_bell", pow(2.0, (float(line[_note][1]) - 74.0) / 12.0), -6.0, false)
 		for i in range(floori(float(_note * n) / line.size()), floori(float((_note + 1) * n) / line.size())):
-			_lift(i)
+			_return_flame(i)
 		_note += 1
 		_prompt.ticks = _note
 	if _note >= line.size() and phase == Phase.GATHER:
@@ -400,328 +619,250 @@ func _ring_notes() -> void:
 		_letgo_held = _held
 		_prompt.let_go = true
 
-## A crown lent: a charred stub stays on the head while the flame arcs into
-## the knight's crown (a crossfade under reduced motion).
-func _lift(i: int) -> void:
-	var f: Cast.FinaleFallen = _fallen[i]
-	var still := Feedback.motion_reduced
-	_crowns.set_lit(i, 0.0, 0.5 if still else 0.0)
-	_streams.launch(f.crown_point, _knight.head_point, 0.5 if still else 0.6, _lent)
-
-func _lent() -> void:
-	_gathered += 1
-	_knight.gold = true
-	_knight.crown = lerpf(1.0, 1.9, float(_gathered) / float(maxi(_fallen.size(), 1)))
-
-## LET GO. The knight thrusts the burning blade into the backrest; this moment
-## is I, the anchor for the burn, the theatre and the curtain call.
-func _strike() -> void:
-	phase = Phase.STRIKE
-	var cut: Dictionary = CUTS[tier]
-	_prompt.visible = false
-	_knight.gesture_to("thrust", 30.0)
-	_knight.crown = 2.0
-	game.feedback.play("kindle")
-	_stop_cue("curtain_hold", 0.2)
-	if not _cue("curtain_b1"):
-		# Without the cue, the D-major bell arpeggio is the chord.
-		game.feedback.play("victory")
-	_streams.launch(_knight.blade_tip, func() -> Vector2: return SIGIL_FLAME, 0.25, Callable(), 0.0)
-	_after(0.25, _flare)
-	_after(0.3, _begin_burn)
-	_after(0.4, _set_phase.bind(Phase.BURN))
-	_after(float(cut.pull_at), _show_front)
-	_after(float(cut.pull_at), _move_camera.bind(THEATRE, float(cut.pull)))
-	_after(float(cut.lamps_at), _light_lamps)
-	_after(float(cut.traveler_at), _ramp.bind(_stage, "closed", 1.0, 1.6 if tier != "brief" else 1.0))
-	_b0 = clock + float(cut.lead) - float(cut.call) * BEAT
-	_schedule_call()
-
-func _set_phase(p: Phase) -> void:
-	phase = p
-
-## The throne takes the flame: the dead sigil bursts gold-white, not the
-## Warden's red, and under that flash the cast steps onto the stage.
-func _flare() -> void:
-	_ramp(game.room, "sigil_heat", 1.2 if Feedback.flash_reduced else 1.4, 0.2)
-	_ramp(game.room, "sigil_gold", 1.0, 0.2)
-	var fb := game.feedback
-	if Feedback.flash_reduced:
-		fb._add_ring(SIGIL, VFX.GOLD, 12.0, 90.0, 0.5, 4.0)
-	else:
-		fb.flash_death(SIGIL, VFX.GOLD, true)
-	fb.shake(6.0, 0.3)
-	_hand_off()
-
-## Moves the cast out of the world viewport onto the actor layer, keeping
-## their draw order. Positions carry over unchanged because the layer shares
-## the camera's canvas transform; the stage light comes up from the hall's.
-func _hand_off() -> void:
-	_handed_off = true
-	var cast := _cast()
-	for node in game.world.get_children():
-		if cast.has(node):
-			node.reparent(_actors, false)
-	# The paper rostrum fades up over the painted dais before the burn takes it.
-	var rostrum := Cast.Rostrum.new()
-	rostrum.modulate.a = 0.0
-	_actors.add_child(rostrum)
-	_actors.move_child(rostrum, 0)
-	_ramp(rostrum, "modulate:a", 1.0, 0.8)
-	_ash = Cast.AshField.new()
-	_ash.z_index = 3
-	_actors.add_child(_ash)
-	_actors.modulate = ambient
-	_ramp(_actors, "modulate", Color.WHITE, 1.5)
-	_ambient_live = false
-	_stage_layer.visible = true
-
-# --- Act III: strike the set -------------------------------------------------
-
-## The set burns off its frame from the sigil outward (the theatre's burn-away
-## on the world's container); what hasn't burned lifts a little on the heat.
-func _begin_burn() -> void:
-	var mat := FinaleStage.burn_away_material()
-	mat.set_shader_parameter("aspect", float(Content.VIEW_W) / float(Content.VIEW_H))
-	game._world_container.material = mat
-	_burning = true
-	_ramp(self, "burn", 1.0, float(CUTS[tier].burn))
-	_ramp(_stage, "remnant_heat", 0.0, 5.0)
-	_ash.rate = 40.0
-	game.feedback.play("burn")
-	_after(1.4, game.feedback.play.bind("burn"))
-
-## The burn follows the sigil across the moving camera, sheds ash along its
-## front, and hides the whole world viewport once it has burned through.
-func _apply_burn(view: Transform2D) -> void:
-	var box := game._world_container
-	var mat := box.material as ShaderMaterial
-	mat.set_shader_parameter("progress", burn)
-	mat.set_shader_parameter("origin", (view * SIGIL) / box.size)
-	if not Feedback.motion_reduced:
-		box.position.y = -24.0 * burn
-	var sight := view.affine_inverse() * Rect2(Vector2.ZERO, box.size)
-	_ash.front_center = SIGIL
-	_ash.front_radius = burn * sight.size.length()
-	_ash.bounds = sight
-	if burn >= 1.0:
-		box.visible = false
-		_burning = false
-		_ash.rate = 0.0
-
-## It was always a stage: the proscenium comes up around the burning hall.
-func _show_front() -> void:
-	_front_layer.visible = true
-	_front.modulate.a = 0.0
-	_ramp(_front, "modulate:a", 1.0, 1.0)
-
-## The footlights kindle from the centre outward, one every 0.05 s.
-func _light_lamps() -> void:
-	for step in range(9):
-		_after(step * 0.1, _set_lamp.bind(8 - step, 1.0, "footlight"))
-		_after(step * 0.1 + 0.05, _set_lamp.bind(9 + step, 1.0, "footlight"))
-
-func _set_lamp(i: int, value: float, sound: String) -> void:
-	_front.lamps[i] = value
-	_sound(sound, randf_range(0.9, 1.2) if sound == "snuff" else 1.0)
-
-# --- Acts IV and V: curtain call and curtain ----------------------------------
-
-## The curtain call on curtain_b2's beats. The full cut gives the fallen, the
-## Warden and the knight a bow each; the shorter cuts open later in the cue and
-## bow together. Every cut lands the rising flame on the resolving D (B32).
-func _schedule_call() -> void:
-	_at(_beat(float(CUTS[tier].call)), _open_call)
-	match tier:
-		"full":
-			_at(_beat(2.0), _reveal.bind(1))
-			_at(_beat(2.0), _homecoming.bind(0.8))
-			_at(_beat(4.6), _fallen_bow)
-			_at(_beat(8.0), _reveal.bind(2))
-			_at(_beat(8.0), _warden_act.bind(1.0))
-			_at(_beat(14.0), _knight_bow.bind(false))
-			_at(_beat(20.0), _curtain.bind(0.22))
-		"abridged":
-			_at(_beat(16.0), _homecoming.bind(0.5))
-			_at(_beat(16.8), _warden_act.bind(2.0))
-			_at(_beat(20.0), _knight_bow.bind(true))
-			_at(_beat(24.0), _curtain.bind(0.22))
-		_:
-			_at(_beat(24.0), _homecoming.bind(0.4))
-			_at(_beat(24.8), _knight_bow.bind(true))
-			_at(_beat(27.0), _curtain.bind(0.12))
-	_at(_beat(30.04), _rise_ember)
-	_at(_beat(32.0), _answer)
-	_at(_beat(32.0) + 3.6, _bloom)
-	_at(_beat(32.0) + 4.4, _finish.bind(false))
-
-## Seconds on the clock of curtain_b2's beat `k`.
-func _beat(k: float) -> float:
-	return _b0 + k * BEAT
-
-## The playbill is lowered on its cords as the title's bell melody begins, now
-## in D major. The brief cut's bill fades in already hanging.
-func _open_call() -> void:
-	phase = Phase.CALL
-	_b2_playing = _cue("curtain_b2", float(CUTS[tier].call) * BEAT)
-	_bill.revealed = 0 if tier == "full" else _bill.rows.size()
-	_front.spot_x = _knight.position.x
-	if tier == "brief":
-		_stop_cue("curtain_b1", 0.6)
-		_bill.drop = 1.0
-		_bill.modulate.a = 0.0
-		_ramp(_bill, "modulate:a", 1.0, 0.4)
-	else:
-		_ramp(_bill, "drop", 1.0, 1.2, Tween.TRANS_BACK, Tween.EASE_OUT)
-
-func _reveal(rows: int) -> void:
-	_bill.revealed = mini(rows, _bill.rows.size())
-
-## The knight salutes and the lent flames fly home: every paper crown relights
-## and the folds climb a D-major pentatonic.
-func _homecoming(stagger: float) -> void:
-	_knight.gesture_to("salute", 12.0)
-	var n := _fallen.size()
-	for i in range(n):
-		_after(stagger * float(i) / float(n), _return_flame.bind(i))
-	_after(stagger + 0.6, _settle_crown)
-
+## A flame goes home: it arcs down onto its knight's head, which relights (a
+## crossfade under reduced motion), on a note of a D-major pentatonic.
 func _return_flame(i: int) -> void:
 	var f: Cast.FinaleFallen = _fallen[i]
-	var still := Feedback.motion_reduced
-	if still:
+	_hoard.send(i, f.crown_point(), 0.6, _relit.bind(i))
+	if Feedback.motion_reduced:
 		_crowns.set_lit(i, 1.0, 0.5)
-	_streams.launch(_knight.head_point, f.crown_point, 0.5 if still else 0.6, _relit.bind(i))
 
 func _relit(i: int) -> void:
 	_crowns.set_lit(i, 1.0)
 	_sound("fold", Content.FOLD_MAJOR[i % Content.FOLD_MAJOR.size()], -8.0, false)
 
-func _settle_crown() -> void:
-	_knight.crown = 1.0
-	_knight.gesture_to("", 0.0)
-
-## The fallen bow in a wave from the wings inward, a pair at a time.
-func _fallen_bow() -> void:
-	var outer := 0.0
-	for f in _fallen:
-		outer = maxf(outer, absf(f.position.x - Cast.THRONE_X))
-	for f in _fallen:
-		var wave := (outer - absf(f.position.x - Cast.THRONE_X)) / 23.0 * 0.08
-		_after(wave, f.bow.bind("bow", 1.1))
-
-## The Warden, for now: lowered from the flies as a mended paper puppet, one
-## stiff bow, hauled back up. Under the Fivefold Oath its wires snap instead.
-func _warden_act(speed: float) -> void:
-	var s := 1.0 / speed
-	_warden = Cast.FinaleWarden.new()
-	_warden.position = Vector2(Cast.THRONE_X - 110.0 * _side, -400.0)
-	_warden.facing = _side
-	_actors.add_child(_warden)
-	if Feedback.motion_reduced:
-		_warden.position.y = WARDEN_Y
-		_warden.modulate.a = 0.0
-		_ramp(_warden, "modulate:a", 1.0, 0.4 * s)
-	else:
-		_ramp(_warden, "position:y", WARDEN_Y, 1.1 * s, Tween.TRANS_BOUNCE, Tween.EASE_OUT)
-		_warden.swing = 0.05
-	_after(1.3 * s, _ramp.bind(_warden, "bow", 1.0, 0.4 * s))
-	_after(2.1 * s, _ramp.bind(_warden, "bow", 0.0, 0.3 * s))
-	if (ctx.get("vows", []) as Array).size() == Content.VOWS.size():
-		_after(2.5 * s, _snap_wires)
-	elif Feedback.motion_reduced:
-		_after(2.5 * s, _ramp.bind(_warden, "modulate:a", 0.0, 0.4 * s))
-	else:
-		_after(2.5 * s, _ramp.bind(_warden, "position:y", -500.0, 1.1 * s, Tween.TRANS_QUAD, Tween.EASE_IN))
-
-## The Fivefold Oath: the wires snap and the Warden drops and folds flat onto
-## the boards like dropped cardboard, and stays there.
-func _snap_wires() -> void:
-	_warden.wires = false
-	game.feedback.play("shatter", 1.4)
-	_after(0.1, game.feedback.play.bind("shatter", 1.4))
-	_ramp(_warden, "position:y", Cast.stage_floor(_warden.position.x), 0.25, Tween.TRANS_QUAD, Tween.EASE_IN)
-	_after(0.25, _fold_warden)
-
-func _fold_warden() -> void:
-	_ramp(_warden, "scale:y", 0.08, 0.35, Tween.TRANS_QUAD, Tween.EASE_IN)
-	game.feedback.play("slam", 0.8)
-	_ash.puff(_warden.position, 24)
-
-## The knight's bow, the last and longest: a follow-spot finds it, it steps to
-## centre and the fallen turn their crowns toward it (the shorter cuts bow
-## together). A socket lights per vow sworn; from the tenth victory the house
-## stands.
-func _knight_bow(ensemble: bool) -> void:
-	_reveal(_bill.rows.size())
-	_front.spot_x = Cast.THRONE_X
-	_ramp(_front, "spot", 1.0, 0.6)
-	if not Feedback.motion_reduced:
-		_move_camera(BOW_FRAME, 1.4)
-	_knight.gesture_to("", 0.0)
-	_knight.walk(Cast.THRONE_X, 88.0, _knight.facing, _bow_down)
-	_crowns.lean_x = Cast.THRONE_X
-	_ramp(_crowns, "lean", 1.0, 0.8)
-	for f in _fallen:
-		f.bow("bow" if ensemble else "nod", 2.6)
-	var vows: Array = ctx.get("vows", [])
-	var lit := 0
-	for v in range(Content.VOWS.size()):
-		if vows.has(Content.VOWS[v].id):
-			_after(0.6 + 0.15 * float(lit), _light_socket.bind(v))
-			lit += 1
-	if int(ctx.get("victories", 1)) >= 10:
-		_after(0.6, _ramp.bind(_front, "rise", 1.0, 0.5))
-
-func _bow_down() -> void:
-	_knight.gesture_to("knight_bow", 6.0)
-	_knight.crown = 2.0
-	_after(1.7, _bow_up)
-
-func _bow_up() -> void:
+## LET GO: the knight lowers the blade and lets them go. The emptied crown goes
+## out and the starved throne greys; the keep burns away from the top down to
+## the open sky, and the fallen climb the well one by one to become stars. The
+## knight stays below, looking up, its flame the last one left.
+func _let_go() -> void:
+	phase = Phase.SKY
+	_prompt.visible = false
 	_knight.gesture_to("", 6.0)
-	_knight.crown = 1.0
-
-func _light_socket(v: int) -> void:
-	_front.vow_lit[v] = true
-	game.feedback.play("elite", 1.2, -6.0)
-
-## The great curtain falls over all of them and the footlights gutter out from
-## the edges inward until the theatre is black.
-func _curtain(lamp_step: float) -> void:
-	phase = Phase.CURTAIN
-	_move_camera(THEATRE, 1.2)
-	_ramp(_front, "spot", 0.0, 0.8)
-	_ramp(_bill, "drop", 0.0, 0.8, Tween.TRANS_QUAD, Tween.EASE_IN)
-	_ramp(_front, "main_drop", 1.0, 1.6, Tween.TRANS_BOUNCE, Tween.EASE_OUT)
-	game.feedback.play("curtain", 0.8)
-	for k in range(9):
-		_after(1.0 + lamp_step * float(k), _set_lamp.bind(k, 0.0, "snuff"))
-		_after(1.0 + lamp_step * float(k), _set_lamp.bind(17 - k, 0.0, "snuff"))
-	_vignette_live = true
-	_ramp(self, "vignette", CURTAIN_DARK, 2.0)
-
-## The flame does not fall: the knight's own crown flame slips out from under
-## the hem, in front of the curtain, and rises into the dark on the resolving D.
-func _rise_ember() -> void:
-	phase = Phase.EMBER
-	_hoard.reparent(_front_layer, false)
-	_hoard.halo_alpha = 0.5
-	if Feedback.motion_reduced:
-		_hoard.ember_pos = EMBER_TOP
-		_ramp(_hoard, "ember_alpha", 1.0, 1.4)
+	_stop_cue("curtain_hold", 0.3)
+	if not _cue("curtain_b1"):
+		game.feedback.play("victory")
+	_ramp(_relic, "burn", 0.0, 0.8)
+	_starve(1.6)
+	_after(1.0, _hand_off.bind(Color.WHITE))
+	_after(1.0, _stand_rostrum)
+	_after(1.2, _begin_burn.bind(float(_cut.burn)))
+	if float(_cut.tilt) > 0.0:
+		_after(2.2, _move_camera.bind([_sky.well_top(), 1.0], float(_cut.tilt)))
 	else:
-		_hoard.ember_alpha = 1.0
-		_ramp(_hoard, "ember_pos", EMBER_TOP, 1.4, Tween.TRANS_SINE, Tween.EASE_OUT)
+		_after(1.4, _move_camera.bind(_look_up_frame(), 1.5))
+	_after(3.0 * _pace(), _release_fallen)
+	_b0 = clock + float(_cut.lead) - float(_cut.call) * BEAT
+	_at(_beat(float(_cut.call)), _open_b2)
+	if float(_cut.down) > 0.0:
+		_at(_beat(float(_cut.down)), _move_camera.bind(_look_up_frame(), 4.0 * _pace()))
+	_at(_beat(32.0), _last_word)
 
-## B32: the last epitaph the player died to, quoted, and the ending's answer.
-func _answer() -> void:
+## Seconds on the clock of curtain_b2's beat `k`.
+func _beat(k: float) -> float:
+	return _b0 + k * BEAT
+
+func _open_b2() -> void:
+	_b2_playing = _cue("curtain_b2", float(_cut.call) * BEAT)
+
+## Starved, the throne goes grey and cold, and every fire in the hall sinks.
+func _starve(dur: float) -> void:
+	for pair in [["sigil_heat", 0.0], ["fire_heat", 0.12], ["fire_lean", 0.0], ["throne_ash", 1.0]]:
+		_ramp(game.room, pair[0], pair[1], dur)
+	_ramp(game, "sconce_heat", 0.2, dur)
+	_ambient_live = true
+	_ramp(self, "ambient", STARVED_AMBIENT, dur)
+
+## Each fallen flame leaves its knight and climbs the well; the paper knight it
+## leaves folds back into the floor. Spread over some ten seconds, however many.
+func _release_fallen() -> void:
+	_knight.gesture_to("look_up", 3.0)
+	var n := _fallen.size()
+	var stagger := clampf(10.0 * _pace() / float(maxi(n, 1)), 0.1, 1.5)
+	for i in range(n):
+		_sky.add_rising((_fallen[i] as Cast.FinaleFallen).crown_point(), stagger * float(i))
+		_after(stagger * float(i), _fold_away.bind(i))
+
+## A fallen knight's crown goes (up the well, or out) and its page folds flat.
+func _fold_away(i: int) -> void:
+	var f: Cast.FinaleFallen = _fallen[i]
+	_crowns.set_lit(i, -1.0)
+	if Feedback.motion_reduced:
+		_ramp(f, "modulate:a", 0.0, 0.4)
+	else:
+		_ramp(f, "hinge", 0.0, 0.45, Tween.TRANS_QUAD, Tween.EASE_IN)
+	_sound("fold", Content.FOLD_MAJOR[i % Content.FOLD_MAJOR.size()] * 2.0, -12.0, false)
+
+## The knight at the bottom of the frame with the open sky above it.
+func _look_up_frame() -> Array:
+	return [Vector2(_knight.position.x if is_instance_valid(_knight) else 640.0, Content.FLOOR_Y - 200.0), 1.4]
+
+# --- V. END IT --------------------------------------------------------------------
+
+## END IT: the knight climbs to the throne, raises the blade and strikes.
+func _end_it() -> void:
+	phase = Phase.DARK
+	_stop_cue("curtain_hold", 0.8)
+	_move_camera(THRONE, 2.0 * _pace())
+	_knight.gesture_to("", 0.0)
+	_knight.walk(Cast.THRONE_X + 66.0 * _side, 120.0, -_side, _raise_blade)
+
+func _raise_blade() -> void:
+	_knight.gesture_to("raise", 8.0)
+	_after(0.8, _strike)
+
+## The throne cracks in two, and every fire in the keep goes out: the sigil,
+## the braziers, the sconces, the crown; the hoard rises away up the well in a
+## thin column and the fallen fold back into the floor. In the dark, the card;
+## then the dawn.
+func _strike() -> void:
+	_knight.gesture_to("thrust", 30.0)
+	var fb := game.feedback
+	fb.play("clang", 0.7)
+	fb.play("shatter", 0.6)
+	fb.play("slam", 0.7)
+	fb.shake(10.0, 0.4)
+	fb.rumble(0.7, 1.0, 0.4)
+	_flare(VFX.HOT)
+	_ramp(game.room, "throne_split", 1.0, 0.5, Tween.TRANS_BACK, Tween.EASE_OUT)
+	_ash.puff(SIGIL + Vector2(0.0, 40.0), 28, Vector2(40.0, 70.0), 0.0)
+	_after(0.4, _douse.bind(2.4))
+	_after(0.5, _column)
+	_after(3.0, _dark_well)
+	_after(3.4, _card.bind(Content.FINALE_TEXT.dark, 3.2, 96.0))
+	_after(6.2 * _pace(), _move_camera.bind([_sky.well_top(), 1.0], 3.0 * _pace()))
+	_after(7.6 * _pace(), _dawn)
+
+## Every fire out, one after another, and the hall falls dark; the knight's
+## own flame sinks to an ember, and its light is set aside with it.
+func _douse(dur: float) -> void:
+	for pair in [["sigil_heat", 0.0, 0.2], ["fire_heat", 0.0, 0.5], ["fire_lean", 0.0, 0.5], ["throne_ash", 1.0, 1.0]]:
+		_ramp(game.room, pair[0], pair[1], dur * float(pair[2]))
+	_ramp(game, "sconce_heat", 0.0, dur)
+	_ramp(_relic, "burn", 0.0, dur * 0.3)
+	_ramp(_knight, "crown", 0.35, dur)
+	_ambient_live = true
+	_ramp(self, "ambient", DARK_AMBIENT, dur)
+	_vignette_live = true
+	_ramp(self, "vignette", DARK_EDGE, dur)
+	for k in range(5):
+		_after(dur * float(k) / 5.0, _sound.bind("snuff", randf_range(0.85, 1.15)))
+	_after(dur, _set_light_follows.bind(false))
+
+## LightRig lights the knight's flame wherever the hidden player stands; with
+## that flame down to an ember, the player is set aside below the hall.
+func _set_light_follows(follows: bool) -> void:
+	_light_follows = follows
+	if not follows:
+		game.player.global_position = Vector2(Cast.THRONE_X, Content.FLOOR_Y + 4000.0)
+
+## The hoard rises away in a thin column up the well and goes out; the fallen
+## it belonged to fold back into the floor.
+func _column() -> void:
+	var n := _hoard.count()
+	for i in range(n):
+		var top := Vector2(Cast.THRONE_X + sin(float(i) * 2.3) * 8.0, -360.0)
+		_after(0.08 * float(i), _hoard.send.bind(i, top, 2.6, Callable(), true))
+	for i in range(_fallen.size()):
+		_after(0.6 + 0.08 * float(i), _fold_away.bind(i))
+
+## In the dark, the keep gives way to the bare well beneath it; only the
+## broken throne and its dais stay, painted again over the well's floor.
+func _dark_well() -> void:
+	_hand_off(ambient)
+	_throne = Cast.ThroneProxy.new()
+	_throne.room = game.room
+	_actors.add_child(_throne)
+	_actors.move_child(_throne, 0)
+	_sky_layer.visible = true
+	_ramp(game._world_container, "modulate:a", 0.0, 0.8)
+
+## A thin grey dawn spills down the well from its mouth, and the camera comes
+## down with it to the knight by the broken throne.
+func _dawn() -> void:
+	var dur := 6.0 * _pace()
+	_ramp(_sky, "dawn", 1.0, dur)
+	_ramp(_actors, "modulate", DAWN_LIGHT, dur)
+	_ramp(self, "vignette", Game.VIGNETTE_EDGE, dur)
+	_move_camera(DAWN_FRAME, dur)
+	_knight.gesture_to("look_up", 3.0)
+	_b0 = clock + 1.0 - 24.0 * BEAT
+	_at(_beat(24.0), _open_b2_from.bind(24.0))
+	_at(_beat(32.0), _last_word)
+
+func _open_b2_from(k: float) -> void:
+	_b2_playing = _cue("curtain_b2", k * BEAT)
+
+# --- The keep burns away ------------------------------------------------------------
+
+## Moves the cast out of the world viewport onto the actor layer, keeping
+## their draw order, before the keep is taken away: positions carry over
+## unchanged because the layer shares the camera's canvas transform. The
+## cast's light eases from the hall's to `light`.
+func _hand_off(light: Color) -> void:
+	if _handed_off:
+		return
+	_handed_off = true
+	var cast := _cast()
+	for node in game.world.get_children():
+		if cast.has(node):
+			node.reparent(_actors, false)
+	_actors.modulate = ambient
+	_ramp(_actors, "modulate", light, 1.5)
+
+## The dais stands on as paper boxes when the rest of the keep burns.
+func _stand_rostrum() -> void:
+	_rostrum = Cast.Rostrum.new()
+	_rostrum.modulate.a = 0.0
+	_actors.add_child(_rostrum)
+	_actors.move_child(_rostrum, 0)
+	_ramp(_rostrum, "modulate:a", 1.0, 0.8)
+
+## Burns the keep away from the top of the frame over `dur`, showing the sky
+## beneath, and sheds ash along the front.
+func _begin_burn(dur: float) -> void:
+	var mat := FinaleSky.burn_away_material()
+	mat.set_shader_parameter("aspect", float(Content.VIEW_W) / float(Content.VIEW_H))
+	game._world_container.material = mat
+	_burning = true
+	_sky_layer.visible = true
+	_ramp(self, "burn", 1.0, dur)
+	_ramp(_sky, "reveal", 1.0, dur)
+	_ash.rate = 40.0
+	_after(dur, _ash.set.bind("rate", 0.0))
+	game.feedback.play("burn")
+	_after(1.4, game.feedback.play.bind("burn"))
+
+## Where the burn's front crosses the frame, as a share of its height.
+static func burn_front(progress: float) -> float:
+	return lerpf(-0.1, 1.1, progress)
+
+## The burn follows the camera, sheds ash along its front, and hides the whole
+## world viewport once it has burned through.
+func _apply_burn(view: Transform2D) -> void:
+	var box := game._world_container
+	(box.material as ShaderMaterial).set_shader_parameter("progress", burn)
+	var sight := view.affine_inverse() * Rect2(Vector2.ZERO, box.size)
+	_ash.bounds = sight
+	_ash.front_y = sight.position.y + sight.size.y * burn_front(burn)
+	if burn >= 1.0:
+		box.visible = false
+		_burning = false
+
+# --- VI. The last word --------------------------------------------------------------
+
+## The last epitaph the knight died to, quoted, and the ending's answer; then
+## the results open.
+func _last_word() -> void:
+	phase = Phase.LAST_WORD
 	if not _b2_playing:
 		game.feedback.play("grave_bell", 1.0, 0.0, false)
 	_final_card(0.6)
+	_after(3.6, _fade_cards)
+	_after(4.4, _finish.bind(false))
 
 func _final_card(fade: float) -> void:
-	var words := Content.finale_answer(str(ctx.get("last_epitaph", "")), int(ctx.get("falls_total", 0)), bool(ctx.get("unknown", false)))
+	var words := Content.finale_answer(str(ctx.get("last_epitaph", "")), int(ctx.get("falls_total", 0)), bool(ctx.get("unknown", false)), ending)
 	for line in [[words.quote, 18, UI.C_MUTED, 450.0], [words.answer, 30, UI.C_TEXT, 488.0]]:
 		if str(line[0]).is_empty():
 			continue
@@ -729,11 +870,7 @@ func _final_card(fade: float) -> void:
 		label.modulate.a = 0.0 if fade > 0.0 else 1.0
 		_ramp(label, "modulate:a", 1.0, fade)
 
-## The flame blooms and the results open out of it.
-func _bloom() -> void:
-	_ramp(_hoard, "halo_radius", 900.0, 0.8)
-	_ramp(_hoard, "halo_alpha", 0.0, 0.8)
-	_ramp(_hoard, "ember_alpha", 0.0, 0.8)
+func _fade_cards() -> void:
 	for label in _cards.get_children():
 		_ramp(label, "modulate:a", 0.0, 0.8)
 
@@ -742,13 +879,13 @@ func _finish(skipped: bool) -> void:
 	_skip.visible = false
 	finished.emit(skipped)
 
-# --- Skip and abort ---------------------------------------------------------
+# --- Skip and abort ---------------------------------------------------------------
 
 ## Holding pause skips. A first viewing advertises nothing and asks for 2 s
 ## (the ring shows after 0.5 s); repeat viewings caption the ring from the
 ## take-over and need 1 s. Letting go drains it three times as fast.
 func _poll_skip(dt: float) -> void:
-	if _skipping or phase > Phase.EMBER:
+	if _skipping or phase >= Phase.LAST_WORD:
 		return
 	var first := int(ctx.get("finale_seen", 0)) == 0
 	var need := 2.0 if first else 1.0
@@ -761,9 +898,8 @@ func _poll_skip(dt: float) -> void:
 	if _skip_hold >= need:
 		skip_to_end()
 
-## A dip to black, the final state built at once (the set gone, the curtain
-## down, the lamps out), then the final card, which survives a skip, and the
-## results panel.
+## A dip to black, the chosen ending's last frame built at once (before the
+## choice, the ending last chosen), then the final card and the results.
 func skip_to_end() -> void:
 	if _skipping or phase == Phase.DONE:
 		return
@@ -772,40 +908,54 @@ func skip_to_end() -> void:
 	_events.clear()
 	_ramps.clear()
 	_prompt.visible = false
+	_choice.visible = false
 	_skip.visible = false
+	if ending.is_empty():
+		ending = _default_ending()
+		Save.set_last_ending(ending)
 	_ramp(_dip, "color:a", 1.0, 0.3)
 	_after(0.3, _final_state)
 	_after(0.3, _ramp.bind(_dip, "color:a", 0.0, 0.3))
 	_after(1.6, _finish.bind(true))
 
 func _final_state() -> void:
-	phase = Phase.EMBER
-	var player := game.player
-	if is_instance_valid(player):
-		player.visible = false
-		player.process_mode = Node.PROCESS_MODE_DISABLED
+	phase = Phase.LAST_WORD
 	_free_cast()
 	for card in _cards.get_children():
 		card.queue_free()
-	var box := game._world_container
-	box.material = null
-	box.visible = false
-	box.position = Vector2.ZERO
-	_burning = false
-	_ambient_live = false
-	_stage_layer.visible = true
-	_stage.closed = 1.0
-	_stage.remnant_heat = 0.0
-	_front_layer.visible = true
-	_front.modulate.a = 1.0
-	_front.main_drop = 1.0
-	_front.spot = 0.0
-	_front.lamps.fill(0.0)
-	_bill.drop = 0.0
-	_frame_now(THEATRE)
-	_vignette_live = true
-	vignette = CURTAIN_DARK
 	_stop_cues(0.3)
+	_stand_in()
+	_ash = Cast.AshField.new()
+	_add_to_world(_ash, 3)
+	_side = signf(_knight.position.x - Cast.THRONE_X) if _knight.position.x != Cast.THRONE_X else -1.0
+	match ending:
+		"crown":
+			_relight_red(0.0)
+			_knight.place(Cast.THRONE_X, -_side)
+			_knight.grounded = false
+			_knight.position = SEAT
+			_knight.gesture_to("sit", 60.0)
+			_knight.red = 1.0
+			_frame_now(SEATED)
+		"given":
+			_starve(0.0)
+			_knight.place(Cast.THRONE_X + 176.0 * _side, -_side)
+			_knight.gesture_to("look_up", 60.0)
+			_hand_off(Color.WHITE)
+			_stand_rostrum()
+			_begin_burn(0.0)
+			_frame_now(_look_up_frame())
+		"ended":
+			_douse(0.0)
+			_ramp(game.room, "throne_split", 1.0, 0.0)
+			_knight.place(Cast.THRONE_X + 66.0 * _side, -_side)
+			_knight.gesture_to("look_up", 60.0)
+			_dark_well()
+			_ramp(game._world_container, "modulate:a", 0.0, 0.0)
+			_ramp(_actors, "modulate", DAWN_LIGHT, 0.0)
+			_ramp(self, "vignette", Game.VIGNETTE_EDGE, 0.0)
+			_sky.dawn = 1.0
+			_frame_now(DAWN_FRAME)
 	_final_card(0.0)
 
 ## Puts back everything the ending borrowed from the game; safe from any phase
@@ -820,7 +970,7 @@ func abort() -> void:
 		return
 	var box := game._world_container
 	box.material = null
-	box.position = Vector2.ZERO
+	box.modulate = Color.WHITE
 	box.visible = true
 	var player := game.player
 	if is_instance_valid(player):
@@ -833,9 +983,8 @@ func abort() -> void:
 	game._set_vignette(Game.VIGNETTE_EDGE)
 	game._lights.set_ambient(game.mood.ambient)
 	if is_instance_valid(game.room):
-		game.room.set("sigil_heat", 1.0)
-		game.room.set("fire_heat", 1.0)
-		game.room.set("sigil_gold", 0.0)
+		for pair in [["sigil_heat", 1.0], ["fire_heat", 1.0], ["sigil_gold", 0.0], ["fire_lean", 0.0], ["throne_split", 0.0], ["throne_ash", 0.0]]:
+			game.room.set(pair[0], pair[1])
 	_stop_cues(0.0)
 
 ## Frees the cast wherever it stands, the world or the actor layer.
@@ -843,19 +992,25 @@ func _free_cast() -> void:
 	for node in _cast():
 		node.get_parent().remove_child(node)
 		node.queue_free()
+	_shell = null
+	_burnt = null
+	_relic = null
+	_relic_held = false
 	_hoard = null
 	_knight = null
 	_crowns = null
 	_streams = null
-	_warden = null
 	_ash = null
+	_rostrum = null
+	_throne = null
 	_fallen.clear()
+	_handed_off = false
 
-# --- The director's machinery -------------------------------------------------
+# --- The director's machinery -----------------------------------------------------
 
 ## Every live cast member the director advances.
 func _cast() -> Array:
-	var out: Array = [_hoard, _knight, _crowns, _streams, _warden, _ash]
+	var out: Array = [_shell, _burnt, _relic, _hoard, _knight, _crowns, _streams, _ash, _rostrum, _throne]
 	out.append_array(_fallen)
 	return out.filter(func(node): return is_instance_valid(node))
 
@@ -863,6 +1018,10 @@ func _cast() -> Array:
 func _add_to_world(node: Node2D, z: int) -> void:
 	node.z_index = z
 	game.world.add_child(node)
+
+## Travel and holds shrink with the shorter cuts.
+func _pace() -> float:
+	return float(_cut.pace)
 
 ## Schedules `action` on the event sheet `delay` seconds from now.
 func _after(delay: float, action: Callable) -> void:
@@ -913,8 +1072,8 @@ func _apply() -> void:
 		camera.zoom = Vector2.ONE * cam_zoom
 		camera.force_update_scroll()
 	var view := game.world_view.canvas_transform
-	for layer in [_stage_layer, _actor_layer, _front_layer]:
-		layer.transform = view
+	_sky_layer.transform = view
+	_actor_layer.transform = view
 	if _burning:
 		_apply_burn(view)
 	if _prompt.visible and is_instance_valid(_knight):
@@ -943,9 +1102,9 @@ func _dip_cut(action: Callable, total: float) -> void:
 	_after(total * 0.5, action)
 	_after(total * 0.5, _ramp.bind(_dip, "color:a", 0.0, total * 0.5))
 
-## An act card at the top of the frame: 0.4 s in, held, 0.4 s out.
-func _card(key: String, hold: float = 2.5) -> void:
-	var label := _label(Content.FINALE_TEXT[key], 30, UI.C_TEXT, 96.0)
+## A card across the frame at height `y`: 0.4 s in, held, 0.4 s out.
+func _card(text: String, hold: float, y: float, size: int = 30, color: Color = UI.C_TEXT) -> void:
+	var label := _label(text, size, color, y)
 	label.modulate.a = 0.0
 	_ramp(label, "modulate:a", 1.0, 0.4)
 	_after(0.4 + hold, _ramp.bind(label, "modulate:a", 0.0, 0.4))
@@ -969,15 +1128,15 @@ func _label(text: String, size: int, color: Color, y: float) -> Label:
 	_cards.add_child(label)
 	return label
 
-## Plays a cue at most 12 times a second, so a row of lamps or a crowd of
-## crowns reads as a flurry rather than a wall of sound.
+## Plays a cue at most 12 times a second, so a row of folds or snuffed fires
+## reads as a flurry rather than a wall of sound.
 func _sound(cue: String, pitch: float = 1.0, volume_db: float = 0.0, humanize: bool = true) -> void:
 	if clock - float(_sounded.get(cue, -1.0)) < 1.0 / 12.0:
 		return
 	_sounded[cue] = clock
 	game.feedback.play(cue, pitch, volume_db, humanize)
 
-## The curtain cues come with the score's cue book. Until one is rendered, or
+## The ending's cues come with the score's cue book. Until one is rendered, or
 ## with music off, the ending plays its sound-effect fallbacks instead.
 func _cue(cue: String, from: float = 0.0) -> bool:
 	var music: Node = game.music
@@ -994,31 +1153,26 @@ func _stop_cues(fade: float) -> void:
 	if game.music.has_method("stop_cues"):
 		game.music.stop_cues(fade)
 
-## Stage (-1, behind the world), actors (10), proscenium and bill (11) and
-## text (45: above the vignette at 40, under the UI at 50).
+## The sky (-1, behind the world), the actors (10) and the text (45: above the
+## vignette at 40, under the UI at 50).
 func _build_layers() -> void:
-	_stage_layer = _layer("StageLayer", -1)
-	_stage = FinaleStage.new()
-	_stage_layer.add_child(_stage)
-	_stage_layer.visible = false
+	_sky_layer = _layer("SkyLayer", -1)
+	_sky = FinaleSky.new()
+	# The director's clock drives the risers too, when the sky lets it.
+	_sky.set("autostep", false)
+	_sky_layer.add_child(_sky)
+	_sky_layer.visible = false
 	_actor_layer = _layer("ActorLayer", 10)
 	_actors = Node2D.new()
 	_actors.name = "Actors"
 	_actor_layer.add_child(_actors)
-	_front_layer = _layer("FrontLayer", 11)
-	_front = FinaleStage.FinaleFront.new()
-	_front.house_count = mini(int(ctx.get("victories", 1)) - 1, Content.HOUSE_CAP)
-	_front_layer.add_child(_front)
-	_bill = FinaleStage.Playbill.new()
-	_bill.rows = _playbill_rows()
-	_front_layer.add_child(_bill)
-	_front_layer.visible = false
 	var text := _full_rect(Control.new(), _layer("TextLayer", 45))
-	text.add_child(FinaleStage.PlaybillText.new(_bill))
 	_cards = _full_rect(Control.new(), text)
 	_prompt = FinalePrompt.new()
 	_prompt.visible = false
 	text.add_child(_prompt)
+	_choice = _full_rect(ChoicePrompt.new(), text)
+	_choice.visible = false
 	_skip = _full_rect(SkipRing.new(), text)
 	_skip.visible = false
 	_dip = _full_rect(ColorRect.new(), text)
@@ -1037,29 +1191,83 @@ func _full_rect(control: Control, parent: Node) -> Control:
 	control.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	return control
 
-## The cast list: the fallen, the Warden (not in the brief cut), the knight and
-## the run's boons, the vows sworn and the watching house.
-func _playbill_rows() -> Array:
-	var text := Content.FINALE_TEXT
-	var vows: Array = ctx.get("vows", [])
-	var oath := vows.size() == Content.VOWS.size()
-	var rows: Array = ["%s — %s" % [text.fallen, Content.fallen_gloss(int(ctx.get("falls_total", 0)), bool(ctx.get("unknown", false)))]]
-	if tier != "brief":
-		rows.append("%s — %s" % [text.warden, text.warden_gloss_oath if oath else text.warden_gloss])
-	rows.append("%s — %s" % [text.knight, text.knight_gloss_oath if oath else text.knight_gloss])
-	var boons: Array = ctx.get("boons", [])
-	if not boons.is_empty():
-		rows.append({ "sigils": boons.slice(0, 8) })
-	var sworn := PackedStringArray()
-	for v in Content.VOWS:
-		if vows.has(v.id):
-			sworn.append(str(v.title).trim_prefix("Vow of "))
-	if not sworn.is_empty():
-		rows.append("%s — %s" % [text.sworn, " · ".join(sworn)])
-	var house := Content.house_gloss(int(ctx.get("victories", 1)) - 1)
-	if not house.is_empty():
-		rows.append("%s — %s" % [text.house, house])
-	return rows
+## A key cap in the house style: the key's name on a dark rounded box, its rim
+## gold when it matters now. Returns the cap's width.
+static func draw_key_cap(ci: CanvasItem, x: float, key: String, gold: bool) -> float:
+	var font := UI._heading_font()
+	var width := font.get_string_size(key, HORIZONTAL_ALIGNMENT_LEFT, -1, 16).x + 16.0
+	var box := StyleBoxFlat.new()
+	box.bg_color = Color(UI.C_INK, 0.9)
+	box.set_border_width_all(1)
+	box.set_corner_radius_all(4)
+	box.border_color = UI.C_GOLD if gold else UI.C_EDGE
+	ci.draw_style_box(box, Rect2(x, -14.0, width, 28.0))
+	ci.draw_string(font, Vector2(x + 8.0, 6.0), key, HORIZONTAL_ALIGNMENT_LEFT, -1, 16, UI.C_TEXT)
+	return width
+
+## Outlined serif word with its left edge at `x`, on the baseline at y 6.
+static func draw_word(ci: CanvasItem, x: float, text: String, size: int, color: Color, y: float = 6.0) -> void:
+	var font := UI._heading_font()
+	ci.draw_string_outline(font, Vector2(x, y), text, HORIZONTAL_ALIGNMENT_LEFT, -1, size, 4, Color(VFX.VOID, 0.6))
+	ci.draw_string(font, Vector2(x, y), text, HORIZONTAL_ALIGNMENT_LEFT, -1, size, color)
+
+
+## The choice, low in the frame in the house's serif: the endings side by side,
+## the one in hand in gold between two chevrons, its rule filling as the hold
+## keeps it; under them, how to choose on the device last touched.
+class ChoicePrompt extends Control:
+	const WORD := 26
+	const GAP := 72.0
+	var options: Array = []:
+		set(value):
+			options = value
+			queue_redraw()
+	var selected := -1:
+		set(value):
+			selected = value
+			queue_redraw()
+	var fill := 0.0:
+		set(value):
+			if value != fill:
+				fill = value
+				queue_redraw()
+
+	func _draw() -> void:
+		var font := UI._heading_font()
+		var widths: Array = options.map(func(o): return font.get_string_size(o, HORIZONTAL_ALIGNMENT_LEFT, -1, WORD).x)
+		var total: float = widths.reduce(func(a, b): return a + b, 0.0) + GAP * float(maxi(options.size() - 1, 0))
+		var x := (size.x - total) * 0.5
+		var y := size.y - 118.0
+		for i in range(options.size()):
+			var w: float = widths[i]
+			var chosen := i == selected
+			Finale.draw_word(self, x, options[i], WORD, UI.C_GOLD if chosen else UI.C_MUTED, y)
+			draw_line(Vector2(x, y + 12.0), Vector2(x + w, y + 12.0), Color(UI.C_EDGE, 0.5), 2.0)
+			if chosen:
+				draw_line(Vector2(x, y + 12.0), Vector2(x + w * clampf(fill, 0.0, 1.0), y + 12.0), UI.C_GOLD, 3.0)
+				for side: float in [-1.0, 1.0]:
+					var tip := Vector2(x + w * 0.5 + side * (w * 0.5 + 22.0), y - 8.0)
+					draw_colored_polygon(PackedVector2Array([tip, tip - Vector2(side * 8.0, -6.0), tip - Vector2(side * 8.0, 6.0)]), UI.C_GOLD)
+			x += w + GAP
+		# How to choose: left and right, then hold.
+		var key := UI.prompt("ui_accept").trim_prefix("[").trim_suffix("]")
+		var hold := str(Content.FINALE_TEXT.hold)
+		var verb := str(Content.FINALE_TEXT.choose)
+		var small := 18
+		var hold_w := font.get_string_size(hold, HORIZONTAL_ALIGNMENT_LEFT, -1, small).x
+		var verb_w := font.get_string_size(verb, HORIZONTAL_ALIGNMENT_LEFT, -1, small).x
+		var cap_w := font.get_string_size(key, HORIZONTAL_ALIGNMENT_LEFT, -1, 16).x + 16.0
+		var line_w := 44.0 + hold_w + 10.0 + cap_w + 10.0 + verb_w
+		draw_set_transform(Vector2((size.x - line_w) * 0.5, y + 50.0))
+		for side: float in [-1.0, 1.0]:
+			var tip := Vector2(14.0 + side * 12.0, 0.0)
+			draw_colored_polygon(PackedVector2Array([tip, tip - Vector2(side * 9.0, -7.0), tip - Vector2(side * 9.0, 7.0)]), UI.C_TEXT)
+		var cx := 44.0
+		Finale.draw_word(self, cx, hold, small, UI.C_TEXT)
+		cx += hold_w + 10.0
+		cx += Finale.draw_key_cap(self, cx, key, selected >= 0) + 10.0
+		Finale.draw_word(self, cx, verb, small, UI.C_TEXT)
+		draw_set_transform(Vector2.ZERO)
 
 
 ## HOLD [Q / RT] IGNITE under the knight: a seven-tick ring that gains a tick
@@ -1074,8 +1282,6 @@ class FinalePrompt extends Control:
 			let_go = value
 			queue_redraw()
 	var _key := ""
-	var _cap := StyleBoxFlat.new()
-	var _cap_gold := StyleBoxFlat.new()
 
 	func _init() -> void:
 		mouse_filter = Control.MOUSE_FILTER_IGNORE
@@ -1083,12 +1289,6 @@ class FinalePrompt extends Control:
 		_key = str(binding.key)
 		if not Input.get_connected_joypads().is_empty() and not str(binding.pad).is_empty():
 			_key += " / " + str(binding.pad)
-		for box: StyleBoxFlat in [_cap, _cap_gold]:
-			box.bg_color = Color(UI.C_INK, 0.9)
-			box.set_border_width_all(1)
-			box.set_corner_radius_all(4)
-		_cap.border_color = UI.C_EDGE
-		_cap_gold.border_color = UI.C_GOLD
 
 	func _draw() -> void:
 		var font := UI._heading_font()
@@ -1106,15 +1306,10 @@ class FinalePrompt extends Control:
 			draw_line(ring + dir * 7.0, ring + dir * 12.0, UI.C_GOLD if j < ticks else UI.C_EDGE, 2.5, true)
 		x += 26.0 + gap
 		if not left.is_empty():
-			_word(font, x, left, word, UI.C_TEXT)
+			Finale.draw_word(self, x, left, word, UI.C_TEXT)
 			x += left_w + gap
-		draw_style_box(_cap_gold if let_go else _cap, Rect2(x, -14.0, cap_w, 28.0))
-		draw_string(font, Vector2(x + 8.0, 6.0), _key, HORIZONTAL_ALIGNMENT_LEFT, -1, 16, UI.C_TEXT)
-		_word(font, x + cap_w + gap, right, word, UI.C_GOLD if let_go else UI.C_TEXT)
-
-	func _word(font: Font, x: float, text: String, size: int, color: Color) -> void:
-		draw_string_outline(font, Vector2(x, 6.0), text, HORIZONTAL_ALIGNMENT_LEFT, -1, size, 4, Color(VFX.VOID, 0.6))
-		draw_string(font, Vector2(x, 6.0), text, HORIZONTAL_ALIGNMENT_LEFT, -1, size, color)
+		x += Finale.draw_key_cap(self, x, _key, let_go) + gap
+		Finale.draw_word(self, x, right, word, UI.C_GOLD if let_go else UI.C_TEXT)
 
 
 ## The skip ring, bottom right: a paper disc filling with an ember edge, with

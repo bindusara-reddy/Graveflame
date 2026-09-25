@@ -131,6 +131,8 @@ var _beat: int = Beat.NONE
 var _beat_t := 0.0
 var _death_t := 0.0
 var _shattered := false
+## The knight took the crown last time: this Warden wears it (see visual_pose).
+var _victor_crown := Save.get_last_ending() == "crown"
 
 ## A patch of the Warden's own fire: the Cinder Trail's burning ground turned
 ## on the knight. It kindles for ARM_T before it bites, and bites only once.
@@ -655,7 +657,9 @@ func _die(_award_reward: bool = true) -> void:
 	_hurtbox.set_deferred("monitorable", false)
 	emit_signal("died", 300)
 
-## Shudder, crack with fire, then come apart. Visual only; the fight is over.
+## Shudder, crack with fire along every fault and last down the seam, then
+## come apart: the finale takes the shatter and splits the costume open.
+## Visual only; the fight is over.
 func _step_death(delta: float) -> void:
 	if _shattered:
 		return
@@ -677,6 +681,8 @@ func _step_death(delta: float) -> void:
 func visual_pose() -> Dictionary:
 	var p := WardenArt.pose(self)
 	p["jitter"] = VFX.jolt_offset(self)
+	if _victor_crown:
+		p["crown_gold"] = 0.8
 	if phase >= BPhase.TWO:
 		# Ignited for good: the mantle burns; the Last Ember burns white-hot.
 		p["mantle_fire"] = 1.0 if phase == BPhase.TWO else 1.4

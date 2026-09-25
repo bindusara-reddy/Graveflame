@@ -7,6 +7,8 @@ const CryptProp := preload("res://scripts/crypt_prop.gd")
 const Severed := preload("res://scripts/severed.gd")
 ## Past victories shown as candles on the throne dais, at most.
 const MAX_DAIS_CANDLES := 12
+## The starved or broken throne's stone.
+const THRONE_ASH := Color("4a4650")
 
 signal completed
 signal cleared(room_name: String)
@@ -81,10 +83,12 @@ var mood: Dictionary = {}
 var _back_decor: Node2D
 ## Depth band (Content.zone_for): picks the floor's material and the dressing.
 var zone := "crypt"
-## The throne room is the finale's stage, and the finale plays it: the Warden's
-## sigil gutters out (heat 0) and relights gold, the braziers sink, and every
-## past victory stands a candle on the dais. The braziers' and the sigil's
-## lights follow the heat, so each change rebuilds the light list.
+## The throne room is where the ending plays, and the finale plays it: the
+## Warden's sigil gutters out (heat 0) and relights, the braziers sink and
+## lean toward the throne as it calls (fire_lean), the throne greys to ash
+## (throne_ash) or cracks in two (throne_split), and every past victory stands
+## a candle on the dais. The braziers' and the sigil's lights follow the heat,
+## so each change rebuilds the light list.
 var sigil_heat := 1.0:
 	set(value):
 		sigil_heat = value
@@ -97,6 +101,9 @@ var fire_heat := 1.0:
 	set(value):
 		fire_heat = value
 		_light_points_dirty = true
+var fire_lean := 0.0
+var throne_ash := 0.0
+var throne_split := 0.0
 var victory_candles := 0
 ## Re-deals the hashed dressing per chamber: prop placement and kinds here, and
 ## the backdrop's bays, banners and mounds through Game. The opening chamber
@@ -825,7 +832,7 @@ func _clear_of_rifts(pos: Vector2) -> bool:
 	# The throne room never opens a rift, so its lights and dressing stay put.
 	return is_boss or not exits.any(func(e: Dictionary) -> bool: return (e.rect as Rect2).grow(45.0).has_point(pos))
 
-func _candles(base: Vector2, n: int, t: float, m: Dictionary) -> void:
+func _candles(base: Vector2, n: int, t: float, m: Dictionary, flame: float = 1.0) -> void:
 	if not _clear_of_rifts(base):
 		return
 	for i in range(n):
@@ -834,7 +841,8 @@ func _candles(base: Vector2, n: int, t: float, m: Dictionary) -> void:
 		var height := 8.0 + h * 12.0
 		draw_rect(Rect2(x - 2.5, base.y - height, 5.0, height), Color("d8cfc0").darkened(0.35))
 		draw_rect(Rect2(x - 3.5, base.y - height * 0.3, 7.0, 3.0), Color("d8cfc0").darkened(0.5))
-		VFX.draw_flame(self, Vector2(x, base.y - height), 9.0, 4.0, t, float(i) * 1.7, m.torch, VFX.GOLD)
+		if flame > 0.02:
+			VFX.draw_flame(self, Vector2(x, base.y - height), 9.0 * flame, 4.0 * flame, t, float(i) * 1.7, m.torch, VFX.GOLD)
 	draw_rect(Rect2(base.x - float(n) * 6.0, base.y - 2.0, float(n) * 12.0, 3.0), Color(0.0, 0.0, 0.0, 0.35))
 
 func _bone_pile(base: Vector2, m: Dictionary) -> void:
@@ -872,30 +880,44 @@ func _brazier(base: Vector2, t: float, m: Dictionary) -> void:
 	draw_rect(Rect2(base.x - 16.0, base.y - 4.0, 32.0, 4.0), iron)
 	draw_colored_polygon(PackedVector2Array([base + Vector2(-22.0, -40.0), base + Vector2(22.0, -40.0), base + Vector2(14.0, -56.0), base + Vector2(-14.0, -56.0)]), iron.lightened(0.1))
 	draw_arc(base + Vector2(0.0, -40.0), 22.0, PI, TAU, 16, iron.lightened(0.2), 3.0)
+	# The flames lean toward the throne as it calls.
+	draw_set_transform(base + Vector2(0.0, -54.0), fire_lean * 0.45 * signf(640.0 - base.x))
 	for i in range(3):
-		VFX.draw_flame(self, base + Vector2(-9.0 + float(i) * 9.0, -54.0), (30.0 - float(i % 2) * 8.0) * fire_heat, 12.0, t, float(i) * 2.2, m.torch, VFX.GOLD)
+		VFX.draw_flame(self, Vector2(-9.0 + float(i) * 9.0, 0.0), (30.0 - float(i % 2) * 8.0) * fire_heat, 12.0, t, float(i) * 2.2, m.torch, VFX.GOLD)
+	draw_set_transform(Vector2.ZERO)
 	draw_circle(base + Vector2(0.0, -2.0), 26.0, Color(m.torch, 0.06 * fire_heat))
 
-func _throne(ci: CanvasItem, base: Vector2, m: Dictionary) -> void:
-	var stone: Color = (m.stone as Color).darkened(0.1)
+## The Ember Throne on its dais. The finale can grey it to ash or split it:
+## each half then tips outward about its outer foot, the crack between them
+## jagged, and the sigil is gone. Public so the ending can paint it again
+## once the rest of the keep has gone dark.
+func paint_throne(ci: CanvasItem, base: Vector2, m: Dictionary) -> void:
+	var stone: Color = (m.stone as Color).darkened(0.1).lerp(THRONE_ASH, throne_ash)
+	var rim: Color = (m.torch as Color).lerp(THRONE_ASH.lightened(0.3), throne_ash)
 	# Dais steps with gilt nosing and a crimson runner up to the seat.
 	for i in range(3):
 		var w := 300.0 - float(i) * 60.0
 		var y := base.y - 14.0 * float(i + 1)
 		ci.draw_rect(Rect2(base.x - w * 0.5, y, w, 14.0), stone.lightened(0.05 * float(i)))
-		ci.draw_rect(Rect2(base.x - 30.0, y, 60.0, 14.0), (m.banner as Color).lightened(0.1))
-		ci.draw_line(Vector2(base.x - w * 0.5, y), Vector2(base.x + w * 0.5, y), Color(VFX.GOLD, 0.5), 2.0)
+		ci.draw_rect(Rect2(base.x - 30.0, y, 60.0, 14.0), (m.banner as Color).lerp(stone, throne_ash).lightened(0.1))
+		ci.draw_line(Vector2(base.x - w * 0.5, y), Vector2(base.x + w * 0.5, y), Color(VFX.GOLD, 0.5 * (1.0 - throne_ash)), 2.0)
 	var seat := base + Vector2(0.0, -42.0)
+	if throne_split > 0.0:
+		for side: float in [-1.0, 1.0]:
+			ci.draw_set_transform(seat + Vector2(side * 78.0, 0.0), side * 0.16 * throne_split)
+			_throne_half(ci, Vector2(-side * 78.0 + side * 10.0 * throne_split, 0.0), side, stone, rim)
+		ci.draw_set_transform(Vector2.ZERO)
+		return
 	# Back with a crown of blades, cut and bevelled like the rest of the set.
 	var back := PackedVector2Array([seat + Vector2(-60.0, 0.0), seat + Vector2(-60.0, -190.0), seat + Vector2(60.0, -190.0), seat + Vector2(60.0, 0.0)])
 	VFX.draw_shaded_polygon(ci, back, stone.darkened(0.15))
-	VFX.draw_rim(ci, back, 1.0, 0.6, m.torch)
+	VFX.draw_rim(ci, back, 1.0, 0.6, rim)
 	for i in range(7):
 		var x := seat.x - 54.0 + float(i) * 18.0
 		var h := 40.0 + (24.0 if i == 3 else (12.0 if i % 2 == 0 else 0.0))
 		var blade := PackedVector2Array([Vector2(x - 6.0, seat.y - 190.0), Vector2(x, seat.y - 190.0 - h), Vector2(x + 6.0, seat.y - 190.0)])
 		ci.draw_colored_polygon(blade, stone.darkened(0.05))
-		VFX.draw_rim(ci, blade, 1.0, 0.6, m.torch)
+		VFX.draw_rim(ci, blade, 1.0, 0.6, rim)
 	# Armrests and seat.
 	ci.draw_rect(Rect2(seat.x - 78.0, seat.y - 70.0, 18.0, 70.0), stone)
 	ci.draw_rect(Rect2(seat.x + 60.0, seat.y - 70.0, 18.0, 70.0), stone)
@@ -907,6 +929,27 @@ func _throne(ci: CanvasItem, base: Vector2, m: Dictionary) -> void:
 	if heat > 0.02:
 		VFX.draw_flame(ci, seat + Vector2(0.0, -104.0), 34.0 * heat, 18.0, _decor_t(), 0.0, Color(fire, minf(1.0, 0.85 * heat)), VFX.GOLD.lerp(VFX.HOT, sigil_gold))
 	ci.draw_arc(seat + Vector2(0.0, -120.0), 30.0, 0.0, TAU, 28, Color(fire, 0.35 * heat), 2.0)
+
+## One half of the split throne, drawn about the seat's centre at `seat`: its
+## half of the back ending in the crack, its blades, armrest and half seat.
+func _throne_half(ci: CanvasItem, seat: Vector2, side: float, stone: Color, rim: Color) -> void:
+	var crack := PackedVector2Array()
+	for k in range(9):
+		var y := -190.0 + 190.0 * float(k) / 8.0
+		crack.append(seat + Vector2(side * (2.0 + 7.0 * VFX.hash01(k, 91)), y))
+	var back := PackedVector2Array([seat + Vector2(side * 60.0, 0.0), seat + Vector2(side * 60.0, -190.0)])
+	back.append_array(crack)
+	VFX.draw_shaded_polygon(ci, back, stone.darkened(0.15))
+	VFX.draw_rim(ci, back, 1.0, 0.6, rim)
+	ci.draw_polyline(crack, Color(VFX.VOID, 0.9), 2.0)
+	for i in [4, 5, 6]:
+		var x := seat.x + side * (float(i) * 18.0 - 54.0)
+		var h := 40.0 + (12.0 if i % 2 == 0 else 0.0)
+		var blade := PackedVector2Array([Vector2(x - 6.0, seat.y - 190.0), Vector2(x, seat.y - 190.0 - h), Vector2(x + 6.0, seat.y - 190.0)])
+		ci.draw_colored_polygon(blade, stone.darkened(0.05))
+		VFX.draw_rim(ci, blade, 1.0, 0.6, rim)
+	ci.draw_rect(Rect2(seat.x + (60.0 if side > 0.0 else -78.0), seat.y - 70.0, 18.0, 70.0), stone)
+	ci.draw_rect(Rect2(seat.x + (2.0 if side > 0.0 else -60.0), seat.y - 30.0, 58.0, 30.0), stone.lightened(0.06))
 
 
 ## Sigil heat as drawn (the apse window shares it): reduced flash caps the
@@ -1158,7 +1201,7 @@ func _draw_decor_back(ci: CanvasItem) -> void:
 			_gallows(ci, Vector2(190.0, fy), 230.0, t, m)
 			_gallows(ci, Vector2(1090.0, fy), -230.0, t, m)
 		"boss":
-			_throne(ci, Vector2(640.0, fy), m)
+			paint_throne(ci, Vector2(640.0, fy), m)
 			_banner_prop(ci, Vector2(120.0, 120.0), 230.0, t, m, 3)
 			_banner_prop(ci, Vector2(1160.0, 120.0), 230.0, t, m, 4)
 
@@ -1198,7 +1241,7 @@ func _draw_decor_front(tag: String, m: Dictionary) -> void:
 			# One candle per past victory on the top step: the Warden is fought
 			# in front of the knight's own tally.
 			if victory_candles > 0:
-				_candles(Vector2(640.0, fy - 42.0), victory_candles, t, m)
+				_candles(Vector2(640.0, fy - 42.0), victory_candles, t, m, fire_heat)
 			_stain(Vector2(640.0, fy), 200.0, Color(0.32, 0.05, 0.08, 0.35))
 			_bone_pile(Vector2(-40.0, fy), m)
 			_bone_pile(Vector2(1330.0, fy), m)

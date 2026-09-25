@@ -19,13 +19,15 @@ const ROAR := {"hand":Vector2(74,-62),"elbow":Vector2(52,-46),"offhand":Vector2(
 const SLUMP := {"hand":Vector2(46,34),"elbow":Vector2(44,-2),"offhand":Vector2(-42,30),"claw_angle":1.3,"off_angle":1.2,"lean":0.16}
 ## How far a kneeling Warden sinks toward the floor.
 const KNEEL_SAG := 16.0
-## The Warden's fault lines: fire splits it along them as it dies, and the
-## finale's mended Warden wears them stitched shut with black thread.
+## The Warden's fault lines: fire splits it along them as it dies. The last
+## is the seam down its middle, the last to burn through: the finale opens the
+## Warden along it like a paper costume.
 const FAULTS := [
 	[Vector2(-30,-44),Vector2(-12,-20),Vector2(-20,2),Vector2(-6,24)],
 	[Vector2(18,-60),Vector2(6,-38),Vector2(22,-14),Vector2(12,10)],
 	[Vector2(-40,-8),Vector2(-18,-6),Vector2(4,-16),Vector2(34,-4)],
 	[Vector2(0,-86),Vector2(10,-70),Vector2(2,-58)],
+	[Vector2(3,-90),Vector2(-2,-62),Vector2(3,-32),Vector2(-2,-2),Vector2(2,28),Vector2(0,56)],
 ]
 ## The crown's three flames: base, height and width. A spent crown keeps only
 ## charred stubs of them.
@@ -279,7 +281,9 @@ static func paint(b,p: Dictionary) -> void:
 			ci.draw_colored_polygon(PackedVector2Array([base+Vector2(-width*0.5,0),tip,base+Vector2(width*0.5,0)]),CHARRED)
 			ci.draw_circle(tip,2.0,fire)
 		else:
-			VFX.draw_flame(ci,base,height*crown_scale,width,t,[1.0,2.3,4.0][i],fire,Content.PAL.attack)
+			# After the knight took the crown, the Warden wears it in the knight's gold.
+			var gold: float = p.get("crown_gold",0.0)
+			VFX.draw_flame(ci,base,height*crown_scale,width,t,[1.0,2.3,4.0][i],fire.lerp(VFX.GOLD,gold),Content.PAL.attack.lerp(VFX.HOT,gold))
 	arm(ci,p.shoulder,p.elbow,p.hand,float(p.claw_angle),rust)
 	if phase2:
 		ci.draw_line(p.elbow+Vector2(3,0),p.hand,fire,2.0,true)
@@ -287,9 +291,6 @@ static func paint(b,p: Dictionary) -> void:
 	if p.windup and int(b.action_idx) == Boss.Action.FAN:
 		var palm: Vector2 = p.offhand+Vector2(-6,-18)
 		VFX.draw_flame(ci,palm,20.0+float(p.progress)*14.0,9.0,t,0.4,fire,HORN)
-	if p.get("mended",false):
-		for fault in FAULTS:
-			stitch(ci,PackedVector2Array(fault))
 	if p.has("dying"):
 		# Fire splitting the body along fault lines before it comes apart.
 		var dk: float = p.dying
@@ -310,15 +311,3 @@ static func paint(b,p: Dictionary) -> void:
 			var x := 55.0+float(i)*27.0
 			ci.draw_polyline(PackedVector2Array([Vector2(x-7,54),Vector2(x,58),Vector2(x-7,62)]),Color(fire,0.2+float(p.progress)*0.6),2.0,true)
 	ci.draw_set_transform(Vector2.ZERO,0.0,Vector2.ONE)
-
-## A crack sewn shut with black thread: the seam in INK, crossed by a RIDGE
-## stitch every 7 px along it.
-static func stitch(ci: CanvasItem, line: PackedVector2Array) -> void:
-	ci.draw_polyline(line,INK,3.0,true)
-	for i in range(line.size()-1):
-		var a := line[i]
-		var b := line[i+1]
-		var across := (b-a).normalized().orthogonal()*2.0
-		for k in range(1,int((b-a).length()/7.0)+1):
-			var at := a.move_toward(b,7.0*float(k))
-			ci.draw_line(at-across,at+across,RIDGE,1.4,true)
