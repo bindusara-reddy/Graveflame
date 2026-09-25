@@ -577,7 +577,21 @@ func _test_full_run_simulation() -> void:
 	check(int(game._stats.kills) > 0 and float(game._stats.damage_dealt) > 0.0, "run statistics accumulate")
 	check(int(game._stats.rooms) == game.run.rooms_total(), "run statistics record the final chamber")
 	check(Save.get_cells() > cells_before, "a run banks cells")
-	check(game.music._current == "title", "victory returns the score to the title cue")
+	check(game.music._current == "", "victory silences the score for the finale")
+	check(game.finale != null, "victory hands the stage to the finale")
+	game.finale.autostep = false
+	game.finale.skip_to_end()
+	for i in range(120):
+		if game.finale.phase == Finale.Phase.DONE:
+			break
+		game.finale.step(1.0 / 60.0)
+	check((game.ui._panels["victory"] as Control).visible, "a skipped finale opens the victory panel")
+	check(game.music._current == "title", "the title theme returns with the results")
+	check(paused, "the results panel pauses the world")
+	# The killing blow's hit-stop is real-time; let it expire before checking.
+	await create_timer(0.3, true, false, true).timeout
+	check(Engine.time_scale == 1.0, "the finale leaves real time running")
+	paused = false
 	game.queue_free()
 	await process_frame
 

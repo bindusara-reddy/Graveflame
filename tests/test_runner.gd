@@ -31,6 +31,7 @@ func _run_tests() -> void:
 	_test_difficulty_and_streaks()
 	_test_synergy_boons()
 	_test_moods()
+	_test_finale_text()
 
 func _test_script_loading() -> void:
 	# A script whose globals failed to resolve (e.g. because `.godot/` carries no
@@ -339,3 +340,33 @@ func _test_synergy_boons() -> void:
 	rm.apply_upgrade({ "id": "executioner", "kind": "execute", "value": 0.5 })
 	rm.apply_upgrade({ "id": "backdraft", "kind": "parry_special", "value": 30.0 })
 	check(is_equal_approx(rm.build.thorns, 15.0) and is_equal_approx(rm.build.execute_bonus, 0.5) and is_equal_approx(rm.build.parry_special, 30.0), "thorns, executioner and backdraft apply")
+
+## The ending's words and its cut choice (finale spec T5, T11).
+func _test_finale_text() -> void:
+	check(Content.finale_tier(0, "") == "full", "a first finale plays in full")
+	check(Content.finale_tier(1, "") == "abridged" and Content.finale_tier(2, "") == "abridged", "the 2nd and 3rd finales are abridged")
+	check(Content.finale_tier(3, "") == "brief", "later finales are brief")
+	check(Content.finale_tier(5, "house_rises") == "abridged", "a new milestone forces at least the abridged cut")
+	check(Content.finale_tier(7, "oath") == "full", "the first Fivefold Oath plays in full")
+	var epitaphs: Array = Content.EPITAPHS.duplicate()
+	epitaphs.append(Content.EPITAPH_THRONE)
+	check(epitaphs.all(func(e): return Content.EPITAPH_ANSWERS.has(e)), "every epitaph has an answer")
+	for key in ["keep", "back", "cold", "again", "bill_title", "curtain"]:
+		check(str(Content.FINALE_TEXT[key]).length() <= 34, "finale heading '%s' fits 34 characters" % key)
+	check(Content.boss_subtitle(0, false) == "Keeper of the Ember Throne", "an unbeaten Warden keeps its title")
+	check(Content.boss_subtitle(1, false) == "Felled once. Mended." and Content.boss_subtitle(2, false) == "Felled twice. Mended.", "the Warden remembers its first falls")
+	check(Content.boss_subtitle(7, false) == "Felled 7 times. Mended.", "the Warden counts its later falls")
+	check(Content.boss_subtitle(3, true) == "Its wires were cut. It rose anyway.", "the Oath changes the Warden's title")
+	var ordinals := { 1: "THE FIRST FLAME", 4: "THE FOURTH FLAME", 20: "THE TWENTIETH FLAME", 21: "THE 21ST FLAME", 22: "THE 22ND FLAME", 23: "THE 23RD FLAME", 111: "THE 111TH FLAME" }
+	for n in ordinals:
+		check(Content.flame_ordinal(n) == ordinals[n], "flame ordinal %d reads %s" % [n, ordinals[n]])
+	check(Content.fallen_gloss(0, false) == "Those before you. Not one was you.", "a deathless crowd is the elders")
+	check(Content.fallen_gloss(1, false) == "One knight. It was you.", "one fall is one knight")
+	check(Content.fallen_gloss(47, false) == "47 knights. Each of them was you.", "the bill prints the true count")
+	check(Content.fallen_gloss(3, true) == "Uncounted. Each of them was you.", "an unknown count is said honestly")
+	check(Content.house_gloss(0) == "" and Content.house_gloss(1) == "One flame, watching.", "the house fills from the second win")
+	check(Content.house_gloss(9) == "Nine flames stand for the tenth." and Content.house_gloss(11) == "Eleven flames, standing.", "the house stands from the tenth win")
+	var answer := Content.finale_answer("The descent is patient.", 3, false)
+	check(answer.quote == "“The descent is patient.”" and answer.answer == "So were you.", "the ending answers the last epitaph")
+	check(Content.finale_answer("", 0, false).answer == Content.FINALE_TEXT.took_nothing, "a deathless run lost nothing")
+	check(Content.finale_answer("", 0, true).quote == Content.FINALE_TEXT.curtain, "nothing to answer falls back to the curtain line")
