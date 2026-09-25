@@ -1,10 +1,12 @@
 class_name Boss
 extends Enemy
-## Phased boss: lunge, projectile fan, ground slam, arena charge. It waits
-## seated on the Ember Throne and rises to meet the knight. Phase 2 below 50%
-## HP: faster, relentless, and it calls two wisps to the throne room.
-## Hits never cancel a committed move; they wear down its poise, and a broken
-## guard (or any parry) drops it to one knee for a real punish window.
+## The Ember Warden. It waits seated on the Ember Throne and rises to meet the
+## knight: lunge, projectile fan, tracked leap-slam, arena charge. Hits never
+## cancel a committed move; they wear down its poise, and a broken guard (or
+## any parry) drops it to one knee for a real punish window. Phase 2 below 50%
+## HP: it roars, its mantle catches, it strings its moves and calls wisps.
+## Phase 3, the Last Ember, below 22%: it kneels as if spent, rises white-hot,
+## and fights faster over a floor that catches fire.
 
 const WardenArt := preload("res://scripts/warden_art.gd")
 
@@ -13,33 +15,12 @@ signal summon_requested(kind: int, pos: Vector2)
 ## The felled Warden breaking apart, a beat after the killing blow.
 signal shattered(pos: Vector2)
 
-enum BPhase { INTRO, ONE, TWO }
+enum BPhase { INTRO, ONE, TWO, THREE }
 enum Action { LUNGE, FAN, SLAM, CHARGE }
+## Scripted moments that play out whatever the knight does.
+enum Beat { NONE, ROAR, EMBER }
 
-var phase: int = BPhase.INTRO
-var intro_t := 1.2
-var action_t := 1.5
-var action_idx: int = Action.LUNGE
-var _phase2_triggered := false
-var _slam_wave_emitted := false
-var _charge_dir := 1.0
-var _charge_t := 0.0
-var _summoned := false
-## Game-time seconds from the killing blow to the Warden coming apart.
-const SHATTER_T := 0.62
-var _death_t := 0.0
-var _shattered := false
-## Hits each phase's guard absorbs before it breaks, indexed by BPhase. A heavier
-## blow spends more (poise_dmg); a parry breaks it outright.
-const POISE := [8.0, 8.0, 12.0]
-## Seconds without a hit before the guard is whole again.
-const POISE_REGEN_DELAY := 1.2
-## How long a broken guard keeps the Warden on one knee, and the extra damage
-## it takes meanwhile: the punish window.
-const BREAK_TIME := 1.2
-const BREAK_DAMAGE_MUL := 1.3
-var _poise: float = POISE[BPhase.ONE]
-var _poise_regen_t := 0.0
+# --- The throne entrance ---
 ## Where the Warden sits on the Ember Throne (room._throne, x 640): haunches on
 ## the seat, feet on the top dais step.
 const THRONE_SEAT := Vector2(640.0, Content.FLOOR_Y - 86.0)
@@ -51,27 +32,105 @@ const WAKE_AFTER := 3.0
 ## feet clear the top step, then steps down toward the knight.
 const RISE_STAND := 0.6
 const RISE_LIFT := 17.0
-## Chance that an ignited lunge runs straight on into a point-blank fan.
-const STRING_CHANCE := 0.4
+
+# --- Poise ---
+## Hits each phase's guard absorbs before it breaks, indexed by BPhase. A heavier
+## blow spends more (poise_dmg); a parry breaks it outright.
+const POISE := [8.0, 8.0, 12.0, 12.0]
+## Seconds without a hit before the guard is whole again.
+const POISE_REGEN_DELAY := 1.2
+## How long a broken guard keeps the Warden on one knee, and the extra damage
+## it takes meanwhile: the punish window.
+const BREAK_TIME := 1.2
+const BREAK_DAMAGE_MUL := 1.3
+
+# --- Moves ---
+## Chance, by phase, that a lunge runs straight on into a string of moves.
+const STRING_CHANCE := [0.0, 0.0, 0.4, 0.7]
 ## A linked move (the next of a string) winds up this fraction of its usual tell.
 const LINK_WINDUP := 0.55
 ## A charge runs through the knight's spot and this far past it, so a Warden
 ## baited near a wall crashes into it and reels for WALL_STUN seconds.
 const CHARGE_OVERRUN := 260.0
 const WALL_STUN := 1.4
+
+# --- Phase beats ---
+## Health fraction where the Last Ember begins.
+const LAST_EMBER_AT := 0.22
+## The phase-two roar: it rears back, and at ROAR_PEAK its mantle catches.
+const ROAR_TIME := 0.9
+const ROAR_PEAK := 0.35
+## The Last Ember: down on one knee until EMBER_KNEEL, rising until EMBER_PEAK,
+## where it roars, throws a close knight back and sets the floor alight.
+const EMBER_TIME := 1.6
+const EMBER_KNEEL := 0.5
+const EMBER_PEAK := 1.1
+const ROAR_RADIUS := 170.0
+const ROAR_DAMAGE := 6.0
+## The Last Ember's charge leaves a fire patch every this many px.
+const TRAIL_STEP := 60.0
+## Warden fire patches are the Cinder Trail's burning ground at this scale,
+## so the hazard reads at a glance.
+const PATCH_SCALE := 1.5
+
+## Game-time seconds from the killing blow to the Warden coming apart.
+const SHATTER_T := 0.62
+
+var phase: int = BPhase.INTRO
+var intro_t := 1.2
+var action_t := 1.5
+var action_idx: int = Action.LUNGE
+## Set by the room before _ready: start seated on the throne, not standing.
+var seated := false
+var _seated_t := 0.0
+## Seconds since waking from the throne; negative while it never sat.
+var _rise_t := -1.0
+var _poise: float = POISE[BPhase.ONE]
+var _poise_regen_t := 0.0
 ## The last two moves, so none comes three times running.
 var _history: Array[int] = []
 ## Moves queued to follow the current one without a rest: the strings.
 var _string: Array[int] = []
 ## Where the tracked leap-slam will come down (its marker burns there).
 var slam_x := 0.0
+var _slam_wave_emitted := false
+var _charge_dir := 1.0
+var _charge_t := 0.0
+## Where the Last Ember's charge last left a fire patch.
+var _trail_x := 0.0
 ## Reeling after a charge into the wall.
 var _dazed := false
-## Set by the room before _ready: start seated on the throne, not standing.
-var seated := false
-var _seated_t := 0.0
-## Seconds since waking from the throne; negative while it never sat.
-var _rise_t := -1.0
+var _beat: int = Beat.NONE
+var _beat_t := 0.0
+var _death_t := 0.0
+var _shattered := false
+
+## A patch of the Warden's own fire: the Cinder Trail's burning ground turned
+## on the knight. It kindles for ARM_T before it bites, and bites only once.
+class EmberPatch extends "res://scripts/ground_fire.gd":
+	const ARM_T := 0.3
+	const DAMAGE := 8.0
+	var _bitten := false
+
+	func _ready() -> void:
+		super._ready()
+		collision_layer = 0
+		collision_mask = Content.L_PLAYER_HURT
+
+	func _physics_process(delta: float) -> void:
+		_t += delta
+		if _t >= LIFE:
+			queue_free()
+			return
+		queue_redraw()
+		if _bitten or _t < ARM_T:
+			return
+		for area in get_overlapping_areas():
+			var knight = area.get_meta("owner", null)
+			if area.get_meta("team", "") == "player" and is_instance_valid(knight) and knight.has_method("take_damage"):
+				_bitten = true
+				knight.take_damage(DAMAGE * Enemy.vow_damage(), Vector2(0.0, -1.0), 200.0)
+				return
 
 func _ready() -> void:
 	hp_max = Content.BOSS_HP
@@ -110,8 +169,12 @@ func _physics_process(delta: float) -> void:
 	if phase == BPhase.INTRO:
 		_step_intro(delta)
 		return
-	_regen_poise(delta)
 	_check_phase2()
+	_check_phase3()
+	if _beat != Beat.NONE:
+		_step_beat(delta)
+		return
+	_regen_poise(delta)
 	match state:
 		EState.SEEK: _boss_seek(delta)
 		EState.WINDUP: _step_windup(delta)
@@ -178,24 +241,76 @@ func _end_intro() -> void:
 		_ignite()
 
 func _check_phase2() -> void:
-	if not _phase2_triggered and hp <= hp_max * Content.BOSS_PHASE2_AT:
+	if phase == BPhase.ONE and hp <= hp_max * Content.BOSS_PHASE2_AT:
 		_ignite()
 
-## Phase two: faster, relentless, and two wisps called to the throne.
+## After the roar has played out, so one big blow still plays both beats in order.
+func _check_phase3() -> void:
+	if phase == BPhase.TWO and _beat == Beat.NONE and hp <= hp_max * LAST_EMBER_AT:
+		_last_ember()
+
+## Phase two: the Warden roars and its mantle catches fire, then fights faster,
+## stringing its moves, with two wisps called to the throne.
 func _ignite() -> void:
-	if _phase2_triggered:
+	if phase >= BPhase.TWO:
 		return
-	_phase2_triggered = true
 	phase = BPhase.TWO
-	emit_signal("phase_changed", 2)
+	_begin_beat(Beat.ROAR)
+	emit_signal("summon_requested", Content.BOSS_SUMMON_KIND, Vector2(300.0, Content.FLOOR_Y - 260.0))
+	emit_signal("summon_requested", Content.BOSS_SUMMON_KIND, Vector2(980.0, Content.FLOOR_Y - 260.0))
+
+## Phase three, the Last Ember: the Warden crashes to one knee as if spent,
+## then rises white-hot for a faster, burning finish.
+func _last_ember() -> void:
+	phase = BPhase.THREE
+	_begin_beat(Beat.EMBER)
+	emit_signal("exploded", global_position + Vector2(0.0, Content.BOSS_H * 0.5), 90.0, 0.0)
+
+## Drop whatever is in hand and play a scripted beat.
+func _begin_beat(beat: int) -> void:
 	_disarm()
 	_string.clear()
+	_dazed = false
 	state = EState.SEEK
-	action_t = 0.8
-	if not _summoned:
-		_summoned = true
-		emit_signal("summon_requested", Content.BOSS_SUMMON_KIND, Vector2(300.0, Content.FLOOR_Y - 260.0))
-		emit_signal("summon_requested", Content.BOSS_SUMMON_KIND, Vector2(980.0, Content.FLOOR_Y - 260.0))
+	_poise = POISE[phase]
+	_beat = beat
+	_beat_t = 0.0
+
+## A beat plays out whatever the knight does. Its peak is the phase change the
+## game answers (shake, callout, music); then the fight resumes.
+func _step_beat(delta: float) -> void:
+	velocity.y += Content.GRAVITY * delta
+	velocity.x = move_toward(velocity.x, 0.0, 1800.0 * delta)
+	move_and_slide()
+	var roar := _beat == Beat.ROAR
+	var peak := ROAR_PEAK if roar else EMBER_PEAK
+	var before_peak := _beat_t < peak
+	_beat_t += delta
+	if before_peak and _beat_t >= peak:
+		emit_signal("phase_changed", phase)
+		if not roar:
+			_roar_blast()
+	if _beat_t >= (ROAR_TIME if roar else EMBER_TIME):
+		_beat = Beat.NONE
+		action_t = 0.3
+
+## The Last Ember's roar throws a close knight back, and the floor around the
+## Warden catches fire.
+func _roar_blast() -> void:
+	var player = _get_player()
+	if player != null and player.has_method("take_damage"):
+		var dx: float = player.global_position.x - global_position.x
+		if absf(dx) < ROAR_RADIUS:
+			player.take_damage(ROAR_DAMAGE * Enemy.vow_damage(), Vector2(signf(dx), -0.6), 560.0)
+	for offset: float in [-110.0, -55.0, 55.0, 110.0]:
+		_kindle(global_position.x + offset)
+
+## Set a patch of hostile fire burning on the floor at x.
+func _kindle(x: float) -> void:
+	var patch := EmberPatch.new()
+	patch.scale = Vector2.ONE * PATCH_SCALE
+	patch.position = Vector2(clampf(x, Content.ROOM_LEFT + 20.0, Content.ROOM_RIGHT - 20.0), Content.FLOOR_Y)
+	get_parent().add_child.call_deferred(patch)
 
 func _boss_seek(delta: float) -> void:
 	var player = _get_player()
@@ -217,9 +332,11 @@ func _face_player() -> void:
 		var dx: float = player.global_position.x - global_position.x
 		facing = signf(dx) if absf(dx) > 4.0 else facing
 
-## Seconds that are `calm` in phase one and `hot` once the Warden is ignited.
+## Seconds that are `calm` in phase one and `hot` once ignited; the Last Ember
+## quickens everything again.
 func _timing(calm: float, hot: float) -> float:
-	return calm if phase < BPhase.TWO else hot
+	var seconds := calm if phase < BPhase.TWO else hot
+	return seconds * (0.85 if phase == BPhase.THREE else 1.0)
 
 func _choose_action(player) -> void:
 	var dx := 0.0
@@ -236,8 +353,9 @@ func _choose_action(player) -> void:
 		# Never one move three times running: the fight keeps asking new questions.
 		options = options.filter(func(a: int) -> bool: return a != _history[0])
 	var action: int = options[randi() % options.size()]
-	if action == Action.LUNGE and phase >= BPhase.TWO and randf() < STRING_CHANCE:
-		_string = [Action.FAN]
+	if action == Action.LUNGE and randf() < STRING_CHANCE[phase]:
+		# A lunge runs on into a point-blank fan; the Last Ember lunges twice first.
+		_string = [Action.LUNGE, Action.FAN] if phase == BPhase.THREE else [Action.FAN]
 	_start(action)
 
 ## Wind up `action` and announce it at the decision point, so every entry into
@@ -290,7 +408,8 @@ func _begin_fan() -> void:
 
 ## The leap tracks the knight: in phase one it covers only part of the gap, so
 ## a sidestep beats it; once ignited it comes down right on them. slam_x is
-## where it will land, and the marker burns there.
+## where it will land, and the marker burns there. The windup is the leap's
+## rise, so it is not quickened.
 func _begin_slam() -> void:
 	var seconds := 0.45
 	_wind_up(Action.SLAM, seconds)
@@ -298,7 +417,8 @@ func _begin_slam() -> void:
 	var player = _get_player()
 	if player != null:
 		target_x = clampf(player.global_position.x, Content.ROOM_LEFT + 80.0, Content.ROOM_RIGHT - 80.0)
-	var drift := clampf((target_x - global_position.x) * _timing(0.6, 1.0) / seconds, -650.0, 650.0)
+	var reach := 0.6 if phase < BPhase.TWO else 1.0
+	var drift := clampf((target_x - global_position.x) * reach / seconds, -650.0, 650.0)
 	velocity = Vector2(drift, -700.0)
 	slam_x = global_position.x + drift * seconds
 
@@ -320,6 +440,10 @@ func _boss_attack(delta: float) -> void:
 	if charge and is_on_wall():
 		_crash_into_wall()
 		return
+	if charge and phase == BPhase.THREE and absf(global_position.x - _trail_x) >= TRAIL_STEP:
+		# The Last Ember's charge leaves the floor burning behind it.
+		_trail_x = global_position.x
+		_kindle(_trail_x)
 	if action_idx == Action.SLAM and is_on_floor() and not _slam_wave_emitted:
 		_slam_wave_emitted = true
 		_emit_slam_waves()
@@ -370,12 +494,13 @@ func _do_charge() -> void:
 		var ahead: float = (player.global_position.x - global_position.x) * _charge_dir
 		_charge_t = clampf((ahead + CHARGE_OVERRUN) / Content.BOSS_CHARGE_SPEED, Content.BOSS_CHARGE_TIME, 1.5)
 	st_timer = _charge_t
+	_trail_x = global_position.x
 	_arm(Content.BOSS_W * 0.5 + 24.0)
 	velocity = Vector2(_charge_dir * Content.BOSS_CHARGE_SPEED, 0.0)
 
 func _do_fan() -> void:
-	var n := 5 if phase == BPhase.TWO else 3
-	var spread := 0.9
+	var n: int = [3, 3, 5, 7][phase]
+	var spread := 1.1 if phase == BPhase.THREE else 0.9
 	var player = _get_player()
 	var base_dir := Vector2(facing, 0.0)
 	if player != null:
@@ -401,10 +526,13 @@ func _emit_slam_waves() -> void:
 	var damage := Content.BOSS_SHOT_DAMAGE * 0.8 * Enemy.vow_damage()
 	for side: float in [-1.0, 1.0]:
 		projectile_requested.emit("enemy", global_position + Vector2(side * 30.0, 0.0), Vector2(side * speed, 0.0), damage, 120.0, 0, 1.4, Content.BOSS_COLOR)
-	if phase == BPhase.TWO:
+	if phase >= BPhase.TWO:
 		# Phase 2 adds a slower, higher pair so a single jump no longer clears everything.
 		for side: float in [-1.0, 1.0]:
 			projectile_requested.emit("enemy", global_position + Vector2(side * 30.0, -70.0), Vector2(side * speed * 0.55, 0.0), damage, 120.0, 0, 1.6, Content.BOSS_COLOR)
+	if phase == BPhase.THREE:
+		for side: float in [-1.0, 1.0]:
+			_kindle(global_position.x + side * 60.0)
 	emit_signal("exploded", global_position + Vector2(0.0, Content.BOSS_H * 0.45), 120.0, 0.0)
 
 func _boss_recover(delta: float) -> void:
@@ -419,19 +547,24 @@ func _boss_recover(delta: float) -> void:
 
 func take_damage(amount: float, from_dir: Vector2, _kb: float, poise_dmg := 1.0) -> void:
 	if dead: return
+	var at := global_position + Vector2(0.0, -Content.BOSS_H * 0.5)
+	if _beat == Beat.EMBER:
+		# The Last Ember, kneeling and rising, turns every blow.
+		emit_signal("damaged", 0.0, at, true)
+		return
 	if is_broken():
 		amount *= BREAK_DAMAGE_MUL
 	var dealt := minf(amount, maxf(hp, 0.0))
 	hp -= amount
 	_hurt_flash = 0.08
-	emit_signal("damaged", dealt, global_position + Vector2(0.0, -Content.BOSS_H * 0.5), false)
+	emit_signal("damaged", dealt, at, false)
 	if hp <= 0.0:
 		_die()
 		return
 	if phase == BPhase.INTRO:
 		_wake()
 		return
-	if is_broken():
+	if is_broken() or _beat != Beat.NONE:
 		return
 	# Hyper-armour: the blow lands and flashes but never cancels what the
 	# Warden is doing; it only spends poise.
@@ -442,7 +575,7 @@ func take_damage(amount: float, from_dir: Vector2, _kb: float, poise_dmg := 1.0)
 
 ## A parried blow always breaks the guard, however much poise is left.
 func on_parried(knock_dir: Vector2) -> void:
-	if not dead and not is_broken():
+	if not dead and not is_broken() and _beat == Beat.NONE:
 		_break_guard(knock_dir)
 
 ## True while the guard is broken and the Warden kneels open to punishment.
@@ -454,6 +587,7 @@ func is_broken() -> bool:
 func _break_guard(from_dir: Vector2) -> void:
 	_disarm()
 	_string.clear()
+	_dazed = false
 	state = EState.STAGGER
 	stagger_t = BREAK_TIME
 	action_t = 0.3
@@ -492,8 +626,25 @@ func _step_death(delta: float) -> void:
 		emit_signal("shattered", global_position + Vector2(0.0, -24.0))
 	queue_redraw()
 
+## WardenArt.pose covers the moves and rests; the Warden's own moments (the
+## throne, a broken guard, the phase beats, the slam marker, death) are layered
+## on here, because the art may also be driven by a stand-in without them.
 func visual_pose() -> Dictionary:
 	var p := WardenArt.pose(self)
+	if phase >= BPhase.TWO:
+		# Ignited for good: the mantle burns; the Last Ember burns white-hot.
+		p["mantle_fire"] = 1.0 if phase == BPhase.TWO else 1.4
+		if phase == BPhase.THREE:
+			p["crown"] = float(p.get("crown", 1.0)) * 1.25
+			p["fissure"] = 4.5
+			p["heat"] = 0.3
+	if dead:
+		var k := clampf(_death_t / SHATTER_T, 0.0, 1.0)
+		p["dying"] = k
+		var amp := 1.5 + 5.0 * k
+		p["jitter"] = Vector2(sin(_death_t * 91.0), cos(_death_t * 73.0)) * amp if not Feedback.motion_reduced else Vector2.ZERO
+		p["lean"] = -0.12 * k
+		return p
 	if phase == BPhase.INTRO and state == EState.SEEK and (seated or _rise_t >= 0.0):
 		# Seated: dark eye, crown banked to embers. Waking, the eye kindles
 		# first, then the crown blooms as it stands.
@@ -501,16 +652,41 @@ func visual_pose() -> Dictionary:
 		WardenArt.seat(p, 1.0 - clampf(woke / RISE_STAND, 0.0, 1.0))
 		p["eye"] = clampf(woke / 0.25, 0.0, 1.0)
 		p["crown"] = lerpf(0.3, 1.0, clampf(woke / 0.5, 0.0, 1.0))
+	if is_broken():
+		# Down on one knee in 0.12 s, back up over the last 0.2 s, winded.
+		var down := clampf((BREAK_TIME - stagger_t) / 0.12, 0.0, 1.0)
+		WardenArt.kneel(p, minf(down, clampf(stagger_t / 0.2, 0.0, 1.0)))
+		p["crown"] = float(p.get("crown", 1.0)) * 0.7
+		p["pant"] = true
+	if _beat != Beat.NONE:
+		_beat_pose(p)
+	if _dazed and not Feedback.motion_reduced:
+		p["lean"] = float(p.lean) + sin(_anim_t * 6.0) * 0.06
 	if action_idx == Action.SLAM and (state == EState.WINDUP or (state == EState.ATTACK and not _slam_wave_emitted)):
 		p["marker"] = to_local(Vector2(slam_x, Content.FLOOR_Y))
 		p["marker_k"] = 1.0 if state == EState.ATTACK else float(p.progress)
-	if dead:
-		var k := clampf(_death_t / SHATTER_T, 0.0, 1.0)
-		p["dying"] = k
-		var amp := 1.5 + 5.0 * k
-		p["jitter"] = Vector2(sin(_death_t * 91.0), cos(_death_t * 73.0)) * amp if not Feedback.motion_reduced else Vector2.ZERO
-		p["lean"] = -0.12 * k
 	return p
+
+## The roar rears back to its peak and holds, shaking. The Last Ember drops to
+## one knee with its crown guttering, then rises into the same roar, white-hot.
+func _beat_pose(p: Dictionary) -> void:
+	var peak := ROAR_PEAK
+	if _beat == Beat.ROAR:
+		WardenArt.blend(p, WardenArt.ROAR, clampf(_beat_t / ROAR_PEAK, 0.0, 1.0))
+		if _beat_t < ROAR_PEAK:
+			p["mantle_fire"] = 0.0
+	else:
+		peak = EMBER_PEAK
+		var down := clampf(_beat_t / 0.25, 0.0, 1.0)
+		var up := clampf((_beat_t - EMBER_KNEEL) / (EMBER_PEAK - EMBER_KNEEL), 0.0, 1.0)
+		WardenArt.kneel(p, down * (1.0 - up))
+		WardenArt.blend(p, WardenArt.ROAR, up)
+		p["crown"] = lerpf(lerpf(1.0, 0.4, down), 1.25, up)
+		p["fissure"] = lerpf(2.4, 4.5, up)
+		p["heat"] = 0.3 * up
+		p["mantle_fire"] = lerpf(1.0, 1.4, up)
+	if _beat_t >= peak and not Feedback.motion_reduced:
+		p["jitter"] = Vector2(sin(_anim_t * 71.0), cos(_anim_t * 57.0)) * 1.5
 
 func _draw() -> void:
 	WardenArt.paint(self, visual_pose())

@@ -12,6 +12,13 @@ static var BODY: Dictionary = _body_shapes()
 ## Open detail strokes, sampled once like BODY. They stay out of BODY because it
 ## holds filled polygons only (boss_art_contract triangulates every entry).
 static var STROKES: Dictionary = _stroke_shapes()
+## Named limb poses that blend() eases a pose toward.
+const SEATED := {"hand":Vector2(66,-30),"elbow":Vector2(46,-20),"offhand":Vector2(-66,-30),"claw_angle":1.45,"off_angle":1.9,"lean":0.07}
+const KNEEL := {"hand":Vector2(56,12),"elbow":Vector2(48,-12),"offhand":Vector2(-46,10),"claw_angle":1.3,"off_angle":1.9,"lean":0.18}
+const ROAR := {"hand":Vector2(74,-62),"elbow":Vector2(52,-46),"offhand":Vector2(-72,-58),"claw_angle":-0.9,"off_angle":-2.2,"lean":-0.15}
+const SLUMP := {"hand":Vector2(46,34),"elbow":Vector2(44,-2),"offhand":Vector2(-42,30),"claw_angle":1.3,"off_angle":1.2,"lean":0.16}
+## How far a kneeling Warden sinks toward the floor.
+const KNEEL_SAG := 16.0
 
 static func curve(start: Vector2, segments: Array) -> PackedVector2Array:
 	var points := PackedVector2Array([start])
@@ -106,21 +113,35 @@ static func pose(b) -> Dictionary:
 				lean = 0.25 + progress * 0.04 if windup else 0.30
 	if recover:
 		lean = 0.08
-	return {"archetype":"cinder_creature", "accent":Content.PAL.player_accent,
+	var p := {"archetype":"cinder_creature", "accent":Content.PAL.player_accent,
 		"shoulder":shoulder,"elbow":elbow,"hand":hand,"offhand":offhand,
 		"claw_angle":claw_angle,"off_angle":off_angle,"lean":lean,
-		"windup":windup,"active":active,"progress":progress,"phase2":b.phase == 2}
+		"windup":windup,"active":active,"progress":progress,"phase2":b.phase >= 2}
+	if b.state == Enemy.EState.RECOVER and int(b.action_idx) in [Boss.Action.SLAM, Boss.Action.CHARGE]:
+		# Spent after a heavy move: slumped, crown low, panting. The knight's cue.
+		blend(p,SLUMP,1.0)
+		p.sag = 5.0
+		p.crown = 0.75
+		p.pant = true
+	return p
+
+## Ease the limbs and lean of pose `p` toward a named pose (SEATED, KNEEL...) by k.
+static func blend(p: Dictionary, target: Dictionary, k: float) -> void:
+	for key in target:
+		p[key] = lerp(p[key],target[key],k)
 
 ## Blend pose `p` toward sitting on the Ember Throne by k (1 = seated): claws
 ## draped over the armrests, haunches forward, head low.
 static func seat(p: Dictionary, k: float) -> void:
+	blend(p,SEATED,k)
 	p.sit = k
-	p.hand = (p.hand as Vector2).lerp(Vector2(66,-30),k)
-	p.elbow = (p.elbow as Vector2).lerp(Vector2(46,-20),k)
-	p.offhand = (p.offhand as Vector2).lerp(Vector2(-66,-30),k)
-	p.claw_angle = lerpf(float(p.claw_angle),1.45,k)
-	p.off_angle = lerpf(float(p.off_angle),1.9,k)
-	p.lean = lerpf(float(p.lean),0.07,k)
+
+## Blend pose `p` down onto one knee by k: head bowed, claws planted on the
+## floor, the whole body sunk KNEEL_SAG px.
+static func kneel(p: Dictionary, k: float) -> void:
+	blend(p,KNEEL,k)
+	p.kneel = k
+	p.sag = KNEEL_SAG*k
 
 static func shape(ci: CanvasItem, points: PackedVector2Array, color: Color, edge: Color = RIDGE) -> void:
 	ci.draw_colored_polygon(points,color)
@@ -163,6 +184,7 @@ static func paint(b,p: Dictionary) -> void:
 	var rust := RUST.lerp(HORN,flash)
 	var fire: Color = Content.PAL.player_accent
 	if Feedback.flash_reduced: fire = fire.darkened(0.22)
+	fire = fire.lerp(VFX.HOT,float(p.get("heat",0.0)))
 	var walk := clampf(absf(b.velocity.x)/Content.BOSS_SPEED,0.0,1.0)
 	var stride := sin(t*8.0)*5.0*walk if b.is_on_floor() else 2.0
 	var breathe := sin(t*2.2)*1.2
@@ -174,21 +196,32 @@ static func paint(b,p: Dictionary) -> void:
 		VFX.draw_ellipse(ci,p.marker,rx,rx*0.16,Color(fire,0.2+0.4*mk))
 		VFX.draw_ellipse_ring(ci,p.marker,rx,rx*0.16,Color(INK,0.7),2.0)
 	var jitter: Vector2 = p.get("jitter", Vector2.ZERO)
-	ci.draw_set_transform(Vector2(jitter.x,breathe+jitter.y),float(p.lean)*face,Vector2(face,1))
+	var sag: float = p.get("sag",0.0)
+	ci.draw_set_transform(Vector2(jitter.x,breathe+jitter.y+sag),float(p.lean)*face,Vector2(face,1))
 	# A broad flowing back mass, not separate armour ornaments.
 	var mantle: PackedVector2Array = BODY.mantle.duplicate()
 	for i in range(mantle.size()):
 		if mantle[i].y > 0: mantle[i].x += sin(t*2.4+mantle[i].y*0.05)*3.0
 	shape(ci,mantle,MANTLE.darkened(0.12),RUST)
 	ci.draw_polyline(STROKES.mantle_fold,RUST.darkened(0.25),3.0,true)
+	var mantle_fire: float = p.get("mantle_fire",0.0)
+	if mantle_fire > 0.0:
+		# An ignited mantle burns along its ragged hem.
+		for i in range(0,mantle.size(),6):
+			if mantle[i].y > 15.0:
+				VFX.draw_flame(ci,mantle[i],20.0*mantle_fire,8.0,t,float(i)*0.7,fire,HORN)
 	# Heavy haunches and three hooked toes anchor the creature to the same floor.
 	# Optional pose keys (seat, rise, roar, kneel...) all default to the plain
 	# standing Warden, so a bare pose draws exactly as it always has.
 	var sit: float = p.get("sit",0.0)
+	var kneeling: float = p.get("kneel",0.0)
 	for side: float in [-1.0,1.0]:
 		var hip := Vector2(side*20,14)
 		var knee := Vector2(side*25+stride*side,35).lerp(Vector2(36+side*7,22),sit)
 		var foot := Vector2(side*24-stride*side,55).lerp(Vector2(40+side*8,38),sit)
+		# Kneeling (drawn KNEEL_SAG lower): front foot planted, rear knee down.
+		knee = knee.lerp(Vector2(42,18) if side > 0.0 else Vector2(-6,40),kneeling)
+		foot = foot.lerp(Vector2(40,39) if side > 0.0 else Vector2(-34,41),kneeling)
 		ci.draw_line(hip,knee,INK,25.0,true)
 		ci.draw_line(hip,knee,CHAR,20.0,true)
 		ci.draw_line(knee,foot,INK,20.0,true)
@@ -203,8 +236,9 @@ static func paint(b,p: Dictionary) -> void:
 	ci.draw_colored_polygon(BODY.shade,CHAR)
 	ci.draw_polyline(STROKES.shoulder_ridge,RIDGE.darkened(0.14),3.5,true)
 	# Scorched torso fissure: one directional ember motif, not a lantern/grille.
-	ci.draw_polyline(STROKES.fissure,INK,7.0,true)
-	ci.draw_polyline(STROKES.fissure,fire,2.4 if phase2 else 1.5,true)
+	var fissure: float = p.get("fissure",2.4 if phase2 else 1.5)
+	ci.draw_polyline(STROKES.fissure,INK,maxf(7.0,fissure+4.0),true)
+	ci.draw_polyline(STROKES.fissure,fire,fissure,true)
 	shape(ci,BODY.head,rust.lightened(0.10))
 	ci.draw_colored_polygon(BODY.face,INK)
 	# Side-on eye, jaw and fangs read as a beast rather than a human death mask.
@@ -215,6 +249,13 @@ static func paint(b,p: Dictionary) -> void:
 	ci.draw_polyline(STROKES.jaw,RIDGE,3.5,true)
 	for x in [23.0,32.0]:
 		ci.draw_colored_polygon(PackedVector2Array([Vector2(x,-48),Vector2(x+4,-48),Vector2(x+2,-57)]),HORN)
+	if p.get("pant",false):
+		# Winded breath puffing from the jaw: the cue that it is open to a blow.
+		var pk := fmod(t,0.35)/0.35
+		var puff := Vector2(48+6.0*pk,-50-14.0*pk)
+		var r := 4.0+4.0*pk
+		ci.draw_circle(puff,r,Color(RIDGE,0.75*(1.0-pk)))
+		ci.draw_arc(puff,r,0.0,TAU,14,Color(INK,0.6*(1.0-pk)),1.5,true)
 	# Flame crown shares the hero's warm identity but has a swept, bestial crest.
 	var crown_scale: float = (1.35 if phase2 else 1.0)*float(p.get("crown",1.0))
 	VFX.draw_flame(ci,Vector2(-8,-75),30.0*crown_scale,12.0,t,1.0,fire,Content.PAL.attack)

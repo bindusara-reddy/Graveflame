@@ -15,6 +15,7 @@ func run() -> void:
 	await _test_poise()
 	await _test_throne()
 	await _test_moveset()
+	await _test_phases()
 	_floor.queue_free()
 	await finish("WARDEN")
 
@@ -37,6 +38,8 @@ func _test_poise() -> void:
 	for i in range(int(Boss.POISE[Boss.BPhase.ONE])):
 		boss.take_damage(5.0, Vector2.RIGHT, 300.0)
 	check(boss.is_broken(), "a sustained assault breaks the guard")
+	await ticks(10)
+	check(float(boss.visual_pose().get("kneel", 0.0)) > 0.9, "a broken guard drops it to one knee")
 	check(not boss._atk_area.monitoring, "a broken guard drops the blow in hand")
 	var hp_before := boss.hp
 	boss.take_damage(10.0, Vector2.RIGHT, 0.0)
@@ -119,6 +122,8 @@ func _test_moveset() -> void:
 	await _until_not(boss, Enemy.EState.WINDUP)
 	await _until_not(boss, Enemy.EState.ATTACK)
 	check(absf(boss.global_position.x - boss.slam_x) < 12.0, "it comes down on its marker")
+	var spent: Dictionary = boss.visual_pose()
+	check(spent.get("pant", false) and float(spent.get("sag", 0.0)) > 0.0, "spent after the slam it slumps and pants: the knight's cue")
 	boss.phase = Boss.BPhase.TWO
 	boss._string = [Boss.Action.FAN]
 	boss._start(Boss.Action.LUNGE)
@@ -142,4 +147,37 @@ func _test_moveset() -> void:
 	boss.queue_free()
 	wall.queue_free()
 	knight.queue_free()
+	await process_frame
+
+
+func _test_phases() -> void:
+	var boss := await _fighting_warden()
+	var phases: Array = []
+	var summons: Array = []
+	boss.phase_changed.connect(func(p: int): phases.append(p))
+	boss.summon_requested.connect(func(k: int, _pos: Vector2): summons.append(k))
+	boss.hp = boss.hp_max * 0.45
+	await ticks(1)
+	check(boss.phase == Boss.BPhase.TWO and boss._beat == Boss.Beat.ROAR, "ignition opens with a roar")
+	check(phases.is_empty() and summons.size() == 2, "the wisps are called at once; the phase lands at the roar's peak")
+	var hp_before := boss.hp
+	boss.take_damage(10.0, Vector2.RIGHT, 0.0)
+	check(boss.hp < hp_before, "the roar still takes blows")
+	await ticks(int(Boss.ROAR_TIME * 60.0) + 2)
+	check(phases == [2] and boss._beat == Boss.Beat.NONE, "the roar peaks once, then the fight resumes")
+	var hot_lunge := boss._timing(0.55, 0.4)
+	boss.hp = boss.hp_max * 0.2
+	await ticks(1)
+	check(boss.phase == Boss.BPhase.THREE and boss._beat == Boss.Beat.EMBER, "the Last Ember begins below 22%")
+	check(boss.visual_pose().get("kneel", 0.0) > 0.0, "it drops to one knee")
+	hp_before = boss.hp
+	boss.take_damage(50.0, Vector2.RIGHT, 0.0)
+	check(is_equal_approx(boss.hp, hp_before), "the kneeling, rising Last Ember turns every blow")
+	await ticks(int(Boss.EMBER_PEAK * 60.0) + 2)
+	var patches := 0
+	for node in boss.get_parent().get_children():
+		patches += 1 if node is Boss.EmberPatch else 0
+	check(phases == [2, 3] and patches >= 4, "it roars and the floor around it catches fire")
+	check(boss._timing(0.55, 0.4) < hot_lunge, "the Last Ember fights faster")
+	boss.queue_free()
 	await process_frame

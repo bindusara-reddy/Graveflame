@@ -1404,6 +1404,7 @@ func _on_boss_phase(phase: int) -> void:
 	else:
 		feedback.play("boss")
 	if phase == 2:
+		feedback.play("roar")
 		# Phase-2 callout renders as a compact floating tag above the boss bar,
 		# never as a center-screen card over the fighters.
 		ui.flash_boss_phase("THE WARDEN IGNITES")
@@ -1412,6 +1413,18 @@ func _on_boss_phase(phase: int) -> void:
 		feedback.hit_stop(0.1)
 		if is_instance_valid(room) and room.boss != null and is_instance_valid(room.boss):
 			feedback.blast(room.boss.global_position, 200.0)
+	elif phase == 3:
+		_on_last_ember()
+
+## The Warden's Last Ember (boss.gd) peaks in a roar: its own callout, the
+## score at full heat and the blast that sets the floor alight.
+func _on_last_ember() -> void:
+	ui.flash_boss_phase("THE LAST EMBER")
+	music.set_intensity(1.0)
+	feedback.play("last_ember")
+	feedback.hit_stop(0.1)
+	if is_instance_valid(room) and room.boss != null:
+		feedback.blast(room.boss.global_position, 260.0)
 
 ## The Warden comes apart: the run's last and loudest beat.
 func _on_boss_shattered(pos: Vector2) -> void:
