@@ -673,11 +673,13 @@ func _scan_parry() -> void:
 		if _parry_hit.has(oid):
 			continue
 		var attack_kind := str(area.get_meta("attack_kind", ""))
-		var attacker = area.get_meta("owner", null)
-		var live_melee := attack_kind == "melee" and bool(area.get_meta("attack_active", false))
 		if attack_kind == "projectile":
 			area.reflect(Vector2(facing, -0.05), Content.PARRY_PROJECTILE_BOOST)
-		elif live_melee and is_instance_valid(attacker):
+		elif attack_kind == "melee" and bool(area.get_meta("attack_active", false)):
+			# Melee areas always carry an owner, but it may already be gone.
+			var attacker = area.get_meta("owner")
+			if not is_instance_valid(attacker):
+				continue
 			attacker.take_damage(Content.PARRY_DAMAGE + float(build.get("parry_bonus_dmg", 0.0)), Vector2(-facing, 0.0), 420.0)
 			attacker.on_parried(Vector2(facing, -0.2))
 		else:
