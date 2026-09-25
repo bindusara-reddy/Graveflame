@@ -21,7 +21,7 @@ func _check_title(ui: UI) -> void:
 	var tableau = ui._title_tableau
 	check(tableau.legacy.victories == 3 and tableau.legacy.ending == "" and not tableau.legacy.dawn, "the title reads the victory record on arrival; a kept Oath alone brings no dawn")
 	check(tableau._wax(0) == tableau.WAX_PLAIN and tableau._wax(1) == tableau.WAX_VOWED and tableau._wax(2) == tableau.WAX_OATH, "wax follows the vows each win was kept under")
-	check(tableau._exclusions.size() == 2, "the title passes its wordmark band and menu column to the tableau")
+	check(tableau._exclusions.size() == 3, "the title passes its wordmark band, menu column and roll to the tableau")
 	var near: Dictionary = tableau._foreground(tableau.size)
 	var last_d := -1.0
 	for slot in tableau._candle_slots.filter(func(sill: Dictionary) -> bool: return sill.has("d")):
@@ -62,8 +62,10 @@ func _check_input_lock(ui: UI) -> void:
 	ui.hide_all_panels()
 
 func _check_forge(ui: UI) -> void:
-	check(UI._roll_line({"victories": 4, "falls": 47, "falls_legacy": true, "best_vows": 3}) == "THE ROLL  ·  4 FLAMES  ·  47+ FALLEN  ·  HIGHEST OATH 3 OF 5", "the roll counts flames, the fallen and the hardest oath")
-	check(UI._roll_line({"victories": 1, "falls": 2, "oath_kept": true}).ends_with("1 FLAME  ·  2 FALLEN  ·  THE FIVEFOLD OATH IS KEPT"), "the roll honours the kept Oath")
+	var roll := UI._roll_line({"victories": 4, "falls": 47, "falls_legacy": true, "best_vows": 3})
+	check(roll == "Four flames carried out.  More than 47 knights fallen.  The highest oath: three of five.", "the roll counts flames, the fallen and the hardest oath (got %s)" % roll)
+	check(UI._roll_line({"victories": 1, "falls": 2, "oath_kept": true}) == "One flame carried out.  Two knights fallen.  The fivefold oath is kept.", "the roll honours the kept Oath")
+	check(UI._roll_line({}) == "", "an empty keep has no roll to read")
 	ui.setup_forge(0)
 	var seals := ui._forge_rows.find_children("*", "Control", true, false).filter(func(node: Node) -> bool: return node is UI.KeptSeal)
 	check(seals.size() == 1, "one seal beside each vow kept through a win")

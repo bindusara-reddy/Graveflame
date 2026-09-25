@@ -138,8 +138,10 @@ func show_run_summary(stats: Dictionary, panel_name: String) -> void:
 	screens.show_run_summary(stats, panel_name)
 
 
-func set_descent(taken: Dictionary, seed_value: int) -> void:
-	screens.set_descent(taken, seed_value)
+## The pause ledger: boons carried, the seed, and the chamber the knight
+## stands in ({ index, total, name }).
+func set_descent(taken: Dictionary, seed_value: int, chamber: Dictionary = {}) -> void:
+	screens.set_descent(taken, seed_value, chamber)
 
 
 func setup_upgrades(upgrades: Array) -> void:

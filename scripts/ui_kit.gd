@@ -1344,3 +1344,91 @@ class BarNotches extends Control:
 		for mark in marks:
 			var x := roundf(size.x * float(mark))
 			draw_rect(Rect2(x - 1.0, -1.0, 2.0, size.y + 2.0), T.INK)
+
+
+# --- Screens additions -------------------------------------------------------------
+# Pieces the full screens (ui_screens.gd and its pages) are cut from, added after
+# the foundation so its builders stay exactly as they were.
+
+## Lay a page down: it rises `rise` px into place and turns flat from a slight
+## angle, the way paper settles on paper. Only for controls no container
+## positions (a screen's centring box): a container would re-sort it
+## mid-flight. Reduced motion keeps a short fade.
+static func settle_in(node: Control, rise := 18.0, turn := 0.018) -> Tween:
+	var rest: Vector2 = node.get_meta("rest", node.position)
+	node.set_meta("rest", rest)
+	kill_tween(node.get_meta("settling", null))
+	var t := tween(node)
+	node.set_meta("settling", t)
+	node.position = rest
+	node.rotation = 0.0
+	node.modulate.a = 0.0
+	if T.still():
+		t.tween_property(node, "modulate:a", 1.0, 0.15)
+		return t
+	node.pivot_offset = node.size * 0.5
+	node.position = rest + Vector2(0.0, rise)
+	node.rotation = turn
+	t.set_parallel(true)
+	t.tween_property(node, "modulate:a", 1.0, T.MED)
+	t.tween_property(node, "position", rest, T.SLOW).set_trans(Tween.TRANS_BACK).set_ease(Tween.EASE_OUT)
+	t.tween_property(node, "rotation", 0.0, T.SLOW).set_trans(Tween.TRANS_SINE).set_ease(Tween.EASE_OUT)
+	return t
+
+
+## A prompt as a flat link: the cap for each of `actions` (one action or an
+## Array) and a word, in the device last touched. A named link takes mouse
+## clicks (a screen's BACK), an unnamed one only reads. Never in the focus
+## chain: keys and pads press the cap itself.
+static func prompt_link(actions: Variant, words: String, node_name := "") -> Button:
+	var b := Button.new()
+	b.name = node_name if not node_name.is_empty() else "Prompt"
+	b.focus_mode = Control.FOCUS_NONE
+	b.mouse_filter = Control.MOUSE_FILTER_IGNORE if node_name.is_empty() else Control.MOUSE_FILTER_STOP
+	b.mouse_default_cursor_shape = Control.CURSOR_POINTING_HAND
+	for state in ["normal", "hover", "pressed", "hover_pressed", "focus", "disabled"]:
+		b.add_theme_stylebox_override(state, StyleBoxEmpty.new())
+	var line := HBoxContainer.new()
+	line.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	line.add_theme_constant_override("separation", T.S2)
+	b.add_child(line)
+	for action in (actions as Array if actions is Array else [actions]):
+		line.add_child(glyph(str(action)))
+	var word := label(words, T.CAPS, T.ASH, HORIZONTAL_ALIGNMENT_LEFT)
+	word.size_flags_horizontal = Control.SIZE_SHRINK_BEGIN
+	line.add_child(word)
+	# A Button measures only its own text, so the painted caps claim their room.
+	line.minimum_size_changed.connect(func() -> void: b.custom_minimum_size = line.get_combined_minimum_size())
+	b.mouse_entered.connect(func() -> void: word.add_theme_color_override("font_color", T.GOLD))
+	b.mouse_exited.connect(func() -> void: word.add_theme_color_override("font_color", T.ASH))
+	return b
+
+
+## The caps for several bindings on one device, side by side: a cell of a
+## bindings table. Its "bindings" meta holds the names " / " joined, the way
+## UiInput.binding_text writes them, so the cell can be read back.
+static func caps(names: Array, device: String, height := 22.0) -> HBoxContainer:
+	var cell := HBoxContainer.new()
+	cell.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	cell.alignment = BoxContainer.ALIGNMENT_END
+	cell.add_theme_constant_override("separation", T.S1 + 2)
+	for binding in names:
+		cell.add_child(glyph_for(str(binding), device, height))
+	cell.set_meta("bindings", " / ".join(names))
+	return cell
+
+
+## Count `l` up from nothing to `to`, writing each step through `shown` (a
+## number to its text), so a result arrives like a tally read aloud. Reduced
+## motion writes the final figure at once (and returns null).
+static func roll_number(l: Label, to: float, shown: Callable, delay := 0.0, duration := 0.9) -> Tween:
+	kill_tween(l.get_meta("rolling", null))
+	if T.still() or to <= 0.0:
+		l.text = shown.call(to)
+		return null
+	l.text = shown.call(0.0)
+	var t := tween(l)
+	l.set_meta("rolling", t)
+	t.tween_interval(delay)
+	t.tween_method(func(v: float) -> void: l.text = shown.call(v), 0.0, to, duration).set_trans(Tween.TRANS_QUART).set_ease(Tween.EASE_OUT)
+	return t

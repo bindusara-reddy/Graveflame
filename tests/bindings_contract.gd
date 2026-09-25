@@ -26,9 +26,10 @@ func press(keycode: int) -> void:
 	Input.parse_input_event(event)
 	await ticks(2)
 
+## What the Forms' caps cell for `action` shows on `column` ("key" or "pad").
 func cell(action: String, column: String) -> String:
 	var cells = game.ui._title_controls.get_meta("control_cells")
-	return (cells[action][column] as Label).text
+	return str((cells[action][column] as Control).get_meta("bindings"))
 
 func run() -> void:
 	use_scratch_save("bindings_contract")
@@ -70,17 +71,13 @@ func run() -> void:
 	check(key_codes("attack").has(KEY_J), "blade starts on its shipped key")
 
 	# Find the BLADE row and rebind it.
-	var blade_button: Button = null
-	for row in game.ui._key_rows.get_children():
-		var label := row.get_child(0) as Label
-		if label != null and label.text == "BLADE":
-			blade_button = row.get_child(1) as Button
+	var blade_button := game.ui._key_rows.find_child("Key_attack", true, false) as Button
 	check(blade_button != null, "the BLADE row is listed")
 	if blade_button != null:
 		var pads_before := pad_count("attack")
 		blade_button.pressed.emit()
 		await ticks(2)
-		check(blade_button.text.contains("PRESS"), "the row waits for a keypress")
+		check(game.ui._listening_action == "attack", "the row waits for a keypress")
 		await press(KEY_ESCAPE)
 		await ticks(2)
 		check(key_codes("attack").has(KEY_J), "ESC cancels the rebind and keeps the old key")

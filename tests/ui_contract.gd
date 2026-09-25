@@ -180,7 +180,7 @@ func _test_pause_ledger() -> void:
 	var quits := [0]
 	game.ui.quit_to_title_requested.connect(func(): quits[0] += 1)
 	game.ui._quit_button.pressed.emit()
-	check(quits[0] == 0 and game.ui._quit_button.text == "ABANDON DESCENT?", "the first QUIT press only asks")
+	check(quits[0] == 0 and game.ui._quit_button.text == "ABANDON THE DESCENT?", "the first press on TO THE LANDING only asks")
 	game.ui._quit_button.pressed.emit()
 	await ticks(2)
 	check(quits[0] == 1 and game.state == Game.GState.TITLE, "a second press abandons the descent")
@@ -204,8 +204,8 @@ func _test_prompts() -> void:
 	await _stick(JOY_AXIS_RIGHT_Y, 0.9)
 	var pad_cap := str(UI._binding_text("heal")["pad"]).get_slice(" / ", 0)
 	check(flask.text.ends_with("[%s]" % pad_cap), "touching the pad switches prompts to pad buttons (got %s)" % flask.text)
-	var pause_footer: Label = _panel("pause").get_meta("footer_label")
-	check(pause_footer.text.begins_with("[START]"), "the pause footer names the pad's pause button (got %s)" % pause_footer.text)
+	var rise: Array = (_panel("pause").get_meta("footer") as Control).find_children("*", "Control", true, false).filter(func(c): return c is UiKit.Glyph)
+	check(rise.size() == 1 and rise[0].action == "pause" and UI.prompt("pause") == "[START]", "the pause footer's cap is the pad's pause button (got %s)" % UI.prompt("pause"))
 	await tap_key(KEY_SHIFT)
 	check(flask.text.ends_with("[H]"), "a keypress switches prompts back to keys")
 
@@ -220,12 +220,19 @@ func _rebind(action: String, key: Key) -> void:
 	await tap_key(key)
 
 
+## RESTORE asks before it forgets every rebind: two presses.
+func _restore_keys() -> void:
+	var restore := _panel("keys").find_child("keys_restore", true, false) as Button
+	restore.pressed.emit()
+	restore.pressed.emit()
+
+
 ## A key taken from another action never leaves two actions on it or one
-## on none, and RESTORE DEFAULTS puts every key and the save back.
+## on none, and RESTORE EVERY KEY puts every key and the save back.
 func _test_rebind_conflicts() -> void:
 	game.ui.keys_requested.emit()
 	await ticks(3)
-	_focus_button("keys_restore", "keys").pressed.emit()
+	_restore_keys()
 	await ticks(2)
 	check(UI._key_codes("parry") == [KEY_S] and UI._key_codes("move_down") == [KEY_DOWN], "restoring defaults returns every key")
 	check(Save.get_bindings().is_empty(), "restoring defaults forgets the saved rebinds")
@@ -234,9 +241,12 @@ func _test_rebind_conflicts() -> void:
 	await _rebind("attack", KEY_A)
 	check(UI._key_codes("move_left") == [KEY_LEFT], "taking one of two keys leaves the other")
 	var note: Label = _panel("keys").get_meta("note_label")
-	check(note.text.begins_with("MOVE LEFT gives up A"), "the screen says what moved (got %s)" % note.text)
+	check(note.text.begins_with("Move left gives up A"), "the screen says what moved (got %s)" % note.text)
 	check(int(Save.get_bindings().get("move_left", 0)) == KEY_LEFT, "the displaced action's key is saved")
-	_focus_button("keys_restore", "keys").pressed.emit()
+	var restore := _panel("keys").find_child("keys_restore", true, false) as Button
+	restore.pressed.emit()
+	check(UI._key_codes("attack") == [KEY_A], "one press on RESTORE only asks")
+	restore.pressed.emit()
 	await ticks(2)
 	game.ui.back_from_keys_requested.emit()
 	await ticks(2)
@@ -255,8 +265,8 @@ func _test_reward_cards() -> void:
 	var frame: Rect2 = game.ui._root.get_global_rect()
 	var cards: Array = _panel("reward").get_meta("buttons")
 	check(cards.all(func(c: Control): return frame.encloses(c.get_global_rect())), "four boon cards fit inside the frame")
-	var footer: Label = _panel("reward").get_meta("footer_label")
-	check(footer.text.begins_with("1 · 2 · 3 · 4 "), "the footer lists every card's key (got %s)" % footer.text)
+	var numbers: Array = (_panel("reward").get_meta("footer") as Control).find_children("*", "Control", true, false).filter(func(c): return c is UiKit.Glyph and not c.binding.is_empty())
+	check(numbers.map(func(g): return g.binding) == ["1", "2", "3", "4"], "the footer prints every card's key")
 	await tap_key(KEY_1)
 	check(picks[0] == 0 and not focus_name().begins_with("Boon"), "a card cannot be taken while the deal lands")
 	await _wait_real(1.0)
@@ -321,13 +331,18 @@ func _test_forge_focus() -> void:
 	buy.pressed.emit()
 	await ticks(3)
 	check(focus_name() == "Buy1", "buying keeps focus on the bought row (got %s)" % focus_name())
+	var scroll := _panel("forge").find_children("*", "ScrollContainer", true, false)[0] as ScrollContainer
+	_focus_button("Buy7", "forge")
+	await ticks(3)
+	check(scroll.follow_focus and scroll.scroll_vertical > 0, "the Forge list scrolls to follow focus below the fold")
+	(_panel("forge").get_meta("tabs") as UiKit.Tabs).select(1)
+	await ticks(2)
+	check(focus_name() == "Vow0", "turning to the vows page brings focus with it (got %s)" % focus_name())
 	var vow := _focus_button("Vow3", "forge")
 	await ticks(1)
 	vow.pressed.emit()
 	await ticks(3)
 	check(focus_name() == "Vow3", "swearing a vow keeps focus on that vow (got %s)" % focus_name())
-	var scroll := _panel("forge").find_children("*", "ScrollContainer", true, false)[0] as ScrollContainer
-	check(scroll.follow_focus and scroll.scroll_vertical > 0, "the Forge list scrolls to follow focus below the fold")
 	game.ui.back_from_forge_requested.emit()
 	await ticks(2)
 

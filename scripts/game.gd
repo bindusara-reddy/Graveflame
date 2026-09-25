@@ -2362,7 +2362,7 @@ func _unhandled_input(event: InputEvent) -> void:
 	if not paused:
 		get_tree().paused = true
 		paused = true
-		ui.set_descent(run.taken, _seed)
+		ui.set_descent(run.taken, _seed, { "index": run.room_index, "total": run.rooms_total(), "name": Content.room_name(room.template) })
 		ui.show_panel("pause")
 	elif ui.is_panel_visible("keys"):
 		_on_back_from_keys()

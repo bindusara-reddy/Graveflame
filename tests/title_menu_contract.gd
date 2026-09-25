@@ -1,8 +1,9 @@
 extends "res://tests/harness.gd"
 ## Title-menu contract on the REAL presented window: layout bounds at three
 ## viewport sizes, keyboard + gamepad navigation through viewport input events,
-## controls-overlay focus trap, cancel/close without launching a run, focus
-## restoration, reduced-motion stillness, and the real start/forge paths.
+## THE FORMS laid over the landing with focus kept inside, cancel/close without
+## launching a run, focus restoration, reduced-motion stillness, and the real
+## start/forge paths.
 ## Needs a display:
 ##   godot4 --path . --audio-driver Dummy --script res://tests/title_menu_contract.gd
 
@@ -27,6 +28,12 @@ func _stick(axis: JoyAxis, value: float) -> void:
 		event.axis_value = axis_value
 		Input.parse_input_event(event)
 		await ticks(2)
+
+
+## Whether focus is on something inside THE FORMS.
+func _in_forms() -> bool:
+	var owner := root.gui_get_focus_owner()
+	return owner != null and ui._title_controls.is_ancestor_of(owner)
 
 
 func _title_button(node_name: String) -> Button:
@@ -60,8 +67,8 @@ func _check_layout(label: String) -> void:
 	check(wordmark != null and forge != null and wordmark.get_global_rect().end.y <= forge.get_global_rect().position.y, "%s: wordmark sits above the navigation" % label)
 	ui._toggle_title_controls()
 	await ticks(3)
-	var card := title.find_child("ControlsCard", true, false) as Control
-	check(card != null and card.is_visible_in_tree() and _inside(card.get_global_rect(), bounds), "%s: controls card on-screen (card %s)" % [label, card.get_global_rect() if card != null else null])
+	var card := ui._title_controls.get_meta("dialog") as Control
+	check(card != null and card.is_visible_in_tree() and _inside(card.get_global_rect(), bounds), "%s: the Forms sheet on-screen (sheet %s)" % [label, card.get_global_rect() if card != null else null])
 	ui._toggle_title_controls()
 	await ticks(2)
 
@@ -94,11 +101,12 @@ func run() -> void:
 	await ticks(2)
 	overlay_texts.clear()
 	_labels(overlay, overlay_texts)
-	check(overlay_texts.has("KEYBOARD") and overlay_texts.has("GAMEPAD"), "controls overlay lists keyboard and gamepad columns")
+	check(overlay_texts.has("KEYBOARD") and overlay_texts.has("GAMEPAD"), "the Forms list keyboard and gamepad columns")
 	# Asserted against the live map rather than a hand-typed abbreviation, so the
 	# check stays about "shows real bindings" and not about exact wording.
 	var pause_key := str(UI._binding_text("pause")["key"])
-	check(overlay_texts.has("START") and overlay_texts.has(pause_key), "controls overlay shows real pause bindings (looked for %s)" % pause_key)
+	var pause_cells: Dictionary = overlay.get_meta("control_cells")["pause"]
+	check(str(pause_cells.pad.get_meta("bindings")) == "START" and str(pause_cells.key.get_meta("bindings")) == pause_key, "the Forms show the real pause bindings (looked for %s)" % pause_key)
 	ui._toggle_title_controls()
 	await ticks(2)
 
@@ -120,20 +128,24 @@ func run() -> void:
 	await tap_key(KEY_DOWN)
 	check(focus_name() == "controls", "keyboard: Down moves to controls (got %s)" % focus_name())
 	await tap_key(KEY_ENTER)
-	check(overlay.visible, "keyboard: Enter opens controls")
-	check(focus_name() == "close_controls", "keyboard: overlay takes focus (got %s)" % focus_name())
+	check(overlay.visible, "keyboard: Enter opens the Forms")
+	check(focus_name() == "Key_move_left", "keyboard: the first form takes focus (got %s)" % focus_name())
 	await tap_key(KEY_DOWN)
 	await tap_key(KEY_UP)
 	await tap_key(KEY_TAB)
-	check(focus_name() == "close_controls", "keyboard: focus trapped inside overlay (got %s)" % focus_name())
+	check(_in_forms(), "keyboard: focus stays inside the Forms (got %s)" % focus_name())
 	await tap_key(KEY_ESCAPE)
-	check(not overlay.visible, "keyboard: Escape closes controls")
-	check(focus_name() == "controls", "keyboard: focus restored to CONTROLS (got %s)" % focus_name())
+	check(not overlay.visible, "keyboard: Escape closes the Forms")
+	check(focus_name() == "controls", "keyboard: focus restored to THE FORMS (got %s)" % focus_name())
 	check(game.state == Game.GState.TITLE and starts == 0, "keyboard: Escape never starts a run")
 	await tap_key(KEY_ENTER)
-	check(overlay.visible, "keyboard: reopen controls")
+	check(overlay.visible, "keyboard: reopen the Forms")
 	await tap_key(KEY_ENTER)
-	check(not overlay.visible and focus_name() == "controls", "keyboard: Enter on CLOSE closes and restores focus (got %s)" % focus_name())
+	check(ui._listening_action == "move_left", "keyboard: Enter on a form listens for its key")
+	await tap_key(KEY_ESCAPE)
+	check(overlay.visible and ui._listening_action == "", "keyboard: Escape gives the listen up and stays")
+	await tap_key(KEY_ESCAPE)
+	check(not overlay.visible and focus_name() == "controls", "keyboard: Escape then closes and restores focus (got %s)" % focus_name())
 	check(game.state == Game.GState.TITLE and starts == 0, "keyboard: closing never starts a run")
 	await tap_key(KEY_ESCAPE)
 	check(game.state == Game.GState.TITLE and not overlay.visible, "keyboard: Escape with overlay closed is inert")
@@ -146,16 +158,20 @@ func run() -> void:
 	await _stick(JOY_AXIS_LEFT_Y, 1.0)
 	check(focus_name() == "controls", "pad: d-pad + stick reach CONTROLS (got %s)" % focus_name())
 	await _pad(JOY_BUTTON_A)
-	check(overlay.visible and focus_name() == "close_controls", "pad: A opens controls with focus (got %s)" % focus_name())
+	check(overlay.visible and focus_name() == "Key_move_left", "pad: A opens the Forms with focus (got %s)" % focus_name())
 	await _pad(JOY_BUTTON_DPAD_UP)
 	await _stick(JOY_AXIS_LEFT_Y, -1.0)
-	check(focus_name() == "close_controls", "pad: focus trapped inside overlay (got %s)" % focus_name())
+	check(_in_forms(), "pad: focus stays inside the Forms (got %s)" % focus_name())
 	await _pad(JOY_BUTTON_B)
-	check(not overlay.visible and focus_name() == "controls", "pad: B closes controls and restores focus (got %s)" % focus_name())
+	check(not overlay.visible and focus_name() == "controls", "pad: B closes the Forms and restores focus (got %s)" % focus_name())
 	check(game.state == Game.GState.TITLE and starts == 0, "pad: B never starts a run")
 	await _pad(JOY_BUTTON_A)
 	await _pad(JOY_BUTTON_A)
-	check(not overlay.visible and focus_name() == "controls" and starts == 0, "pad: A on CLOSE closes without starting")
+	check(overlay.visible and ui._listening_action == "move_left" and starts == 0, "pad: A on a form listens for a key, never starts")
+	await _pad(JOY_BUTTON_B)
+	check(overlay.visible and ui._listening_action == "", "pad: a pad button gives the listen up")
+	await _pad(JOY_BUTTON_B)
+	check(not overlay.visible and focus_name() == "controls" and starts == 0, "pad: B then closes without starting")
 	await _stick(JOY_AXIS_LEFT_Y, -1.0)
 	check(focus_name() == "forge", "pad: stick up reaches THE FORGE (got %s)" % focus_name())
 	await _pad(JOY_BUTTON_A)
