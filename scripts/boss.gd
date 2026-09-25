@@ -495,7 +495,7 @@ func _boss_attack(delta: float) -> void:
 func _crash_into_wall() -> void:
 	_string.clear()
 	_disarm()
-	emit_signal("exploded", global_position + Vector2(_charge_dir * Content.BOSS_W * 0.5, 0.0), 120.0, 0.0)
+	emit_signal("exploded", global_position + Vector2(_charge_dir * Content.BOSS_W * 0.5, Content.BOSS_H * 0.5), 120.0, 0.0)
 	velocity = Vector2(-_charge_dir * 200.0, -180.0)
 	state = EState.RECOVER
 	st_timer = _timing(WALL_STUN, WALL_STUN * 0.8)
