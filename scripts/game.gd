@@ -2012,7 +2012,7 @@ func _on_player_died() -> void:
 func _on_boss_spawned() -> void:
 	if is_instance_valid(room) and room.boss != null:
 		ui.show_boss_bar(room.boss.hp_max)
-		var subtitle := "Trial of the Throne" if room.trial else Content.boss_subtitle(Save.get_victories(), Save.oath_kept())
+		var subtitle := "Trial of the Throne" if room.trial else Content.boss_subtitle(Save.get_last_ending())
 		ui.show_boss_intro("The Ember Warden", subtitle)
 		feedback.shake(8.0, 0.3)
 		feedback.play("boss")

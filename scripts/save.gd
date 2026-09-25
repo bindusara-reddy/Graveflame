@@ -288,8 +288,13 @@ static func _improves(records: Dictionary, key: String, value: float) -> bool:
 	return value < old if key == "fastest_win" else value > old
 # --- The finale's legacy ---
 ## A victory is recorded once, at the killing blow, so quitting, skipping or
-## crashing mid-finale never loses it. Deaths are counted so the ending can raise
-## exactly the knights the Warden took since it was last mended.
+## crashing mid-finale never loses it. Deaths are counted because the ending
+## raises one fallen knight for every knight ever lost. The choice made at the
+## throne is written the moment it is made, and the next descent remembers it.
+
+## How a won descent can end: the crown taken, the flames given back, the
+## throne put out for good.
+const ENDINGS := ["crown", "given", "ended"]
 
 ## Vow counts kept per victory, newest last; the oldest fall off past this.
 const ROLL_CAP := 64
@@ -320,7 +325,9 @@ static func record_fall(epitaph: String) -> void:
 ## The single save write for a won descent. Returns what the finale needs:
 ## first, victories, falls_total (every knight ever lost), unknown (a save
 ## from before the count with no counted fall yet), last_epitaph,
-## finale_seen (before this one), milestone and oath_first.
+## finale_seen (before this one), milestone ("oath" the first time all five
+## vows are kept, else ""), oath_first and last_ending (how the previous won
+## descent ended).
 static func record_victory(vows: Array) -> Dictionary:
 	var d := load_save()
 	var victories := int(d.get("victories", 0)) + 1
@@ -328,16 +335,6 @@ static func record_victory(vows: Array) -> Dictionary:
 	var seen := int(d.get("finale_seen", 0))
 	var oath := vows.size() == Content.VOWS.size()
 	var oath_first := oath and not bool(d.get("oath_kept", false))
-	var milestones: Array = d.get("milestones_seen", [])
-	var milestone := ""
-	if oath_first:
-		milestone = "oath"
-	elif victories == 10 and not milestones.has("house_rises"):
-		milestone = "house_rises"
-	elif victories == 2 and not milestones.has("house"):
-		milestone = "house"
-	if not milestone.is_empty():
-		milestones.append(milestone)
 	var roll: Array = d.get("roll", [])
 	roll.append(vows.size())
 	var kept: Array = d.get("vows_kept_ever", [])
@@ -349,7 +346,8 @@ static func record_victory(vows: Array) -> Dictionary:
 		"falls_total": falls,
 		"unknown": bool(d.get("falls_legacy", false)) and falls == 0,
 		"last_epitaph": str(d.get("last_epitaph", "")), "finale_seen": seen,
-		"milestone": milestone, "oath_first": oath_first,
+		"milestone": "oath" if oath_first else "", "oath_first": oath_first,
+		"last_ending": get_last_ending(),
 	}
 	d["victories"] = victories
 	d["best_vows"] = maxi(int(d.get("best_vows", 0)), vows.size())
@@ -358,7 +356,6 @@ static func record_victory(vows: Array) -> Dictionary:
 	d["roll"] = roll.slice(maxi(0, roll.size() - ROLL_CAP))
 	d["vows_kept_ever"] = kept
 	d["oath_kept"] = bool(d.get("oath_kept", false)) or oath
-	d["milestones_seen"] = milestones
 	save_save(d)
 	return out
 
@@ -390,3 +387,27 @@ static func set_last_celebrated(victories: int) -> void:
 	var d := load_save()
 	d["last_celebrated"] = victories
 	save_save(d)
+
+## "" until a won descent has ended by the knight's choice.
+static func get_last_ending() -> String:
+	var ending := str(_data().get("last_ending", ""))
+	return ending if ENDINGS.has(ending) else ""
+
+## The choice at the throne: the last ending, every ending ever seen, and
+## whether the keep was ever put out (the title keeps that dawn for good).
+static func set_last_ending(ending: String) -> void:
+	if not ENDINGS.has(ending):
+		return
+	var seen: Array = _slot("endings_seen", [])
+	if not seen.has(ending):
+		seen.append(ending)
+	_data()["last_ending"] = ending
+	_data()["ended_ever"] = ended_ever() or ending == "ended"
+	_write()
+
+static func get_endings_seen() -> Array:
+	var seen = _data().get("endings_seen", [])
+	return (seen as Array).filter(func(e): return ENDINGS.has(e)) if seen is Array else []
+
+static func ended_ever() -> bool:
+	return bool(_data().get("ended_ever", false))
