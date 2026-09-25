@@ -134,7 +134,7 @@ const LEVELS := {
 	"die": 0.75, "boom": 0.85, "pickup": 0.45, "streak": 0.4, "elite": 0.6,
 	"second_wind": 0.6, "pyre": 0.75, "shatter": 0.45, "clear": 0.45, "wave": 0.45,
 	"rift": 0.5, "boss": 0.8, "step": 0.16,
-	"ui_confirm": 0.32, "ui_back": 0.28,
+	"ui_move": 0.2, "ui_confirm": 0.32, "ui_back": 0.28,
 	"victory": 0.6, "defeat": 0.65,
 	"tell_stalker": 0.42, "tell_hopper": 0.36, "tell_wisp": 0.36, "tell_brute": 0.55,
 	"tell_bomber": 0.45, "tell_crow": 0.42, "tell_lunge": 0.55, "tell_fan": 0.5, "tell_slam": 0.58, "tell_charge": 0.6,
@@ -345,6 +345,11 @@ static func build_pcm(name: String, take: int = 0) -> PackedByteArray:
 			add_tone(b, 0.0, 1.3, 55.0, 41.0, 0.8, 1.0, 0.004, 0.45, 0.8)
 			add_metal(b, 0.0, 1.4, 110.0, 0.6, 0.6, [1.0, 1.52, 2.44, 2.76], 0.7)
 			add_noise(b, 0.0, 1.0, 400.0, 120.0, 0.8, 0.6, 0.01, 0.35, 0, sd + 1, 40.0)
+		"ui_move":
+			# Menu focus stepping on: a dry paper tick with a pin of steel.
+			b = buf(0.08)
+			add_noise(b, 0.0, 0.05, 2600.0, 2200.0, 3.0, 0.8, 0.001, 0.008, 1, sd)
+			add_metal(b, 0.0, 0.08, 1760.0, 0.25, 0.02, [1.0, 2.76], 0.4)
 		"ui_confirm":
 			b = buf(0.45)
 			add_metal(b, 0.0, 0.45, 880.0, 0.6, 0.14, [1.0, 2.0, 3.01], 0.35)
