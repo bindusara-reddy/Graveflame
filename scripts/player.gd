@@ -30,6 +30,9 @@ const PARRY_POISE := 99.0
 const HEAVY_RECOIL := 90.0
 ## A blow that rings off a shield throws the knight back this fast (px/s).
 const GUARD_RECOIL := 220.0
+## Graveflame ignition's shockwave: its reach (px) and how hard it throws (px/s).
+const IGNITE_RADIUS := 170.0
+const IGNITE_KNOCK := 460.0
 ## A deflect inside the first PERFECT_PARRY seconds of the window is perfect:
 ## the foe reels longer, the meter pays more and the riposte it banks hits
 ## harder. A whiff holds the stance PARRY_WHIFF_LAG longer, so spam costs.
@@ -748,6 +751,13 @@ func _do_graveflame() -> void:
 	iframes = maxf(iframes, 0.18)
 	emit_signal("special_changed", special, max_special)
 	emit_signal("action_feedback", "flame", global_position)
+	# Ignition is a showpiece and a panic button: it throws every foe close by
+	# clear, guard broken and alight, while the world holds and the camera leans in.
+	nova(0.0, IGNITE_RADIUS, IGNITE_KNOCK, PARRY_POISE)
+	if feedback != null:
+		feedback.hit_stop(0.18)
+		feedback.punch_zoom(1.08, 0.06, 0.3)
+		feedback.blast(global_position, IGNITE_RADIUS)
 
 func _gain_special(amount: float) -> void:
 	special = minf(max_special, special + amount)
@@ -997,15 +1007,16 @@ func _feel_hurt(from_dir: Vector2) -> void:
 	feedback.flash_edge(Game.VIGNETTE_LOW_HP, 0.12)
 
 ## A ring of flame around the knight: damages and ignites every enemy within
-## `radius`. Shared by Flare Parry and Phoenix Flask.
-func nova(dmg: float, radius: float) -> void:
+## `radius`. Shared by Flare Parry, Phoenix Flask and ignition, which deals no
+## damage but throws harder (`knock`) and breaks guards (`poise`).
+func nova(dmg: float, radius: float, knock := 320.0, poise := 1.0) -> void:
 	for foe in Enemy.living_near(get_tree(), global_position, radius):
 		# A pyre chain set off by this blast may already have killed a later foe.
 		if foe.dead:
 			continue
 		var dir: Vector2 = (foe.global_position - global_position).normalized()
 		if dir == Vector2.ZERO: dir = Vector2(facing, 0.0)
-		foe.take_damage(dmg * _damage_mul(foe), Vector2(dir.x, -0.4), 320.0)
+		deal(foe, dmg * _damage_mul(foe), Vector2(dir.x, -0.4), knock, poise)
 		foe.apply_burn(Content.P_FLAME_BURN_DPS, Content.P_FLAME_BURN_TIME)
 	emit_signal("action_feedback", "nova", global_position)
 

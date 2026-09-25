@@ -23,6 +23,7 @@ func run() -> void:
 	await test_shots_strike()
 	await test_parry_aims()
 	test_number_tally()
+	await test_ignition_and_clear_beat()
 	release(["attack", "parry", "move_left"])
 	Feedback.motion_reduced = false
 	await finish("COMBAT_PRESENCE")
@@ -336,6 +337,27 @@ func test_number_tally() -> void:
 	game.feedback.damage_number(at + Vector2(10.0, 0.0), 16.0, "hit")
 	var numbers: Array = game.feedback._particles.filter(func(v): return v.kind == "number")
 	check(numbers.size() == 1 and numbers[0].text == "28", "blows on one foe add up in one damage number")
+
+## Ignition throws close foes clear and sets them alight; a cleared chamber
+## eases the world into slow motion.
+func test_ignition_and_clear_beat() -> void:
+	var p := game.player
+	p.respawn_at(Vector2(480.0, Content.FLOOR_Y - Content.P_BODY_H * 0.5))
+	p.facing = 1.0
+	await ticks(40)
+	var foe := dummy_ahead(80.0)
+	p.special = p.max_special
+	await hold_action("ignite")
+	await ticks(2)
+	check(foe.velocity.x > 0.0 and foe.burn_time > 0.0, "ignition throws a close foe clear and sets it alight")
+	foe.queue_free()
+	await ticks(20)
+	game.feedback.set_reduced_motion(false)
+	game.room.cleared.emit("test chamber")
+	await ticks(12)
+	check(Engine.time_scale < 1.0, "a cleared chamber's last kill eases into slow motion")
+	game.feedback.end_slow_motion()
+	game.feedback.set_reduced_motion(true)
 
 func test_breakable_crypt() -> void:
 	var props := game.room.props

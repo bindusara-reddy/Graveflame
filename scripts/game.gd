@@ -1451,6 +1451,7 @@ func _on_room_cleared(room_name: String) -> void:
 	feedback.play("clear")
 	# The chamber exhales: the combat layer ebbs away under the clear bells.
 	music.set_intensity(0.0, 3.0)
+	feedback.chamber_cleared()
 	ui.show_room_clear(room_name)
 
 func _on_room_completed() -> void:

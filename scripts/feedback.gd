@@ -110,6 +110,13 @@ func slow_motion(scale: float, duration: float) -> void:
 	_slowmo_tween.tween_interval(maxf(0.0, duration * 0.55))
 	_slowmo_tween.tween_method(_set_slowmo, scale, 1.0, maxf(0.05, duration * 0.45)).set_trans(Tween.TRANS_SINE).set_ease(Tween.EASE_IN)
 
+## A chamber's last kill lands as a beat of its own: the world eases into slow
+## motion while the camera leans in, then both let go. Reduced motion keeps
+## only the chamber-clear sound.
+func chamber_cleared() -> void:
+	slow_motion(0.3, 0.6)
+	punch_zoom(1.08, 0.12, 0.35)
+
 func end_slow_motion() -> void:
 	if _slowmo_tween != null and _slowmo_tween.is_valid():
 		_slowmo_tween.kill()
