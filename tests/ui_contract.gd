@@ -39,7 +39,29 @@ func run() -> void:
 	await _test_chamber_banners()
 	await _test_burn_veil()
 	await _test_title_return()
+	_test_hud_affordances()
 	await finish("UI_CONTRACT")
+
+
+## The HUD marks what a resource buys: Lance notches, a gold IGNITE prompt,
+## a sigil per flask charge, and the Warden's phase notch and ignition.
+func _test_hud_affordances() -> void:
+	var ui: UI = game.ui
+	var notches := ui._special_bar.find_children("*", "Control", false, false).filter(func(c): return c is UI.BarNotches)
+	check(notches.size() == 1 and notches[0].marks == [0.4, 0.8], "the Graveflame bar is notched at each Lance's cost")
+	ui.set_special(100.0, 100.0)
+	check(ui._special_value_label.text == "IGNITE  " + UI.prompt("ignite"), "a full bar names the Ignite key (got %s)" % ui._special_value_label.text)
+	ui.set_special(40.0, 100.0)
+	check(ui._special_value_label.text == "40 / 100", "spending it restores the count")
+	ui.set_flask(1, 3)
+	var sigils: Array = ui._flask_sigils
+	check(sigils.size() == 3 and sigils[0].modulate == Color.WHITE and sigils[2].modulate.a < 1.0, "one flask sigil per charge, spent ones dimmed")
+	ui.show_boss_bar(1000.0)
+	ui.update_boss_bar(400.0)
+	check(ui._boss_ignited and ui._boss_name_label.text.ends_with("IGNITED"), "past the phase notch the Warden's bar ignites")
+	ui.show_boss_bar(1000.0)
+	check(not ui._boss_ignited, "a fresh boss bar starts unlit")
+	ui.hide_boss_bar()
 
 
 ## The chamber veil burns fully open from any arrival point and leaves nothing.

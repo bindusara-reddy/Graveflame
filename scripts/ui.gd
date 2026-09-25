@@ -111,14 +111,22 @@ var _trail_tweens: Dictionary = {}
 var _hp_value_label: Label
 var _special_bar: ProgressBar
 var _special_value_label: Label
+## Graveflame last shown, kept so the IGNITE prompt can be repainted.
+var _special_shown := Vector2(0.0, Content.P_SPECIAL_MAX)
+## The Graveflame fill's own style: it breathes white while Ignite is ready.
+var _special_fill: StyleBoxFlat
+var _ignite_tween: Tween
 var _room_label: Label
 var _wave_label: Label
 var _score_label: Label
 var _boss_panel: Control
 var _boss_bar: ProgressBar
 var _boss_value_label: Label
+var _boss_name_label: Label
+## Whether the boss bar wears its second-phase ember colours.
+var _boss_ignited := false
 var _flask_container: HBoxContainer
-var _flask_dots: Array = []
+var _flask_sigils: Array = []
 var _flask_count_label: Label
 ## Charges and belt size last shown, kept so the key prompt can be repainted.
 var _flask_shown := Vector2i(Content.FLASK_MAX, Content.FLASK_MAX)
@@ -376,9 +384,11 @@ func _build_player_status() -> void:
 
 	_special_value_label = _make_stat_line(stack, "GRAVEFLAME", "0 / 100", C_BLUE, 10)
 	_special_bar = _make_bar(C_BLUE, Color("153243"), 7.0)
-	_special_bar.max_value = 100.0
+	_special_bar.max_value = Content.P_SPECIAL_MAX
 	_special_bar.value = 0.0
+	_special_fill = _special_bar.get_theme_stylebox("fill") as StyleBoxFlat
 	stack.add_child(_special_bar)
+	_notch_bar(_special_bar, _lance_marks(Content.P_SPECIAL_MAX))
 
 	var supplies := HBoxContainer.new()
 	supplies.mouse_filter = Control.MOUSE_FILTER_IGNORE
@@ -395,7 +405,7 @@ func _build_player_status() -> void:
 	_flask_count_label = _make_label("", 10, C_MINT, HORIZONTAL_ALIGNMENT_RIGHT)
 	_flask_count_label.size_flags_horizontal = Control.SIZE_SHRINK_END
 	supplies.add_child(_flask_count_label)
-	_rebuild_flask_dots(Content.FLASK_MAX)
+	_rebuild_flask_sigils(Content.FLASK_MAX)
 
 
 func _build_run_status() -> void:
@@ -427,14 +437,16 @@ func _build_boss_status() -> void:
 	var head := HBoxContainer.new()
 	head.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	stack.add_child(head)
-	var boss_label := _make_label("THE EMBER WARDEN", 13, Color("f2c3c6"), HORIZONTAL_ALIGNMENT_LEFT)
-	head.add_child(boss_label)
+	_boss_name_label = _make_label("THE EMBER WARDEN", 13, Color("f2c3c6"), HORIZONTAL_ALIGNMENT_LEFT)
+	head.add_child(_boss_name_label)
 	_boss_value_label = _make_label("", 12, C_RED, HORIZONTAL_ALIGNMENT_RIGHT)
 	head.add_child(_boss_value_label)
 	var boss_pair := _trailed_bar(Color("b94350"), Color("41131b"), 13.0)
 	stack.add_child(boss_pair.holder)
 	_boss_bar = boss_pair.bar
 	_boss_trail = boss_pair.trail
+	# The Warden ignites at this mark, so the fight's midpoint is readable.
+	_notch_bar(boss_pair.holder, [Content.BOSS_PHASE2_AT])
 	_boss_panel.visible = false
 
 
@@ -699,6 +711,7 @@ func _track_device(event: InputEvent) -> void:
 ## Repaint every visible key prompt after a device switch or a rebind.
 func _refresh_prompts() -> void:
 	_paint_flask_label()
+	_paint_special_label()
 	_paint_reward_footer()
 	(_panels["pause"].get_meta("footer_label") as Label).text = "%s  resume" % prompt("pause")
 	if _hint_panel.visible:
@@ -2013,7 +2026,60 @@ func set_hp(hp: float, max_hp: float) -> void:
 func set_special(value: float, maximum: float) -> void:
 	_special_bar.max_value = maxf(1.0, maximum)
 	_special_bar.value = clampf(value, 0.0, maximum)
-	_special_value_label.text = "%d / %d" % [roundi(value), roundi(maximum)]
+	var was_ready := _special_shown.x >= _special_shown.y and _special_shown.y > 0.0
+	_special_shown = Vector2(value, maximum)
+	var ready := value >= maximum
+	if ready != was_ready:
+		_set_ignite_ready(ready)
+	_paint_special_label()
+
+
+## A full Graveflame names the Ignite key in gold; otherwise the count.
+func _paint_special_label() -> void:
+	var ready := _special_shown.x >= _special_shown.y and _special_shown.y > 0.0
+	_special_value_label.text = "IGNITE  %s" % prompt("ignite") if ready else "%d / %d" % [roundi(_special_shown.x), roundi(_special_shown.y)]
+	_special_value_label.add_theme_color_override("font_color", C_GOLD if ready else C_BLUE)
+
+
+## While Ignite is ready the fill breathes between blue and white-hot, so a
+## full bar reads as a prompt; reduced motion holds it white-hot instead.
+func _set_ignite_ready(ready: bool) -> void:
+	_kill_tween(_ignite_tween)
+	var hot := C_BLUE.lerp(Color.WHITE, 0.75)
+	_special_fill.bg_color = hot if ready else C_BLUE
+	if not ready or Feedback.motion_reduced:
+		return
+	_ignite_tween = _ui_tween().set_loops()
+	_ignite_tween.tween_property(_special_fill, "bg_color", C_BLUE, 0.42).set_trans(Tween.TRANS_SINE)
+	_ignite_tween.tween_property(_special_fill, "bg_color", hot, 0.42).set_trans(Tween.TRANS_SINE)
+
+
+## Notch fractions for every Lance's worth of Graveflame below a full bar.
+static func _lance_marks(maximum: float) -> Array:
+	var marks: Array = []
+	var cost := Content.P_SPECIAL_COST
+	while cost < maximum - 0.5:
+		marks.append(cost / maximum)
+		cost += Content.P_SPECIAL_COST
+	return marks
+
+
+## Lay ink notches over `bar` at each fraction in `marks`.
+func _notch_bar(bar: Control, marks: Array) -> void:
+	var notches := BarNotches.new()
+	notches.marks = marks
+	notches.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	bar.add_child(notches)
+	notches.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+
+
+## Thin cuts across a bar: thresholds the player spends or fights toward.
+class BarNotches extends Control:
+	var marks: Array = []
+	func _draw() -> void:
+		for mark in marks:
+			var x := roundf(size.x * float(mark))
+			draw_rect(Rect2(x - 1.0, -1.0, 2.0, size.y + 2.0), Color("100d18"))
 
 
 ## Seven chambers lead down to the throne, which is named rather than counted.
@@ -2043,12 +2109,23 @@ func show_boss_bar(max_hp: float) -> void:
 	_boss_trail.max_value = _boss_bar.max_value
 	_boss_trail.value = max_hp
 	_boss_value_label.text = str(roundi(max_hp))
+	_set_boss_ignited(false)
 
 
 func update_boss_bar(hp: float) -> void:
 	if not is_equal_approx(hp, _boss_bar.value):
 		_set_trailed(_boss_bar, _boss_trail, hp, _boss_bar.max_value)
 	_boss_value_label.text = str(maxi(0, roundi(hp)))
+	if not _boss_ignited and hp <= _boss_bar.max_value * Content.BOSS_PHASE2_AT:
+		_set_boss_ignited(true)
+
+
+## Past the phase notch the Warden burns: its bar and name take the ember.
+func _set_boss_ignited(on: bool) -> void:
+	_boss_ignited = on
+	_boss_bar.add_theme_stylebox_override("fill", _bar_box(C_EMBER if on else Color("b94350")))
+	_boss_name_label.text = "THE EMBER WARDEN  ·  IGNITED" if on else "THE EMBER WARDEN"
+	_boss_name_label.add_theme_color_override("font_color", C_EMBER_HI if on else Color("f2c3c6"))
 
 
 func hide_boss_bar() -> void:
@@ -2242,10 +2319,10 @@ func _paint_reward_footer() -> void:
 func set_flask(charges: int, max_charges: int) -> void:
 	var safe_max := maxi(0, max_charges)
 	var safe_charges := clampi(charges, 0, safe_max)
-	if _flask_dots.size() != safe_max:
-		_rebuild_flask_dots(safe_max)
-	for i in range(_flask_dots.size()):
-		_style_flask_dot(_flask_dots[i] as PanelContainer, i < safe_charges)
+	if _flask_sigils.size() != safe_max:
+		_rebuild_flask_sigils(safe_max)
+	for i in range(_flask_sigils.size()):
+		_fill_flask_sigil(_flask_sigils[i], i < safe_charges, i >= _flask_shown.x and i < safe_charges)
 	_flask_shown = Vector2i(safe_charges, safe_max)
 	_paint_flask_label()
 
@@ -2623,23 +2700,26 @@ func hide_room_clear() -> void:
 
 # --- Internal updates --------------------------------------------------------
 
-func _rebuild_flask_dots(count: int) -> void:
+## One flask sigil per charge on the belt, drawn like the Forge's flask relic.
+func _rebuild_flask_sigils(count: int) -> void:
 	_clear_children(_flask_container)
-	_flask_dots.clear()
+	_flask_sigils.clear()
 	for i in range(count):
-		var dot := PanelContainer.new()
-		dot.custom_minimum_size = Vector2(16, 8)
-		dot.size_flags_vertical = Control.SIZE_SHRINK_CENTER
-		dot.mouse_filter = Control.MOUSE_FILTER_IGNORE
-		_flask_container.add_child(dot)
-		_flask_dots.append(dot)
-		_style_flask_dot(dot, true)
+		var sigil := BoonSigil.new()
+		sigil.setup("flask", C_MINT, Vector2(16.0, 18.0))
+		sigil.pivot_offset = Vector2(8.0, 9.0)
+		_flask_container.add_child(sigil)
+		_flask_sigils.append(sigil)
 
 
-func _style_flask_dot(dot: PanelContainer, filled: bool) -> void:
-	var color := C_MINT if filled else Color("26332f")
-	var edge := Color("98ffd0") if filled else Color("3b4944")
-	dot.add_theme_stylebox_override("panel", _panel_box(color, edge, 3, 1, 0))
+## A charged flask glows mint; a spent one is a dim ghost of the glass. A
+## charge that has just come back pops, so a refill is noticed mid-fight.
+func _fill_flask_sigil(sigil: Control, filled: bool, refilled: bool) -> void:
+	sigil.modulate = Color.WHITE if filled else Color(0.32, 0.4, 0.38, 0.55)
+	if not refilled or Feedback.motion_reduced:
+		return
+	sigil.scale = Vector2.ONE * 1.3
+	_ui_tween().tween_property(sigil, "scale", Vector2.ONE, 0.2).set_trans(Tween.TRANS_BACK).set_ease(Tween.EASE_OUT)
 
 
 ## Boon card frame: no content margins, because the card's own MarginContainer
