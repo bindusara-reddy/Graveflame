@@ -254,7 +254,11 @@ func _init() -> void:
 	_riser_glow = painter(self, _draw_riser_glow, VFX.radial_material())
 	_risers = painter(self, _draw_risers)
 	_light()
-	set_process(false)
+
+
+## Godot turns processing on at ready; a sky with nothing climbing stays idle.
+func _ready() -> void:
+	set_process(not _flying.is_empty())
 
 
 ## The burn shader compiles once; every material made from it is new.
