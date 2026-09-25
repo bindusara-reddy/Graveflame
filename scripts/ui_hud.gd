@@ -98,11 +98,9 @@ func build() -> void:
 	# The chamber card takes the Warden's slot, empty outside the throne, so it
 	# never covers the platforms where foes arrive. The Warden's card lies on
 	# the throne room's brick foundation, clear of the Warden.
-	_room_intro = Kit.banner(self, T.EMBER, 10.0, 104.0)
-	_room_intro.name = "ChamberCard"
+	_room_intro = _card("ChamberCard", T.EMBER, 10.0, 104.0, T.HEADLINE, T.BONE)
 	_trial_seal = _pin_seal(_room_intro, "tick")
-	_boss_intro = Kit.banner(self, T.WARDEN, 546.0, 666.0, T.TITLE, T.WARDEN)
-	_boss_intro.name = "WardenCard"
+	_boss_intro = _card("WardenCard", T.WARDEN, 546.0, 666.0, T.TITLE, T.WARDEN)
 	_build_clear()
 	_build_hint()
 	_build_inscription()
@@ -127,6 +125,15 @@ func _column(preset: Control.LayoutPreset, grow: Control.GrowDirection) -> VBoxC
 	col.offset_top = 14.0
 	col.grow_horizontal = grow
 	return col
+
+
+## A card: a banner strip across the band `top`..`bottom` that burns open
+## from its centre when it plays.
+func _card(node_name: String, accent: Color, top: float, bottom: float, title_role: String, title_color: Color) -> Kit.Banner:
+	var card := Kit.banner(self, accent, top, bottom, title_role, title_color)
+	card.name = node_name
+	Kit.ember_edges(card)
+	return card
 
 
 ## A slip of paper in `col`, lined up on the column's edge.
@@ -170,7 +177,7 @@ func _band(node_name: String, preset: Control.LayoutPreset, top: float, bottom: 
 func _build_knight_slip(col: VBoxContainer) -> void:
 	var row := _row(T.S3)
 	_slip(col, "KnightSlip").add_child(row)
-	_flame = Kit.vital_flame(52.0)
+	_flame = Kit.vital_flame(60.0)
 	row.add_child(_flame)
 	var gauges := VBoxContainer.new()
 	gauges.mouse_filter = Control.MOUSE_FILTER_IGNORE
@@ -381,7 +388,7 @@ func _build_chamber_track(col: VBoxContainer) -> void:
 	purse.add_child(_cells)
 	var fame := _row()
 	stack.add_child(fame)
-	fame.add_child(Kit.label("RENOWN", T.MICRO, T.SOOT, HORIZONTAL_ALIGNMENT_LEFT))
+	fame.add_child(Kit.label("RENOWN", T.MICRO, T.ASH, HORIZONTAL_ALIGNMENT_LEFT))
 	_renown = Kit.label("0", T.CAPS, T.ASH, HORIZONTAL_ALIGNMENT_RIGHT)
 	fame.add_child(_renown)
 
@@ -519,7 +526,7 @@ func _build_warden() -> void:
 	_warden_meter = Kit.meter(T.WARDEN, 12.0, WARDEN_TURNS)
 	stack.add_child(_warden_meter)
 	for turn in WARDEN_TURNS:
-		_warden_seals.append(Kit.meter_seal(_warden_meter, turn, 22.0))
+		_warden_seals.append(Kit.meter_seal(_warden_meter, turn, 26.0))
 	_phase_tag = _band("WardenPhase", Control.PRESET_TOP_WIDE, 94.0, 130.0)
 	var tag := Kit.caption("", T.WARDEN)
 	_phase_tag.add_child(tag)
@@ -617,9 +624,8 @@ func show_room_intro(idx: int, total: int, room_name: String, trial: bool = fals
 ## it steps aside into: a slip in the top slot that stays until a rift is
 ## taken, saying only where to go.
 func _build_clear() -> void:
-	_clear = Kit.banner(self, T.VERDIGRIS, 100.0, 216.0, T.HEADLINE, T.VERDIGRIS)
-	_clear.name = "ClearCard"
-	_chip = _band("ClearChip", Control.PRESET_TOP_WIDE, 14.0, 54.0)
+	_clear = _card("ClearCard", T.VERDIGRIS, 100.0, 216.0, T.HEADLINE, T.VERDIGRIS)
+	_chip =_band("ClearChip", Control.PRESET_TOP_WIDE, 14.0, 54.0)
 	var line := _row()
 	Kit.sheet(_chip, "slip", T.VERDIGRIS).add_child(line)
 	line.add_child(Kit.seal(20.0, T.VERDIGRIS.darkened(0.5), "tick"))

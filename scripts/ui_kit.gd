@@ -1491,9 +1491,10 @@ class PromptLine extends HBoxContainer:
 		add_child(l)
 
 
-## The knight's flame in an inked medallion, the portrait on the knight's
-## slip. The flame stands as tall as `vitality` (0..1) allows. `roaring`
-## (Ignite is ready) rings it in ember and burns its heart white-hot;
+## The knight's portrait in an inked medallion: the round mask, its one eye
+## and the four-tongue flame crown the puppet wears (knight_art.gd). The
+## crown stands as tall as `vitality` (0..1) allows. `roaring` (Ignite is
+## ready) rings it in ember and burns the crown gold and white-hot;
 ## `guttering` (vitality low) rings it in blood. It flickers only while it
 ## roars or gutters, so an idle HUD never redraws; reduced motion holds it
 ## still in every state.
@@ -1543,14 +1544,33 @@ class VitalFlame extends Control:
 			for i in range(3):
 				draw_arc(c, r + 3.0 + 3.0 * float(i), 0.0, TAU, 40, Color(T.EMBER, 0.34 - 0.1 * float(i)), 3.0, true)
 		draw_circle(c, r, T.SHEET_LO)
-		draw_circle(c + Vector2(0.0, -r * 0.08), r * 0.66, Color(T.EMBER, 0.22 if roaring else 0.09))
+		draw_circle(c + Vector2(0.0, -r * 0.2), r * 0.62, Color(T.EMBER, 0.24 if roaring else 0.1))
 		draw_arc(c, r, 0.0, TAU, 40, ring, 1.5, true)
 		draw_arc(c, r - 3.5, 0.0, TAU, 40, Color(ring, 0.22), 1.0, true)
-		var base := c + Vector2(0.0, r * 0.62)
-		var tall := r * (1.5 if roaring else lerpf(0.5, 1.2, vitality))
-		P.flame(ci, base, tall, tall * 0.6, _t)
-		if roaring:
-			P.fill(ci, P.VFX.flame_tongues(base, tall * 0.5, tall * 0.26, _t * 1.3, 2.0)[0], T.HOT)
+		_draw_head(ci, c + Vector2(-r * 0.04, r * 0.36), r * 0.46)
+
+	## The puppet's head, `head_r` px across its mask: the crown's four
+	## tongues (inner gold ones on the centre two), then the mask, rimmed so
+	## it holds against the dark disc, and the eye. The tongues are drawn
+	## taller than the puppet's so the crown carries the portrait.
+	func _draw_head(ci: RID, head: Vector2, head_r: float) -> void:
+		var k := head_r / 10.0
+		var tall := 1.4 if roaring else lerpf(0.25, 1.0, vitality)
+		for i in range(4):
+			var fx := (-9.0 + float(i) * 6.0) * k
+			var tip := (13.0 + sin(_t * 10.0 + float(i) * 1.7) * 5.0) * tall + 8.0
+			P.fill(ci, PackedVector2Array([
+				head + Vector2(fx - 4.2 * k, -2.0 * k), head + Vector2(fx, -tip * k), head + Vector2(fx + 4.2 * k, -4.0 * k),
+			]), T.GOLD if roaring else T.EMBER)
+		for i in [1, 2]:
+			var fx := (-9.0 + float(i) * 6.0) * k
+			var tip := (7.0 + sin(_t * 13.0 + float(i) * 2.3) * 3.0) * tall + 8.0
+			P.fill(ci, PackedVector2Array([
+				head + Vector2(fx - 2.2 * k, -5.0 * k), head + Vector2(fx, -tip * k), head + Vector2(fx + 2.2 * k, -5.0 * k),
+			]), T.HOT if roaring else T.GOLD)
+		draw_circle(head, head_r + 1.0, T.HAIRLINE)
+		draw_circle(head, head_r, T.INK)
+		draw_circle(head + Vector2(4.0, -1.0) * k, 2.8 * k, T.HOT)
 
 
 ## A wax seal pressed on `meter` at the fraction `at`: a threshold the fight
@@ -1582,8 +1602,10 @@ class MeterSeal extends Control:
 	func _draw() -> void:
 		var ci := get_canvas_item()
 		var c := size * 0.5
-		var r := minf(size.x, size.y) * 0.5 - 1.0
-		P.seal(ci, c, r, wax.darkened(0.25) if broken else wax, "flame" if broken else "crown")
+		var r := minf(size.x, size.y) * 0.5 - 2.0
+		# An ink ring lifts the wax off a meter of its own colour.
+		draw_circle(c, r + 2.0, T.INK_DEEP)
+		P.seal(ci, c, r, wax.darkened(0.3) if broken else wax, "flame" if broken else "crown")
 		if broken:
 			var seam := PackedVector2Array([
 				c + Vector2(-r * 0.15, -r), c + Vector2(r * 0.12, -r * 0.4), c + Vector2(-r * 0.12, r * 0.05),
@@ -1591,6 +1613,44 @@ class MeterSeal extends Control:
 			])
 			RenderingServer.canvas_item_add_polyline(ci, seam, PackedColorArray([T.INK_DEEP]), 3.0, true)
 			RenderingServer.canvas_item_add_polyline(ci, seam, PackedColorArray([T.EMBER_HI]), 1.2, true)
+
+
+## An ember seam on both ends of `banner`'s strip while it unrolls, as if the
+## strip were burning open from its centre (ui_design.md §6, motion). It
+## repaints only while the strip is opening; a standing banner costs nothing,
+## and under reduced motion (no unroll) it never shows.
+static func ember_edges(banner: Banner) -> EmberEdges:
+	var edges := EmberEdges.new()
+	edges.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	banner.strip.add_child(edges)
+	banner.visibility_changed.connect(func() -> void: edges.set_process(banner.visible))
+	return edges
+
+
+class EmberEdges extends Control:
+	var _lit := false
+
+	func _ready() -> void:
+		set_process(false)
+
+	func _process(_delta: float) -> void:
+		var opening := (get_parent() as Control).scale.x < 1.0
+		if opening or _lit:
+			_lit = opening
+			queue_redraw()
+
+	func _draw() -> void:
+		var strip := get_parent() as Control
+		if not _lit or strip.scale.x <= 0.0:
+			return
+		# The strip is squeezed while it opens: widths are divided back out so
+		# the seam stays a few screen pixels wide.
+		var px := 1.0 / strip.scale.x
+		var r := Rect2(-position, strip.size)
+		for x in [r.position.x, r.end.x]:
+			draw_rect(Rect2(x - 5.0 * px, r.position.y, 10.0 * px, r.size.y), Color(T.EMBER, 0.28))
+			draw_rect(Rect2(x - 1.5 * px, r.position.y, 3.0 * px, r.size.y), T.EMBER_HI)
+			draw_rect(Rect2(x - 0.5 * px, r.position.y + 2.0, px, r.size.y - 4.0), T.HOT)
 
 
 ## A wick that burns down as `fraction` falls: the fury's window. The spent
