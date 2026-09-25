@@ -649,10 +649,10 @@ static func setting_row(title: String, caption_text: String, control: Control) -
 	return line
 
 
-## A focusable ledger row: title (and caption) on the left, `trailing` (a
-## price, a seal, a key cap) on the right. Quiet at rest; a slip of paper
-## lifts under it with focus. Its children never take clicks.
-static func row(node_name: String, title: String, caption_text := "", trailing: Control = null, height := 52.0) -> Button:
+## A focusable ledger row: an optional `leading` emblem, title (and caption),
+## then `trailing` (a price, a seal, a key cap) on the right. Quiet at rest;
+## a slip of paper lifts under it with focus. Its children never take clicks.
+static func row(node_name: String, title: String, caption_text := "", trailing: Control = null, leading: Control = null, height := 52.0) -> Button:
 	var b := PaperButton.new()
 	b.name = node_name
 	b.custom_minimum_size = Vector2(0.0, height)
@@ -668,6 +668,10 @@ static func row(node_name: String, title: String, caption_text := "", trailing: 
 	line.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	line.add_theme_constant_override("separation", T.S4)
 	m.add_child(line)
+	if leading != null:
+		leading.mouse_filter = Control.MOUSE_FILTER_IGNORE
+		leading.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+		line.add_child(leading)
 	var words := VBoxContainer.new()
 	words.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	words.size_flags_horizontal = Control.SIZE_EXPAND_FILL
@@ -1136,7 +1140,9 @@ class FocusFlame extends Control:
 		var r := owner.get_global_rect()
 		if owner.get_meta("flame_at", "") == "top":
 			return Vector2(r.get_center().x, r.position.y - 4.0)
-		var x := r.position.x - 17.0 if r.position.x > 40.0 else r.position.x + 17.0
+		# Beside the control on the left, or on its right when the frame's
+		# edge leaves no room.
+		var x := r.position.x - 17.0 if r.position.x > 40.0 else r.end.x + 17.0
 		return Vector2(x, r.get_center().y + 10.0)
 
 	func _draw() -> void:

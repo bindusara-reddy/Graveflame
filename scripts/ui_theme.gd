@@ -6,6 +6,8 @@ extends RefCounted
 ## Static only, so any script can read a token without owning a UI. The
 ## design language these encode is in the UI design doc (ui_design.md).
 
+const VFX := preload("res://scripts/vfx.gd")
+
 # --- Colour --------------------------------------------------------------------------
 # Ground: ink-violet paper, dark to light.
 const INK_DEEP := Color("09070f")
@@ -186,6 +188,11 @@ class PaperStyle extends StyleBox:
 	var lift := Vector2.ZERO
 	## A tooltip's pointer: a notch rising from the top edge's middle.
 	var pointer := 0.0
+	## A darker lip along the foot: the tile's own thickness (buttons, caps).
+	var lip := 0.0
+	var lip_color := Color(0, 0, 0, 0.35)
+	## Paper grain: faint fibres per 100x100 px of paper.
+	var fibres := 0.0
 	var seed := 1
 
 	func _draw(ci: RID, rect: Rect2) -> void:
@@ -204,6 +211,12 @@ class PaperStyle extends StyleBox:
 				UiPaint.fill(ci, inner, fill)
 		else:
 			UiPaint.fill(ci, body, fill)
+		if fibres > 0.0:
+			_draw_fibres(ci, r)
+		if lip > 0.0:
+			var foot := UiPaint.cut_rect(Rect2(r.position.x, r.end.y - lip, r.size.x, lip), 0.0)
+			for part in Geometry2D.intersect_polygons(body, foot):
+				UiPaint.fill(ci, part, lip_color)
 		if band.a > 0.0 and band_height > 0.0:
 			var strip := PackedVector2Array([r.position, Vector2(r.end.x, r.position.y), Vector2(r.end.x, r.position.y + band_height), Vector2(r.position.x, r.position.y + band_height)])
 			for part in Geometry2D.intersect_polygons(body, strip):
@@ -218,6 +231,19 @@ class PaperStyle extends StyleBox:
 				UiPaint.lozenge(ci, corner, 3.0, rule)
 		if edge.a > 0.0:
 			UiPaint.stroke(ci, body, edge, edge_width)
+
+	## Faint short strokes laid mostly along the grain, the same every frame.
+	func _draw_fibres(ci: RID, r: Rect2) -> void:
+		var inner := r.grow(-8.0)
+		if inner.size.x <= 0.0 or inner.size.y <= 0.0:
+			return
+		var grain := Color(fill.lightened(0.14), 0.3)
+		var count := int(inner.size.x * inner.size.y * fibres / 10000.0)
+		for i in range(count):
+			var at := inner.position + Vector2(VFX.hash01(i, seed + 101), VFX.hash01(i, seed + 211)) * inner.size
+			var run := Vector2.from_angle((VFX.hash01(i, seed + 307) - 0.5) * 0.6) * (5.0 + 12.0 * VFX.hash01(i, seed + 401))
+			var end := (at + run).clamp(inner.position, inner.end)
+			RenderingServer.canvas_item_add_line(ci, at, end, grain, 1.0)
 
 	## The paper's outline for `r`, torn where asked. `tear_seed` lets the
 	## under-sheet tear differently from the sheet above it.
@@ -276,6 +302,7 @@ static func sheet_style(accent := HAIRLINE, seed := 1) -> PaperStyle:
 	s.under = Color("221a2b")
 	s.under_turn = -0.018
 	s.under_offset = Vector2(5, 6)
+	s.fibres = 0.7
 	s.seed = seed
 	return s
 
@@ -333,6 +360,7 @@ static func card_styles(tint: Color, epic := false, seed := 21) -> Dictionary:
 	rest.shadow = Color(0.0, 0.0, 0.0, 0.62)
 	rest.shadow_offset = Vector2(5, 7)
 	rest.light = 0.2
+	rest.fibres = 0.8
 	rest.seed = seed
 	if epic:
 		rest.glow = Color(tint, 0.35)
@@ -354,6 +382,7 @@ static func button_styles(kind: int) -> Dictionary:
 	rest.shadow = Color(0.0, 0.0, 0.0, 0.55)
 	rest.shadow_offset = Vector2(3, 4)
 	rest.light = 0.35
+	rest.lip = 3.0
 	rest.seed = 31 + kind
 	var ink := BONE
 	var ink_hot := BONE
@@ -361,6 +390,7 @@ static func button_styles(kind: int) -> Dictionary:
 		Kind.PRIMARY:
 			rest.fill = EMBER
 			rest.edge = CINDER
+			rest.lip_color = Color(CINDER, 0.75)
 			ink = INK
 			ink_hot = INK
 		Kind.DANGER:
@@ -370,6 +400,7 @@ static func button_styles(kind: int) -> Dictionary:
 			rest.fill = Color(INK, 0.0)
 			rest.shadow = Color(0, 0, 0, 0)
 			rest.light = 0.0
+			rest.lip = 0.0
 			ink = ASH
 		_:
 			rest.fill = SHEET_HI
@@ -381,9 +412,9 @@ static func button_styles(kind: int) -> Dictionary:
 	})
 	var pressed := rest.with({
 		"fill": rest.fill.darkened(0.12) if kind != Kind.QUIET else SHEET_HI, "edge": GOLD,
-		"lift": Vector2(1, 1), "shadow_offset": Vector2(1, 2), "shadow": Color(0, 0, 0, 0.5),
+		"lift": Vector2(1, 2), "shadow_offset": Vector2(1, 2), "shadow": Color(0, 0, 0, 0.5), "lip": 0.0,
 	})
-	var disabled := rest.with({ "fill": Color(SHEET_LO, 0.9) if kind != Kind.QUIET else Color(0, 0, 0, 0), "edge": HAIRLINE_DIM, "shadow": Color(0, 0, 0, 0), "light": 0.0 })
+	var disabled := rest.with({ "fill": Color(SHEET_LO, 0.9) if kind != Kind.QUIET else Color(0, 0, 0, 0), "edge": HAIRLINE_DIM, "shadow": Color(0, 0, 0, 0), "light": 0.0, "lip": 0.0 })
 	for style in [rest, raised, pressed, disabled]:
 		_pad(style, S4 + 2, S2 + 2)
 	return {
