@@ -330,6 +330,8 @@ func _process(delta: float) -> void:
 		var boss := _live_boss()
 		if boss != null:
 			ui.update_boss_bar(boss.hp)
+		if is_instance_valid(room):
+			ui.track_threats(room.enemies, world_view.get_canvas_transform())
 		# Check player death handled by signal; check fall off world
 		if player.global_position.y > Content.FLOOR_Y + 240:
 			player.fall_out_of_world()

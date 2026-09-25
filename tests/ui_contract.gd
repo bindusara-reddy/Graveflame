@@ -42,7 +42,26 @@ func run() -> void:
 	await _test_title_return()
 	_test_hud_affordances()
 	_test_shake_slider()
+	await _test_threat_pips()
 	await finish("UI_CONTRACT")
+
+
+## A foe winding up beyond the frame gets a pip on the edge nearest it; one
+## in view does not.
+func _test_threat_pips() -> void:
+	await start_run(20)
+	var foe: Enemy = game.room.enemies.filter(func(e): return is_instance_valid(e))[0]
+	var view := game.world_view.get_canvas_transform()
+	foe.global_position = view.affine_inverse() * Vector2(1500.0, 360.0)
+	foe.state = Enemy.EState.WINDUP
+	game.ui.track_threats([foe], view)
+	var pips: Array = game.ui._threat_pips._pips
+	check(pips.size() == 1 and pips[0].at.x > 1200.0 and absf(pips[0].angle) < 0.1, "a windup beyond the right edge gets a pip there, pointing out")
+	foe.global_position = view.affine_inverse() * Vector2(640.0, 360.0)
+	game.ui.track_threats([foe], view)
+	check(game.ui._threat_pips._pips.is_empty(), "a foe in view needs no pip")
+	game.ui.quit_to_title_requested.emit()
+	await ticks(3)
 
 
 ## Screen shake has its own strength, saved and applied as it moves.

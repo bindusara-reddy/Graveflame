@@ -118,6 +118,10 @@ var _special_fill: StyleBoxFlat
 var _ignite_tween: Tween
 var _room_label: Label
 var _wave_label: Label
+## The wave on the HUD as (current, total); zero when the chamber has none.
+var _wave_shown := Vector2i.ZERO
+## Paper arrows at the frame's edge for threats beyond it (see track_threats).
+var _threat_pips: ThreatPips
 var _score_label: Label
 var _boss_panel: Control
 var _boss_bar: ProgressBar
@@ -271,6 +275,10 @@ func _build_hud() -> void:
 	_room_intro = _build_banner("RoomIntro", 18.0, 96.0, Vector2(470, 70), 26, 11, C_EMBER, Color("14101ceb"))
 	_boss_intro = _build_banner("BossIntro", 546.0, 666.0, Vector2(620, 118), 40, 14, C_RED, Color("1a0c11f0"))
 	_build_hint()
+	_threat_pips = ThreatPips.new()
+	_threat_pips.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_hud.add_child(_threat_pips)
+	_threat_pips.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 
 
 ## Teaching prompt: sits below the fight, clear of the fighters and the HUD.
@@ -2076,6 +2084,7 @@ func hide_hint() -> void:
 
 
 func hide_banners() -> void:
+	_threat_pips.show_pips([])
 	_kill_tween(_boss_phase_tween)
 	if _boss_phase_tag != null:
 		_boss_phase_tag.visible = false
@@ -2158,10 +2167,63 @@ func set_room(idx: int, total: int) -> void:
 func set_wave(current: int, total: int) -> void:
 	_wave_label.text = "WAVE %d / %d" % [current, total]
 	_wave_label.visible = true
+	_wave_shown = Vector2i(current, total)
 
 
 func hide_wave() -> void:
 	_wave_label.visible = false
+	_wave_shown = Vector2i.ZERO
+
+
+## Called every frame of play with the chamber's enemies and the camera's
+## world-to-screen transform. A foe winding up beyond the frame, or one of
+## the last two of the final wave hiding beyond it, gets a pip on the edge
+## nearest it, so no strike and no straggler comes from nowhere.
+func track_threats(enemies: Array, view: Transform2D) -> void:
+	var alive := enemies.filter(func(e): return is_instance_valid(e) and not e.dead)
+	var stragglers := _wave_shown.x > 0 and _wave_shown.x >= _wave_shown.y and alive.size() <= 2
+	var frame := Rect2(Vector2.ZERO, _hud.size)
+	var pips: Array = []
+	for foe in alive:
+		var winding: bool = foe.state == Enemy.EState.WINDUP
+		var at: Vector2 = view * foe.global_position
+		if frame.has_point(at) or not (winding or stragglers):
+			continue
+		var edge := at.clamp(Vector2.ONE * ThreatPips.INSET, frame.size - Vector2.ONE * ThreatPips.INSET)
+		var color: Color = Content.ELITE_COLOR if foe.elite else foe.data.color
+		pips.append({ "at": edge, "angle": (at - edge).angle(), "color": color, "winding": winding })
+	_threat_pips.show_pips(pips)
+
+
+## Small cut-paper arrowheads at the frame's edge, each pointing at a foe
+## beyond it in that foe's colour. A foe winding up gets a larger arrow that
+## throbs (steady under reduced motion); a straggler's is small and still.
+class ThreatPips extends Control:
+	const INSET := 22.0
+	var _pips: Array = []
+
+	func show_pips(pips: Array) -> void:
+		if pips.is_empty() and _pips.is_empty():
+			return
+		_pips = pips
+		queue_redraw()
+
+	func _draw() -> void:
+		var t := Time.get_ticks_msec() * 0.001
+		for pip in _pips:
+			var size := 13.0 if pip.winding else 9.0
+			if pip.winding and not Feedback.motion_reduced:
+				size *= 1.0 + 0.18 * sin(t * 14.0)
+			draw_set_transform(pip.at, float(pip.angle))
+			var head := PackedVector2Array([Vector2(size, 0.0), Vector2(-size * 0.7, -size * 0.75), Vector2(-size * 0.35, 0.0), Vector2(-size * 0.7, size * 0.75)])
+			var shadow := head.duplicate()
+			for i in range(shadow.size()):
+				shadow[i] += Vector2(2.0, 3.0).rotated(-float(pip.angle))
+			draw_colored_polygon(shadow, Color(0.0, 0.0, 0.0, 0.55))
+			draw_colored_polygon(head, pip.color)
+			head.append(head[0])
+			draw_polyline(head, Color("100d18"), 1.5)
+		draw_set_transform(Vector2.ZERO)
 
 
 func set_score(score: int) -> void:
