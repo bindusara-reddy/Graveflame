@@ -101,43 +101,22 @@ func _ready() -> void:
 	world_view.gui_disable_input = true
 	world_view.canvas_item_default_texture_filter = Viewport.DEFAULT_CANVAS_ITEM_TEXTURE_FILTER_LINEAR
 	_world_container.add_child(world_view)
-	_backdrop = BackdropPainter.new()
-	_backdrop.name = "Backdrop"
+	_backdrop = _add_layer(BackdropPainter.new(), "Backdrop", world_view)
 	_backdrop.game = self
-	_backdrop.process_mode = Node.PROCESS_MODE_PAUSABLE
-	world_view.add_child(_backdrop)
 	# Additive lights and ambient particles (pausable, like the world they belong to).
-	_light_layer = load("res://scripts/light_layer.gd").new()
-	_light_layer.name = "LightLayer"
+	_light_layer = _add_layer(load("res://scripts/light_layer.gd").new(), "LightLayer", world_view)
 	_light_layer.game = self
-	_light_layer.process_mode = Node.PROCESS_MODE_PAUSABLE
-	world_view.add_child(_light_layer)
-	_atmosphere = load("res://scripts/atmosphere.gd").new()
-	_atmosphere.name = "Atmosphere"
-	_atmosphere.process_mode = Node.PROCESS_MODE_PAUSABLE
-	world_view.add_child(_atmosphere)
+	_atmosphere = _add_layer(load("res://scripts/atmosphere.gd").new(), "Atmosphere", world_view)
 	# World (pausable)
-	world = Node2D.new()
-	world.name = "World"
-	world.process_mode = Node.PROCESS_MODE_PAUSABLE
-	world_view.add_child(world)
-	projectiles = Node2D.new()
-	projectiles.name = "Projectiles"
+	world = _add_layer(Node2D.new(), "World", world_view)
+	projectiles = _add_layer(Node2D.new(), "Projectiles", world)
 	projectiles.z_index = 2
-	projectiles.process_mode = Node.PROCESS_MODE_PAUSABLE
-	world.add_child(projectiles)
 	# Feedback (pausable): camera, particles, audio.
-	feedback = Feedback.new()
-	feedback.name = "Feedback"
+	feedback = _add_layer(Feedback.new(), "Feedback", world_view)
 	feedback.z_index = 3
-	feedback.process_mode = Node.PROCESS_MODE_PAUSABLE
-	world_view.add_child(feedback)
 	# Real 2D lights over everything in the world viewport.
-	_lights = LightRig.new()
-	_lights.name = "Lights"
+	_lights = _add_layer(LightRig.new(), "Lights", world_view)
 	_lights.game = self
-	_lights.process_mode = Node.PROCESS_MODE_PAUSABLE
-	world_view.add_child(_lights)
 	_lights.set_ambient(mood.ambient)
 	# Route synthesized audio through named buses so the options screen has
 	# something to mix. Master already exists as bus 0.
@@ -194,6 +173,15 @@ func _ready() -> void:
 	_reset_stats()
 	_restore_options()
 	music.play_track("title")
+
+
+## Name `node` and add it under `parent`. World layers are pausable: they freeze
+## with the game while the UI and music keep running.
+func _add_layer(node: Node2D, layer_name: String, parent: Node) -> Node2D:
+	node.name = layer_name
+	node.process_mode = Node.PROCESS_MODE_PAUSABLE
+	parent.add_child(node)
+	return node
 
 
 ## Reapply the saved settings at boot so a relaunch honours them, then let the
@@ -268,9 +256,14 @@ func _reset_stats() -> void:
 		"time": 0.0, "kills": 0, "elites": 0, "damage_dealt": 0.0, "damage_taken": 0.0,
 		"best_streak": 0, "rooms": 0, "rooms_total": 0,
 	}
+	_break_streak()
+
+## Drop the kill streak and its HUD meter.
+func _break_streak() -> void:
 	_streak_kills = 0
 	_streak_t = 0.0
 	_streak_tier = 0
+	ui.hide_streak()
 
 func _process(delta: float) -> void:
 	_atmosphere.global_position = _view_center
@@ -395,9 +388,7 @@ func _tick_streak(delta: float) -> void:
 		return
 	_streak_t -= delta
 	if _streak_t <= 0.0:
-		_streak_kills = 0
-		_streak_tier = 0
-		ui.hide_streak()
+		_break_streak()
 		return
 	ui.set_streak(_streak_kills, _streak_t / Content.STREAK_WINDOW, Content.streak_multiplier(_streak_kills))
 
@@ -442,7 +433,7 @@ func _paint_backdrop(ci: CanvasItem) -> void:
 	# Sky: void above, crypt navy through the arches, warm at the floor line.
 	VFX.draw_vgradient(ci, Rect2(left, top, span, (horizon - top) * 0.6), m.bg_top, m.bg_mid)
 	VFX.draw_vgradient(ci, Rect2(left, top + (horizon - top) * 0.6, span, (horizon - top) * 0.4), m.bg_mid, m.bg_bot)
-	_draw_stars(ci, top, horizon)
+	_draw_stars(ci, horizon)
 	_draw_moon(ci, horizon)
 	# Under-floor pit: the floor line falls away into absolute void.
 	VFX.draw_vgradient(ci, Rect2(left, horizon, span, 320.0), m.bg_bot, m.pit)
@@ -501,7 +492,7 @@ func torch_positions() -> PackedVector2Array:
 	_torch_frame = frame
 	return out
 
-func _draw_stars(ci: CanvasItem, top: float, horizon: float) -> void:
+func _draw_stars(ci: CanvasItem, horizon: float) -> void:
 	var vis := float(mood.stars)
 	if vis <= 0.01:
 		return
@@ -807,8 +798,9 @@ func _draw_fog(ci: CanvasItem, horizon: float) -> void:
 			VFX.draw_ellipse(ci, Vector2(x, yy), rx, ry, col)
 
 # --- Run lifecycle ---
-func _begin_run() -> void:
-	# cleanup
+## Clear every trace of the current run: its closing beat, the camera, the
+## chamber, projectiles, the knight and the run's HUD cards.
+func _teardown_run() -> void:
 	_beat_kind = ""
 	_reset_camera()
 	_clear_room()
@@ -816,11 +808,15 @@ func _begin_run() -> void:
 	if is_instance_valid(player):
 		player.queue_free()
 		player = null
+	ui.hide_boss_bar()
+	ui.hide_streak()
+	ui.hide_banners()
+
+func _begin_run() -> void:
+	_teardown_run()
 	score = 0
 	_run_cells = 0
 	_reset_stats()
-	ui.hide_streak()
-	ui.hide_banners()
 	_seed = randi()
 	run = RunModel.new(_seed)
 	_stats.rooms_total = run.rooms_total()
@@ -874,7 +870,6 @@ func _begin_run() -> void:
 	_advance_room()
 	ui.set_score(score)
 	ui.hide_all_panels()
-	ui.hide_boss_bar()
 	get_tree().paused = false
 	paused = false
 	state = GState.PLAYING
@@ -961,7 +956,7 @@ func _clear_projectiles() -> void:
 			c.queue_free()
 
 # --- Signal handlers ---
-func _on_player_hit(dmg: float, pos: Vector2, heavy: bool) -> void:
+func _on_player_hit(_damage: float, pos: Vector2, heavy: bool) -> void:
 	feedback.impact(pos, Content.PAL.player_accent if player._flame_time > 0.0 else Content.PAL.attack, heavy)
 	feedback.hit_stop(0.065 if heavy else 0.045)
 	feedback.shake(6.0 if heavy else 3.0, 0.14 if heavy else 0.08)
@@ -1101,23 +1096,15 @@ func _on_enemy_died(sc: int, pos: Vector2, tier: int, color: Color) -> void:
 	if sc <= 0:
 		return
 	_register_kill()
-	var mult := Content.streak_multiplier(_streak_kills)
-	score += int(round(float(sc) * mult * _vow_mult))
+	score += int(round(float(sc) * Content.streak_multiplier(_streak_kills) * _vow_mult))
 	ui.set_score(score)
 	_stats.kills += 1
 	if is_instance_valid(player):
 		player.on_enemy_killed()
 	# Award cells (1 per regular enemy; 3 for an elite; 10 for the boss)
-	var cells_gain := 1
-	match tier:
-		1:
-			cells_gain = Content.ELITE_CELLS
-			_stats.elites += 1
-		2:
-			cells_gain = 10
-	cells_gain = _award_cells(cells_gain)
 	match tier:
 		2:
+			_award_cells(10)
 			# The killing blow lands hard; the Warden's own shattering is the payoff.
 			feedback.impact(pos + Vector2(0.0, -30.0), Content.PAL.player_accent, true)
 			feedback.shake(16.0, 0.5)
@@ -1125,13 +1112,16 @@ func _on_enemy_died(sc: int, pos: Vector2, tier: int, color: Color) -> void:
 			feedback.play("die")
 			feedback.play("elite", 0.8)
 		1:
+			_stats.elites += 1
+			var cells := _award_cells(Content.ELITE_CELLS)
 			feedback.flash_death(pos, Content.ELITE_COLOR, true)
 			feedback.shake(9.0, 0.26)
 			feedback.hit_stop(0.09)
 			feedback.play("tear", 0.85)
 			feedback.play("elite")
-			feedback.damage_number(pos + Vector2(0.0, -66.0), 0.0, "elite", "ELITE SLAIN  +%d CELLS" % cells_gain)
+			feedback.damage_number(pos + Vector2(0.0, -66.0), 0.0, "elite", "ELITE SLAIN  +%d CELLS" % cells)
 		_:
+			_award_cells(1)
 			feedback.flash_death(pos, color)
 			feedback.shake(6.0, 0.18)
 			feedback.play("tear")
@@ -1145,10 +1135,7 @@ func _on_room_completed() -> void:
 	# The rift swallows the chamber: mark the descent before the reward opens.
 	feedback.play("rift")
 	# A streak belongs to the chamber it was built in.
-	_streak_kills = 0
-	_streak_t = 0.0
-	_streak_tier = 0
-	ui.hide_streak()
+	_break_streak()
 	if run.is_boss_room():
 		_victory()
 		return
@@ -1230,20 +1217,27 @@ func _finalize_summary() -> void:
 	else:
 		_stats["line"] = Content.EPITAPHS[pick % Content.EPITAPHS.size()]
 
+## Settle the run for its end screen: the result, the cells banked (and the
+## vows kept, on a victory) and the summary, with the run's HUD cards cleared.
+## The state is set first because the epitaph depends on it.
+func _close_run(victory: bool) -> void:
+	state = GState.VICTORY if victory else GState.GAME_OVER
+	var panel := "victory" if victory else "gameover"
+	var vows_kept := _vows.size() if victory else 0
+	_finalize_summary()
+	ui.show_run_cells(_run_cells, panel, vows_kept)
+	ui.show_run_summary(_stats, panel)
+	ui.hide_boss_bar()
+	ui.hide_streak()
+	ui.hide_banners()
+
 func _on_player_died() -> void:
 	# Embers and paper shards, not a burst: the flame is going out.
 	feedback.burst(player.global_position + Vector2(0.0, -28.0), 16, Content.PAL.player_accent, 180.0)
 	feedback.shake(12.0, 0.4)
 	# A toll rather than a hit: the run itself has ended, not just the player.
 	feedback.play("defeat")
-	_finalize_summary()
-	ui.show_run_cells(_run_cells, "gameover")
-	ui.show_run_summary(_stats, "gameover")
-	ui.hide_streak()
-	ui.hide_banners()
-	ui.hide_hint()
-	state = GState.GAME_OVER
-	ui.hide_boss_bar()
+	_close_run(false)
 	# The score drops out under the toll; the title theme returns with the screen.
 	music.play_track("")
 	feedback.slow_motion(0.3, DEATH_BEAT * 0.85)
@@ -1282,7 +1276,7 @@ func _on_boss_shattered(pos: Vector2) -> void:
 	feedback.rumble(0.8, 1.0, 0.6)
 	ui.show_victory_card()
 
-func _on_slam_landed(pos: Vector2, radius: float) -> void:
+func _on_slam_landed(pos: Vector2, _radius: float) -> void:
 	feedback.shake(8.0, 0.22)
 	feedback.burst(pos, 18, Content.PAL.attack, 320.0)
 	feedback.land_dust(pos, 1.4)
@@ -1317,13 +1311,7 @@ func _victory() -> void:
 	# Bonus cells for clearing the run
 	_award_cells(20)
 	Save.add_victory(_vows.size())
-	state = GState.VICTORY
-	ui.hide_boss_bar()
-	ui.hide_streak()
-	ui.hide_banners()
-	_finalize_summary()
-	ui.show_run_cells(_run_cells, "victory", _vows.size())
-	ui.show_run_summary(_stats, "victory")
+	_close_run(true)
 	feedback.play("victory")
 	music.play_track("title")
 	# The knight has won; nothing left in the hall may still hurt them.
@@ -1353,16 +1341,7 @@ func _on_resume() -> void:
 func _on_quit_to_title() -> void:
 	get_tree().paused = false
 	paused = false
-	_beat_kind = ""
-	_reset_camera()
-	_clear_room()
-	_clear_projectiles()
-	if is_instance_valid(player):
-		player.queue_free()
-		player = null
-	ui.hide_boss_bar()
-	ui.hide_streak()
-	ui.hide_banners()
+	_teardown_run()
 	ui.hide_all_panels()
 	ui.show_panel("title")
 	state = GState.TITLE
