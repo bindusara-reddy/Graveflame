@@ -461,7 +461,7 @@ func _test_boss_room_adds() -> void:
 	var deaths: Array = []
 	room.completed.connect(func(): completed[0] += 1)
 	room.cleared.connect(func(_n: String): cleared[0] += 1)
-	room.enemy_died.connect(func(score: int, _pos: Vector2, tier: int, _color: Color): deaths.append([score, tier]))
+	room.enemy_died.connect(func(score: int, _pos: Vector2, tier: int, _color: Color, _kind: String): deaths.append([score, tier]))
 	root.add_child(room)
 	check(room.boss != null and is_instance_valid(room.boss), "boss room spawns its boss")
 	room._on_boss_summon(Content.BOSS_SUMMON_KIND, Vector2(300, Content.FLOOR_Y - 260))

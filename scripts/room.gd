@@ -9,8 +9,8 @@ const Severed := preload("res://scripts/severed.gd")
 signal completed
 signal cleared(room_name: String)
 signal wave_started(current: int, total: int)
-## tier: 0 regular, 1 elite, 2 boss.
-signal enemy_died(score: int, pos: Vector2, tier: int, color: Color)
+## tier: 0 regular, 1 elite, 2 boss. kind names the archetype ("warden" for the boss).
+signal enemy_died(score: int, pos: Vector2, tier: int, color: Color, kind: String)
 signal enemy_damaged(amount: float, pos: Vector2, blocked: bool)
 signal projectile_requested(team: String, pos: Vector2, vel: Vector2, dmg: float, kb: float, pierce: int, life: float, color: Color)
 signal boss_spawned
@@ -264,9 +264,11 @@ func _on_enemy_died(score: int, who: Node) -> void:
 	var tier := 0
 	var pos := Vector2.ZERO
 	var color: Color = Content.PAL.attack
+	var kind := ""
 	if is_instance_valid(who):
 		pos = who.global_position
 		color = who.data.color
+		kind = "warden" if who is Boss else Enemy.telegraph_id(who.kind)
 		if who is Boss:
 			tier = 2
 		elif who.elite:
@@ -275,7 +277,7 @@ func _on_enemy_died(score: int, who: Node) -> void:
 		# fell into the pit or blew itself up leaves nothing to split.
 		if score > 0 and tier < 2 and not who.exploded_out:
 			Severed.spawn(self, who, who._last_hit_dir, int(who.get_instance_id()))
-	emit_signal("enemy_died", score, pos, tier, color)
+	emit_signal("enemy_died", score, pos, tier, color, kind)
 	_clean_dead()
 	if is_boss:
 		# Adds dying mid-fight must never unseal or "clear" the throne room.

@@ -51,6 +51,8 @@ var _queued_lesson := ""
 var _learned_lessons: Array = []
 # Run statistics shown on the end screens.
 var _stats: Dictionary = {}
+## damage_taken when the current chamber began, to tell an untouched clear.
+var _chamber_damage_mark := 0.0
 var _vignette_rect: ColorRect
 ## The vignette's shader: retinted as health runs low, de-grained for reduced flash.
 var _vignette_mat: ShaderMaterial
@@ -273,9 +275,11 @@ func _ensure_audio_bus(bus_name: String) -> void:
 	AudioServer.set_bus_send(idx, "Master")
 
 func _reset_stats() -> void:
+	# rooms counts chambers cleared, so a death at the throne never reads as a full clear.
 	_stats = {
 		"time": 0.0, "kills": 0, "elites": 0, "damage_dealt": 0.0, "damage_taken": 0.0,
-		"best_streak": 0, "rooms": 0, "rooms_total": 0,
+		"best_streak": 0, "rooms": 0, "rooms_total": 0, "kills_by_kind": {},
+		"parries": 0, "perfect_parries": 0, "ripostes": 0, "untouched_chambers": 0,
 	}
 	_break_streak()
 
@@ -946,6 +950,7 @@ func _advance_room() -> void:
 	var entry := room.get_entry_point()
 	player.respawn_at(entry)
 	player.suppress_gameplay_input()
+	_chamber_damage_mark = float(_stats.damage_taken)
 	# Snap across the rift instead of briefly lerping from the previous exit.
 	feedback.camera.global_position = _camera_target_for(entry)
 	# UI
@@ -960,7 +965,6 @@ func _advance_room() -> void:
 	else:
 		# The throne room is one continuous fight, so it carries no wave counter.
 		ui.hide_wave()
-	_stats.rooms = run.room_index + 1
 
 func _camera_target_for(pos: Vector2) -> Vector2:
 	var target := pos
@@ -1046,6 +1050,7 @@ func _on_pyre_burst(pos: Vector2, radius: float) -> void:
 	feedback.play("pyre")
 
 func _on_player_action(kind: String, pos: Vector2) -> void:
+	_tally_action(kind)
 	match kind:
 		"swing":
 			var heavy_swing := player.is_finisher()
@@ -1103,6 +1108,14 @@ func _on_player_action(kind: String, pos: Vector2) -> void:
 			feedback.blast(pos, Content.THORNS_RADIUS * 0.8)
 		_: pass
 
+## Counts the knight's feats for the run's stats. Kept out of the feedback
+## match above so a feat is counted once, however it is voiced.
+func _tally_action(kind: String) -> void:
+	if kind == "perfect_parry":
+		_stats.perfect_parries += 1
+	elif kind == "swing" and player._riposte_attack:
+		_stats.ripostes += 1
+
 func _on_player_projectile(team: String, pos: Vector2, vel: Vector2, dmg: float, kb: float, pierce: int, life: float, color: Color) -> void:
 	_spawn_projectile(team, pos, vel, dmg, kb, pierce, life, color)
 	feedback.play("shoot")
@@ -1146,8 +1159,8 @@ func _bank_cells() -> void:
 	ui.set_cells(Save.add_cells(_unbanked_cells))
 	_unbanked_cells = 0
 
-## tier: 0 regular, 1 elite, 2 boss.
-func _on_enemy_died(sc: int, pos: Vector2, tier: int, color: Color) -> void:
+## tier: 0 regular, 1 elite, 2 boss. kind names the archetype ("warden" for the boss).
+func _on_enemy_died(sc: int, pos: Vector2, tier: int, color: Color, kind: String) -> void:
 	# Falling out of a pit is cleanup, not a player kill or a cell reward.
 	if sc <= 0:
 		return
@@ -1155,6 +1168,7 @@ func _on_enemy_died(sc: int, pos: Vector2, tier: int, color: Color) -> void:
 	score += int(round(float(sc) * Content.streak_multiplier(_streak_kills) * _vow_mult))
 	ui.set_score(score)
 	_stats.kills += 1
+	_stats.kills_by_kind[kind] = int(_stats.kills_by_kind.get(kind, 0)) + 1
 	if is_instance_valid(player):
 		player.on_enemy_killed()
 	# Award cells (1 per regular enemy; 3 for an elite; 10 for the boss)
@@ -1189,6 +1203,9 @@ func _on_room_cleared(room_name: String) -> void:
 	ui.show_room_clear(room_name)
 
 func _on_room_completed() -> void:
+	_stats.rooms = run.room_index + 1
+	if is_equal_approx(float(_stats.damage_taken), _chamber_damage_mark):
+		_stats.untouched_chambers += 1
 	ui.hide_room_clear()
 	# The rift swallows the chamber: mark the descent before the reward opens.
 	feedback.play_persistent("rift")
@@ -1262,15 +1279,20 @@ func _enter_next_chamber(flask_refill: int) -> void:
 ## Fold the run's headline result into the stats the summary screen renders.
 ## Called before either end screen so death and victory report identically.
 func _finalize_summary() -> void:
+	var won := state == GState.VICTORY
 	var previous_best := Save.get_best_score()
-	Save.set_best_score(score)
-	var best := Save.get_best_score()
-	ui.set_best(best)
 	_stats["score"] = score
-	_stats["best"] = best
+	_stats["best"] = maxi(score, previous_best)
 	_stats["new_best"] = score > previous_best
+	ui.set_best(_stats.best)
+	# The ledger's one write for this descent; it names the records it beat.
+	_stats["broken"] = Save.record_run({
+		"won": won, "seed": _seed, "room": _stats.rooms, "score": score,
+		"time": snappedf(_stats.time, 0.1), "kills": _stats.kills, "cells": _run_cells,
+		"streak": _stats.best_streak, "heat": _vows.size(), "boons": run.taken.keys(),
+	}).broken
 	var pick := absi(_seed) + int(_stats.kills)
-	if state == GState.VICTORY:
+	if won:
 		_stats["line"] = Content.VICTORY_LINES[pick % Content.VICTORY_LINES.size()]
 	elif run != null and run.is_boss_room():
 		_stats["line"] = Content.EPITAPH_THRONE
@@ -1350,6 +1372,7 @@ func _on_slam_landed(pos: Vector2, _radius: float) -> void:
 
 func _on_parried(pos: Vector2, success: bool) -> void:
 	if success:
+		_stats.parries += 1
 		feedback.parry_flash(pos)
 		feedback.hit_stop(0.065)
 		feedback.shake(4.0, 0.1)

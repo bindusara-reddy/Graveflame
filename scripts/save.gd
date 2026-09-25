@@ -1,11 +1,14 @@
 class_name Save
 extends RefCounted
 ## Persistent save: cells (meta currency), best score, purchased meta upgrades,
-## options and bindings. Stored as JSON at user://graveflame_save.json. Dead Cells-style meta progression.
+## options, bindings and the ledger of finished descents. Stored as JSON at
+## user://graveflame_save.json. Dead Cells-style meta progression.
 ## The parsed file is cached, so reads never touch the disk, and every write is
 ## atomic, so a crash mid-write can never wipe progress.
 
 const SAVE_PATH := "user://graveflame_save.json"
+## Finished descents the ledger keeps, newest first.
+const HISTORY_CAP := 12
 ## Active file. Tests and tooling point this at a scratch file so simulated runs
 ## never touch the player's real progress. Pointing it elsewhere drops the cache.
 static var path := SAVE_PATH:
@@ -94,11 +97,6 @@ static func get_cells() -> int:
 
 static func get_best_score() -> int:
 	return int(_data()["best_score"])
-
-static func set_best_score(s: int) -> void:
-	if s > get_best_score():
-		_data()["best_score"] = s
-		_write()
 
 ## Player options. Volumes are linear 0..1; everything else is a bool. These
 ## live in the same save file so accessibility choices survive a relaunch.
@@ -234,3 +232,49 @@ static func add_victory(vows_kept: int) -> void:
 static func vows_unlocked() -> bool:
 	return get_victories() > 0
 
+## Fold one finished descent into the ledger with a single write: lifetime
+## totals, personal records, the best score, a short history and the boons that
+## won. `summary` carries won, seed, room (chambers cleared), score, time,
+## kills, cells, streak, heat (vows sworn) and boons (ids taken). Returns
+## {broken: [record keys]}, the records this run beat, so the end screen can
+## call them out; a record set for the first time beats nothing.
+static func record_run(summary: Dictionary) -> Dictionary:
+	var won := bool(summary.won)
+	var totals: Dictionary = _slot("stats", {})
+	var tally := {
+		"runs": 1, "wins": int(won), "deaths": int(not won), "kills": summary.kills,
+		"cells_earned": summary.cells, "seconds": summary.time,
+	}
+	for key in tally:
+		totals[key] = totals.get(key, 0) + tally[key]
+	var candidates := {"best_streak": summary.streak, "deepest_room": summary.room}
+	if won:
+		candidates.merge({"fastest_win": summary.time, "best_win_score": summary.score, "best_heat": summary.heat})
+	var records: Dictionary = _slot("records", {})
+	var broken: Array = []
+	for key in candidates:
+		var value := float(candidates[key])
+		if _improves(records, key, value):
+			if records.has(key):
+				broken.append(key)
+			records[key] = value
+	_data()["best_score"] = maxi(get_best_score(), int(summary.score))
+	var history: Array = _slot("history", [])
+	var entry := summary.duplicate()
+	entry["date"] = Time.get_date_string_from_system()
+	history.push_front(entry)
+	history.resize(mini(history.size(), HISTORY_CAP))
+	if won:
+		var boon_wins: Dictionary = _slot("boon_wins", {})
+		for id in summary.boons:
+			boon_wins[id] = int(boon_wins.get(id, 0)) + 1
+	_write()
+	return {"broken": broken}
+
+## Whether `value` improves on the stored record `key`. Every record is a
+## high-water mark except the fastest win, which improves downward.
+static func _improves(records: Dictionary, key: String, value: float) -> bool:
+	if not records.has(key):
+		return true
+	var old := float(records[key])
+	return value < old if key == "fastest_win" else value > old
