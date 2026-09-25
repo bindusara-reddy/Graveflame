@@ -154,46 +154,40 @@ func _finish() -> void:
 	quit(0 if passed else 1)
 
 # --- "finale" probe -------------------------------------------------------------
-var _theatre := {}
+var _sky: FinaleSky
+var _sky_layer: CanvasLayer
+var _burn: ShaderMaterial
+var _risen := 0
 
-## The ending's theatre at more than its real peak: the burn shader mid-pass on
-## the live throne room while every theatre piece is up at once (all footlights
-## and vow sockets lit, a full standing house, the spot, the whole playbill).
-## Gameplay is frozen as it is under the real ending.
+## The ending's sky at more than its real peak: the burn shader mid-pass on the
+## live throne room over the whole night (every star, the moon and its halo,
+## the moonlight) while the dawn spill repaints every frame and a fallen flame
+## leaves the floor every half second, so a dozen are always climbing and
+## stars keep settling. Gameplay is frozen as it is under the real ending.
 func _stage_finale() -> void:
 	game.state = Game.GState.VICTORY
 	game.player.process_mode = Node.PROCESS_MODE_DISABLED
 	game.room.boss.process_mode = Node.PROCESS_MODE_DISABLED
-	var bill := FinaleStage.Playbill.new()
-	_theatre = {"stage": FinaleStage.new(), "front": FinaleStage.FinaleFront.new(), "bill": bill, "burn": FinaleStage.burn_away_material(), "layers": []}
-	for piece in [[-1, _theatre.stage], [11, _theatre.front], [11, bill], [45, FinaleStage.PlaybillText.new(bill)]]:
-		var layer := CanvasLayer.new()
-		layer.layer = piece[0]
-		layer.add_child(piece[1])
-		game.add_child(layer)
-		if piece[0] != 45:
-			_theatre.layers.append(layer)
-	_theatre.front.lamps.fill(1.0)
-	_theatre.front.vow_lit.fill(true)
-	_theatre.front.house_count = 23
-	_theatre.front.rise = 1.0
-	_theatre.front.spot = 1.0
-	bill.rows = ["THE FALLEN — 16 knights. Each of them was you.", "THE EMBER WARDEN — Keeper of a cold throne. For now.",
-		"THE KNIGHT — Who carried their flames.", {"sigils": ["vitality", "swift", "cindertrail", "flareparry", "phoenix", "brand", "skyfall", "thorns"]},
-		"SWORN — Embers · Thirst · the Gilded · Haste · the Pyre", "THE HOUSE — Twenty-three flames, standing."]
-	bill.revealed = bill.rows.size()
-	bill.drop = 1.0
-	game._world_container.material = _theatre.burn
+	_sky_layer = CanvasLayer.new()
+	_sky_layer.layer = -1
+	game.add_child(_sky_layer)
+	_sky = FinaleSky.new()
+	_sky.reveal = 1.0
+	_sky_layer.add_child(_sky)
+	_burn = FinaleSky.burn_away_material()
+	game._world_container.material = _burn
 
-## The burn front crawls and the traveler runs (both repaint every frame, with
-## the back wall still showing through), while the camera holds the theatre
-## framing with the layers synced as the director does.
+## The burn front crawls, the dawn rises and falls, flames keep rising, and
+## the camera tilts up and down the shaft with the sky's layer synced as the
+## director does.
 func _step_finale(t: float) -> void:
-	_theatre.stage.closed = 0.3 + 0.3 * sin(t)
-	_theatre.burn.set_shader_parameter("progress", 0.45 + 0.25 * sin(t * 0.7))
+	_burn.set_shader_parameter("progress", 0.45 + 0.25 * sin(t * 0.7))
+	_sky.dawn = 0.3 + 0.3 * sin(t)
+	while _risen < int(t * 2.0):
+		_risen += 1
+		_sky.add_rising(Vector2(420.0 + 40.0 * float(_risen % 12), Content.FLOOR_Y - 40.0), 0.0)
 	var cam := game.feedback.camera
-	cam.global_position = Vector2(640, 300)
-	cam.zoom = Vector2.ONE * 0.86
+	cam.global_position = Vector2(640, 390).lerp(_sky.well_top(), 0.5 - 0.5 * cos(t * 0.5))
+	cam.zoom = Vector2.ONE
 	cam.force_update_scroll()
-	for layer in _theatre.layers:
-		layer.transform = game.world_view.canvas_transform
+	_sky_layer.transform = game.world_view.canvas_transform
