@@ -137,48 +137,11 @@ func _ready() -> void:
 		if data.is_empty():
 			data = Content.ENEMY[Kind.STALKER]
 		return
-	collision_layer = Content.L_ENEMY_BODY
-	collision_mask = Content.L_WORLD
 	if data.is_empty():
 		data = Content.ENEMY[Kind.STALKER]
 		hp_max = float(data.hp)
 		hp = hp_max
-	var bs := CollisionShape2D.new()
-	var rect := RectangleShape2D.new()
-	rect.size = Vector2(float(data.w), float(data.h))
-	bs.shape = rect
-	add_child(bs)
-	# Hurtbox
-	_hurtbox = Area2D.new()
-	_hurtbox.collision_layer = Content.L_ENEMY_HURT
-	_hurtbox.collision_mask = 0
-	var hs := CollisionShape2D.new()
-	var hrect := RectangleShape2D.new()
-	hrect.size = Vector2(float(data.w), float(data.h))
-	hs.shape = hrect
-	_hurtbox.add_child(hs)
-	_hurtbox.set_meta("team", "enemy")
-	_hurtbox.set_meta("owner", self)
-	_hurtbox.set_meta("owner_id", _owner_id)
-	_hurtbox.add_to_group("enemy_hurtbox")
-	add_child(_hurtbox)
-	# Melee attack hitbox (used by stalker/hopper/brute)
-	_atk_area = Area2D.new()
-	_atk_area.collision_layer = Content.L_ENEMY_ATK
-	_atk_area.collision_mask = Content.L_PLAYER_HURT
-	_atk_area.monitoring = false
-	_atk_shape = CollisionShape2D.new()
-	var arect := RectangleShape2D.new()
-	arect.size = Vector2(float(data.w) + 40.0, float(data.h) + 10.0)
-	_atk_shape.shape = arect
-	_atk_shape.disabled = true
-	_atk_area.add_child(_atk_shape)
-	_atk_area.set_meta("team", "enemy")
-	_atk_area.set_meta("owner", self)
-	_atk_area.set_meta("owner_id", _owner_id)
-	_atk_area.set_meta("attack_kind", "melee")
-	_atk_area.set_meta("attack_active", false)
-	add_child(_atk_area)
+	_build_bodies(Vector2(float(data.w), float(data.h)), Vector2(40.0, 10.0))
 	if kind == Kind.WISP or kind == Kind.CROW:
 		_wisp_y = global_position.y
 		collision_mask = 0  # flyers ignore the world
@@ -191,6 +154,72 @@ func _ready() -> void:
 		add_child(_ledge_ray)
 	state = EState.SEEK
 	_spawn_anim = 0.4
+
+## Body shape, hurtbox and melee box shared by every creature, the Warden
+## included; `reach` is how far the melee box outgrows the body. Each area is
+## fully configured before it enters the tree, so none is ever live half-built.
+func _build_bodies(size: Vector2, reach: Vector2) -> void:
+	collision_layer = Content.L_ENEMY_BODY
+	collision_mask = Content.L_WORLD
+	add_child(Content.rect_shape(size))
+	_hurtbox = _tagged_area(Content.L_ENEMY_HURT, 0, Content.rect_shape(size))
+	_hurtbox.add_to_group("enemy_hurtbox")
+	add_child(_hurtbox)
+	_atk_shape = Content.rect_shape(size + reach)
+	_atk_shape.disabled = true
+	_atk_area = _tagged_area(Content.L_ENEMY_ATK, Content.L_PLAYER_HURT, _atk_shape)
+	_atk_area.monitoring = false
+	_atk_area.set_meta("attack_kind", "melee")
+	_atk_area.set_meta("attack_active", false)
+	add_child(_atk_area)
+
+## An unparented Area2D holding `shape`, tagged with the team and owner metas
+## the knight's blade and parry read to tell who they touched.
+func _tagged_area(layer: int, mask: int, shape: CollisionShape2D) -> Area2D:
+	var area := Area2D.new()
+	area.collision_layer = layer
+	area.collision_mask = mask
+	area.add_child(shape)
+	area.set_meta("team", "enemy")
+	area.set_meta("owner", self)
+	area.set_meta("owner_id", _owner_id)
+	return area
+
+## Open the melee box `front_offset` ahead of the body for a fresh swing.
+func _arm(front_offset: float) -> void:
+	_atk_hit = false
+	_atk_shape.position = Vector2(facing * front_offset, 0.0)
+	_atk_shape.disabled = false
+	_atk_area.monitoring = true
+	_atk_area.set_meta("attack_active", true)
+
+## Close the melee box. The shape is disabled deferred so this is safe inside a
+## physics callback; attack_active drops at once, which the knight's parry reads.
+func _disarm() -> void:
+	_atk_shape.set_deferred("disabled", true)
+	_atk_area.monitoring = false
+	_atk_area.set_meta("attack_active", false)
+
+## Land this swing on the first damageable non-enemy owner the melee box
+## overlaps. A swing hits at most once.
+func _strike_overlaps(dmg: float, dir: Vector2, knock: float) -> void:
+	if _atk_hit:
+		return
+	for area in _atk_area.get_overlapping_areas():
+		if not is_instance_valid(area) or area.get_meta("team") == "enemy":
+			continue
+		var target = area.get_meta("owner")
+		if target != null and is_instance_valid(target) and target.has_method("take_damage"):
+			target.take_damage(dmg, dir, knock)
+			_atk_hit = true
+			return
+
+## Every attack ends the same way: melee box closed, a rest, then the cooldown.
+func _enter_recover() -> void:
+	_disarm()
+	state = EState.RECOVER
+	st_timer = float(data.recover)
+	cd = float(data.cd)
 
 func _physics_process(delta: float) -> void:
 	if dead: return
@@ -341,20 +370,14 @@ func _step_windup(delta: float) -> void:
 	if st_timer <= 0.0:
 		if kind == Kind.WISP:
 			_wisp_shoot()
-			state = EState.RECOVER
-			st_timer = float(data.recover)
-			cd = float(data.cd)
+			_enter_recover()
 		elif kind == Kind.BOMBER:
 			# fuse ended through st_timer path (shouldn't happen, but explode)
 			_do_explosion()
 		else:
 			state = EState.ATTACK
 			st_timer = float(data.active) if data.has("active") else 0.18
-			_atk_hit = false
-			_atk_shape.position = Vector2(facing * (float(data.w) * 0.5 + 20.0), 0.0)
-			_atk_shape.disabled = false
-			_atk_area.monitoring = true
-			_atk_area.set_meta("attack_active", true)
+			_arm(float(data.w) * 0.5 + 20.0)
 
 ## The dive: a straight line at where the knight stood when the shriek ended.
 func _begin_dive() -> void:
@@ -367,31 +390,15 @@ func _begin_dive() -> void:
 	state = EState.ATTACK
 	velocity = aim * float(data.get("dive_speed", 720.0))
 	st_timer = 0.9
-	_atk_hit = false
-	_atk_shape.position = Vector2.ZERO
-	_atk_shape.disabled = false
-	_atk_area.monitoring = true
-	_atk_area.set_meta("attack_active", true)
+	_arm(0.0)
 
 func _step_dive(delta: float) -> void:
 	global_position += velocity * delta
 	st_timer -= delta
-	if not _atk_hit:
-		for area in _atk_area.get_overlapping_areas():
-			if not is_instance_valid(area) or area.get_meta("team") == "enemy": continue
-			var tgt = area.get_meta("owner")
-			if tgt != null and is_instance_valid(tgt) and tgt.has_method("take_damage"):
-				tgt.take_damage(attack_damage(), Vector2(signf(velocity.x), -0.3), float(data.knock))
-				_atk_hit = true
-				break
+	_strike_overlaps(attack_damage(), Vector2(signf(velocity.x), -0.3), float(data.knock))
 	var floor_hit := global_position.y >= Content.FLOOR_Y - float(data.h) * 0.5 - 6.0 and velocity.y > 0.0
 	if st_timer <= 0.0 or _atk_hit or floor_hit:
-		_atk_shape.disabled = true
-		_atk_area.monitoring = false
-		_atk_area.set_meta("attack_active", false)
-		state = EState.RECOVER
-		st_timer = float(data.recover)
-		cd = float(data.cd)
+		_enter_recover()
 		# Pull out of the dive and climb away.
 		velocity = Vector2(velocity.x * 0.35, -300.0)
 
@@ -403,22 +410,9 @@ func _step_attack(delta: float) -> void:
 	_move_x(facing * float(data.speed) * 0.3, delta)
 	move_and_slide()
 	st_timer -= delta
-	if not _atk_hit:
-		for area in _atk_area.get_overlapping_areas():
-			if not is_instance_valid(area): continue
-			if area.get_meta("team") == "enemy": continue
-			var tgt = area.get_meta("owner")
-			if tgt != null and is_instance_valid(tgt) and tgt.has_method("take_damage"):
-				tgt.take_damage(attack_damage(), Vector2(facing, -0.2), float(data.knock))
-				_atk_hit = true
-				break
+	_strike_overlaps(attack_damage(), Vector2(facing, -0.2), float(data.knock))
 	if st_timer <= 0.0:
-		_atk_shape.disabled = true
-		_atk_area.monitoring = false
-		_atk_area.set_meta("attack_active", false)
-		state = EState.RECOVER
-		st_timer = float(data.recover)
-		cd = float(data.cd)
+		_enter_recover()
 
 func _wisp_shoot() -> void:
 	var player = _get_player()
@@ -535,9 +529,7 @@ func _tick_status(delta: float) -> void:
 			_die()
 
 func on_parried(knock_dir: Vector2) -> void:
-	_atk_shape.set_deferred("disabled", true)
-	_atk_area.monitoring = false
-	_atk_area.set_meta("attack_active", false)
+	_disarm()
 	state = EState.STAGGER
 	stagger_t = 0.4
 	velocity = knock_dir.normalized() * 260.0
@@ -567,9 +559,7 @@ func _die(award_reward: bool = true) -> void:
 	if dead: return
 	dead = true
 	state = EState.DEAD
-	_atk_shape.disabled = true
-	_atk_area.monitoring = false
-	_atk_area.set_meta("attack_active", false)
+	_disarm()
 	_hurtbox.set_deferred("monitorable", false)
 	if award_reward:
 		_pyre_detonate()

@@ -19,11 +19,9 @@ func _ready() -> void:
 	set_meta("owner", self)
 	set_meta("owner_id", get_instance_id())
 	add_to_group("breakable_prop")
-	_shape = CollisionShape2D.new()
-	var rect := RectangleShape2D.new()
-	rect.size = Vector2(30.0, 48.0 if kind == 1 else 38.0)
-	_shape.shape = rect
-	_shape.position.y = -rect.size.y * 0.5
+	var height := 48.0 if kind == 1 else 38.0
+	_shape = Content.rect_shape(Vector2(30.0, height))
+	_shape.position.y = -height * 0.5
 	add_child(_shape)
 	set_process(kind == 1)
 

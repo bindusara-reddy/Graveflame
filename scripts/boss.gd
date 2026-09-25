@@ -41,42 +41,7 @@ func _ready() -> void:
 	hp = max_hp
 	hp_max = max_hp
 	_owner_id = get_instance_id()
-	collision_layer = Content.L_ENEMY_BODY
-	collision_mask = Content.L_WORLD
-	var bs := CollisionShape2D.new()
-	var rect := RectangleShape2D.new()
-	rect.size = Vector2(Content.BOSS_W, Content.BOSS_H)
-	bs.shape = rect
-	add_child(bs)
-	_hurtbox = Area2D.new()
-	_hurtbox.collision_layer = Content.L_ENEMY_HURT
-	_hurtbox.collision_mask = 0
-	var hs := CollisionShape2D.new()
-	var hrect := RectangleShape2D.new()
-	hrect.size = Vector2(Content.BOSS_W, Content.BOSS_H)
-	hs.shape = hrect
-	_hurtbox.add_child(hs)
-	_hurtbox.set_meta("team", "enemy")
-	_hurtbox.set_meta("owner", self)
-	_hurtbox.set_meta("owner_id", _owner_id)
-	_hurtbox.add_to_group("enemy_hurtbox")
-	add_child(_hurtbox)
-	_atk_area = Area2D.new()
-	_atk_area.collision_layer = Content.L_ENEMY_ATK
-	_atk_area.collision_mask = Content.L_PLAYER_HURT
-	_atk_area.monitoring = false
-	_atk_shape = CollisionShape2D.new()
-	var arect := RectangleShape2D.new()
-	arect.size = Vector2(Content.BOSS_W + 60.0, Content.BOSS_H + 20.0)
-	_atk_shape.shape = arect
-	_atk_shape.disabled = true
-	_atk_area.add_child(_atk_shape)
-	_atk_area.set_meta("team", "enemy")
-	_atk_area.set_meta("owner", self)
-	_atk_area.set_meta("owner_id", _owner_id)
-	_atk_area.set_meta("attack_kind", "melee")
-	_atk_area.set_meta("attack_active", false)
-	add_child(_atk_area)
+	_build_bodies(Vector2(Content.BOSS_W, Content.BOSS_H), Vector2(60.0, 20.0))
 	phase = BPhase.INTRO
 	state = EState.SEEK
 
@@ -117,11 +82,6 @@ func _physics_process(delta: float) -> void:
 		EState.RECOVER: _boss_recover(delta)
 		EState.STAGGER: _step_stagger(delta)
 		EState.DEAD: pass
-
-func _disarm() -> void:
-	_atk_shape.set_deferred("disabled", true)
-	_atk_area.monitoring = false
-	_atk_area.set_meta("attack_active", false)
 
 func _check_phase2() -> void:
 	if not _phase2_triggered and hp <= max_hp * Content.BOSS_PHASE2_AT:
@@ -216,8 +176,9 @@ func _begin_charge() -> void:
 	_charge_dir = facing
 
 func _boss_attack(delta: float) -> void:
+	var charge := action_idx == Action.CHARGE
 	velocity.y += Content.GRAVITY * delta
-	if action_idx == Action.CHARGE:
+	if charge:
 		# Locked heading: the telegraph promised this line, so it never tracks the player.
 		_charge_t -= delta
 		velocity.x = _charge_dir * Content.BOSS_CHARGE_SPEED
@@ -230,24 +191,17 @@ func _boss_attack(delta: float) -> void:
 	if action_idx == Action.SLAM and is_on_floor() and not _slam_wave_emitted:
 		_slam_wave_emitted = true
 		_emit_slam_waves()
-	if not _atk_hit:
-		for area in _atk_area.get_overlapping_areas():
-			if not is_instance_valid(area): continue
-			if area.get_meta("team") == "enemy": continue
-			var tgt = area.get_meta("owner")
-			if tgt != null and is_instance_valid(tgt) and tgt.has_method("take_damage"):
-				var dmg := Content.BOSS_DAMAGE * (1.15 if action_idx == Action.CHARGE else 1.0) * Enemy.vow_damage()
-				tgt.take_damage(dmg, Vector2(facing, -0.3), 480.0 if action_idx == Action.CHARGE else 420.0)
-				_atk_hit = true
-				break
+	var dmg := Content.BOSS_DAMAGE * (1.15 if charge else 1.0) * Enemy.vow_damage()
+	var knock := 480.0 if charge else 420.0
+	_strike_overlaps(dmg, Vector2(facing, -0.3), knock)
 	var finished := st_timer <= 0.0
-	if action_idx == Action.CHARGE:
+	if charge:
 		finished = _charge_t <= 0.0
 	if finished:
 		_disarm()
 		velocity.x *= 0.2
 		state = EState.RECOVER
-		if action_idx == Action.CHARGE:
+		if charge:
 			st_timer = 0.55 if phase == BPhase.TWO else 0.8
 		else:
 			st_timer = 0.5 if phase == BPhase.TWO else 0.7
@@ -263,13 +217,6 @@ func _step_windup(delta: float) -> void:
 			Action.FAN: _do_fan()
 			Action.SLAM: _do_slam()
 			Action.CHARGE: _do_charge()
-
-func _arm(front_offset: float) -> void:
-	_atk_hit = false
-	_atk_shape.position = Vector2(facing * front_offset, 0.0)
-	_atk_shape.disabled = false
-	_atk_area.monitoring = true
-	_atk_area.set_meta("attack_active", true)
 
 func _do_lunge() -> void:
 	state = EState.ATTACK

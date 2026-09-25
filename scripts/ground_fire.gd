@@ -16,10 +16,7 @@ func _ready() -> void:
 	collision_mask = Content.L_ENEMY_HURT
 	monitoring = true
 	monitorable = false
-	var shape := CollisionShape2D.new()
-	var rect := RectangleShape2D.new()
-	rect.size = Vector2(WIDTH, 22.0)
-	shape.shape = rect
+	var shape := Content.rect_shape(Vector2(WIDTH, 22.0))
 	shape.position = Vector2(0.0, -11.0)
 	add_child(shape)
 	material = VFX.unshaded_material()

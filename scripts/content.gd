@@ -12,6 +12,14 @@ const L_PLAYER_ATK := 1 << 5
 const L_ENEMY_ATK := 1 << 6
 const L_TRIGGER := 1 << 7
 
+## A collision shape holding a fresh rectangle of `size`; callers position it.
+static func rect_shape(size: Vector2) -> CollisionShape2D:
+	var rect := RectangleShape2D.new()
+	rect.size = size
+	var shape := CollisionShape2D.new()
+	shape.shape = rect
+	return shape
+
 # --- World / camera ---
 const VIEW_W := 1280
 const VIEW_H := 720
