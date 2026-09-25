@@ -490,6 +490,10 @@ func light_points() -> Array:
 	for prop in props:
 		if is_instance_valid(prop) and prop.flame_height() > 0.0 and not prop.broken:
 			out.append({ "pos": prop.global_position + Vector2(0.0, -prop.flame_height()), "radius": 72.0, "color": Color("ffac67"), "alpha": 0.16, "rate": 8.0, "phase": prop.position.x })
+	# Grave flames come last, so they glow without taking the chamber's PointLights.
+	for grave: Array in GRAVES.get(tag, []):
+		if not grave[1]:
+			out.append({ "pos": Vector2(grave[0], Content.FLOOR_Y) + GRAVE_FLAME, "radius": 46.0, "color": torch, "alpha": 0.16, "rate": 9.0, "phase": grave[0] })
 	_light_points_cache = out.filter(func(lp: Dictionary) -> bool: return _clear_of_rifts(lp.pos))
 	_light_points_dirty = false
 	return _light_points_cache
@@ -1031,6 +1035,54 @@ func _stain(base: Vector2, w: float, color: Color) -> void:
 	VFX.draw_ellipse(self, base + Vector2(0.0, -1.0), w * 0.5, 4.0, color)
 	VFX.draw_ellipse(self, base + Vector2(w * 0.2, -1.0), w * 0.22, 2.5, color)
 
+## Knight graves in the crypt chambers, [x, open] along the floor: the keep
+## lights a flame on each, and the first chamber keeps the one this knight got
+## up from. Their flames glow in the light layer too (see light_points).
+const GRAVES := {
+	"intro": [[-12.0, false], [40.0, false], [100.0, true]],
+	"tiers": [[590.0, false], [650.0, false]],
+	"arena": [[300.0, false], [364.0, false], [428.0, false]],
+}
+## Where a grave's flame burns, from the grave's foot.
+const GRAVE_FLAME := Vector2(15.0, -12.0)
+
+## A headstone, feet at the origin: a slab with a rounded head.
+const GRAVE_STONE := [
+	Vector2(-11, 0), Vector2(-11, -22), Vector2(-9.5, -27.5), Vector2(-5.5, -31.5), Vector2(0, -33),
+	Vector2(5.5, -31.5), Vector2(9.5, -27.5), Vector2(11, -22), Vector2(11, 0),
+]
+
+## A knight's grave in the crypt: a headstone cut with the knight's crowned
+## mask, a low mound, and the small flame the keep lights on every one. The
+## `open` grave is the one this knight got up from (the first chamber's): dug
+## out from inside, its stone knocked askew and its cup cold, because the
+## flame walked away in the knight.
+func _grave(base: Vector2, t: float, m: Dictionary, k: int, open := false) -> void:
+	if not _clear_of_rifts(base):
+		return
+	var earth := (m.wall as Color).darkened(0.3)
+	var xf := Transform2D(-0.32 if open else 0.0, base + (Vector2(-9.0, 2.0) if open else Vector2.ZERO))
+	var slab: PackedVector2Array = xf * PackedVector2Array(GRAVE_STONE)
+	VFX.draw_shaded_polygon(self, slab, (m.stone as Color).lightened(0.14))
+	VFX.draw_rim(self, slab, 1.0, 0.5, m.torch)
+	var cut := Color(VFX.VOID, 0.6)
+	draw_circle(xf * Vector2(0.0, -17.0), 4.0, cut)
+	for i in range(4):
+		draw_line(xf * Vector2(-4.5 + 3.0 * float(i), -22.0), xf * Vector2(-4.5 + 3.0 * float(i), -27.0 + absf(1.5 - float(i))), cut, 1.5)
+	var cup := base + Vector2(GRAVE_FLAME.x, 0.0)
+	var iron := Color("2a2430")
+	if open:
+		# The hollow it climbed out of, the spoil thrown to either side, the cup kicked over.
+		VFX.draw_ellipse(self, base + Vector2(4.0, -1.0), 20.0, 4.0, VFX.VOID)
+		for side: float in [-1.0, 1.0]:
+			var heap := base + Vector2(4.0 + side * 22.0, 0.0)
+			draw_colored_polygon(PackedVector2Array([heap + Vector2(-9.0, 0.0), heap + Vector2(-2.0, -7.0), heap + Vector2(6.0, -3.0), heap + Vector2(9.0, 0.0)]), earth)
+		draw_colored_polygon(PackedVector2Array([cup + Vector2(4.0, -1.0), cup + Vector2(4.0, -9.0), cup + Vector2(9.0, -7.0), cup + Vector2(9.0, -3.0)]), iron)
+		return
+	draw_colored_polygon(PackedVector2Array([base + Vector2(-20.0, 0.0), base + Vector2(-13.0, -5.0), base + Vector2(2.0, -7.0), base + Vector2(15.0, -4.0), base + Vector2(21.0, 0.0)]), earth)
+	draw_colored_polygon(PackedVector2Array([cup + Vector2(-4.0, -6.0), cup + Vector2(4.0, -6.0), cup + Vector2(2.5, 0.0), cup + Vector2(-2.5, 0.0)]), iron)
+	VFX.draw_flame(self, cup + Vector2(0.0, -6.0), 12.0, 6.0, t, float(k) * 1.9, m.torch, VFX.GOLD)
+
 func _fallen_blade(base: Vector2) -> void:
 	if not _clear_of_rifts(base):
 		return
@@ -1074,6 +1126,87 @@ func _draw_set_piece(ci: CanvasItem) -> void:
 				PackedColorArray([Color(day, 0.05), Color(day, 0.05), Color(day, 0.0), Color(day, 0.0)]))
 			ci.draw_circle(Vector2(640.0, -120.0), 60.0, Color(day, 0.08))
 			ci.draw_circle(Vector2(640.0, -120.0), 40.0, Color(day, 0.5))
+			_frieze(ci, -182.0, fy - 160.0, m)
+		"crossfire":
+			_frieze(ci, -192.0, fy - 130.0, m)
+
+## The ashpit frieze's figure as two paper cut-outs with matching points, feet
+## at the origin, facing +x: a knight under its four-tongue crown, and the
+## Warden it becomes, hunched and swollen, the crown's outer tongues grown into
+## horns. Parts back to front: back leg, front leg, torso, arm, hand or claw,
+## then the crown's four tongues. The head is a circle, `head` [centre, radius].
+const FRIEZE_KNIGHT := [
+	[Vector2(-7, -30), Vector2(-1, -30), Vector2(-3, 0), Vector2(-10, 0)],
+	[Vector2(1, -30), Vector2(7, -30), Vector2(10, 0), Vector2(4, 0)],
+	[Vector2(-9, -28), Vector2(-10, -44), Vector2(-8, -58), Vector2(0, -61), Vector2(8, -57), Vector2(9, -28)],
+	[Vector2(3, -56), Vector2(9, -55), Vector2(13, -34), Vector2(8, -33)],
+	[Vector2(7, -34), Vector2(14, -34), Vector2(11, -29)],
+	[Vector2(-6, -73), Vector2(-5, -83), Vector2(-2, -74)],
+	[Vector2(-3, -75), Vector2(-1, -87), Vector2(1, -76)],
+	[Vector2(0, -76), Vector2(2, -87), Vector2(4, -75)],
+	[Vector2(3, -74), Vector2(6, -83), Vector2(7, -73)],
+]
+const FRIEZE_BEAST := [
+	[Vector2(-16, -34), Vector2(-5, -36), Vector2(-10, 0), Vector2(-24, 0)],
+	[Vector2(4, -36), Vector2(15, -34), Vector2(22, 0), Vector2(9, 0)],
+	[Vector2(-17, -30), Vector2(-25, -60), Vector2(-12, -84), Vector2(12, -82), Vector2(30, -62), Vector2(16, -30)],
+	[Vector2(18, -72), Vector2(30, -64), Vector2(36, -6), Vector2(26, -6)],
+	[Vector2(23, -7), Vector2(40, -7), Vector2(44, 0)],
+	[Vector2(19, -80), Vector2(0, -108), Vector2(24, -82)],
+	[Vector2(23, -82), Vector2(24, -89), Vector2(27, -83)],
+	[Vector2(27, -83), Vector2(30, -90), Vector2(31, -82)],
+	[Vector2(31, -80), Vector2(48, -100), Vector2(35, -77)],
+]
+const FRIEZE_HEAD := [[Vector2(0, -69), 8.0], [Vector2(27, -72), 11.0]]
+## The crown's parts start here in the cut-outs.
+const FRIEZE_CROWN := 5
+## The knight's sword, held point-down; the beast has dropped it.
+const FRIEZE_SWORD := [Vector2(11, -34), Vector2(14, -34), Vector2(20, -2), Vector2(18, -2)]
+
+## The ashpit's relief: four niches read left to right, a knight crowned and
+## bent, niche by niche, into the Warden. Each is a paper cut-out raised off a
+## recessed panel (its shadow falls on the panel), under a pointed gable so the
+## run of niches never reads as a ledge. `base` is the niches' bottom edge.
+func _frieze(ci: CanvasItem, left: float, base: float, m: Dictionary) -> void:
+	var frame := (m.edge as Color).darkened(0.3)
+	var recess := (m.wall as Color).darkened(0.5)
+	for i in range(4):
+		var cx := left + 42.0 + 94.0 * float(i)
+		var x0 := cx - 42.0
+		var x1 := cx + 42.0
+		var y0 := base - 96.0
+		ci.draw_colored_polygon(PackedVector2Array([Vector2(x0, base), Vector2(x0, y0), Vector2(cx, y0 - 22.0), Vector2(x1, y0), Vector2(x1, base)]), frame)
+		ci.draw_colored_polygon(PackedVector2Array([Vector2(x0 + 5.0, base - 5.0), Vector2(x0 + 5.0, y0 + 2.0), Vector2(cx, y0 - 15.0), Vector2(x1 - 5.0, y0 + 2.0), Vector2(x1 - 5.0, base - 5.0)]), recess)
+		# The first niche holds the crown just over the knight's head, still to be put on.
+		_frieze_figure(ci, Vector2(cx - 6.0, base - 8.0), float(i) / 3.0, 14.0 if i == 0 else 0.0, m)
+
+## One frieze figure, `bend` of the way from knight (0) to Warden (1), with
+## its crown `lift` px over its head. Drawn twice: a shadow nudged down-right
+## onto the panel, then the paper itself, rim-lit, its crown in ember.
+func _frieze_figure(ci: CanvasItem, foot: Vector2, bend: float, lift: float, m: Dictionary) -> void:
+	# Dark paper: it sits at sconce height, where the torches light it hardest,
+	# and must stay behind the fight.
+	var paper := (m.wall as Color).lightened(0.04)
+	var ember := (m.torch as Color).darkened(0.5)
+	var head_c: Vector2 = (FRIEZE_HEAD[0][0] as Vector2).lerp(FRIEZE_HEAD[1][0], bend)
+	var head_r := lerpf(FRIEZE_HEAD[0][1], FRIEZE_HEAD[1][1], bend)
+	for shadow: bool in [true, false]:
+		var xf := Transform2D(0.0, Vector2(0.85, 0.85), 0.0, foot + (Vector2(2.5, 2.5) if shadow else Vector2.ZERO))
+		var ink := Color(VFX.VOID, 0.55)
+		if bend < 0.5:
+			var sword: PackedVector2Array = xf * PackedVector2Array(FRIEZE_SWORD)
+			ci.draw_colored_polygon(sword, ink if shadow else Color("7f8896").darkened(0.45))
+		for p in range(FRIEZE_KNIGHT.size()):
+			var pts := PackedVector2Array()
+			for v in range(FRIEZE_KNIGHT[p].size()):
+				pts.append(xf * ((FRIEZE_KNIGHT[p][v] as Vector2).lerp(FRIEZE_BEAST[p][v], bend) + (Vector2(0.0, -lift) if p >= FRIEZE_CROWN else Vector2.ZERO)))
+			if shadow:
+				ci.draw_colored_polygon(pts, ink)
+			else:
+				ci.draw_colored_polygon(pts, ember if p >= FRIEZE_CROWN else paper)
+				VFX.draw_rim(ci, pts, 1.0, 0.45, m.torch)
+			if p == FRIEZE_CROWN - 1:
+				ci.draw_circle(xf * head_c, head_r * 0.85, ink if shadow else paper.darkened(0.25))
 
 ## A cell in the crypt wall: a recess behind six iron bars under a lintel, with a
 ## shackle chain on the jamb. `open` swings the barred door 20 degrees out on its
@@ -1208,6 +1341,9 @@ func _draw_decor_back(ci: CanvasItem) -> void:
 func _draw_decor_front(tag: String, m: Dictionary) -> void:
 	var t := _decor_t()
 	var fy := Content.FLOOR_Y
+	var graves: Array = GRAVES.get(tag, [])
+	for i in range(graves.size()):
+		_grave(Vector2(graves[i][0], fy), t, m, i, graves[i][1])
 	match tag:
 		"intro":
 			_candles(Vector2(260.0, fy), 5, t, m)

@@ -1192,6 +1192,14 @@ const STATUE := [
 	[Vector2(6, -188), Vector2(26, -182), Vector2(64, -158), Vector2(58, -146), Vector2(16, -164)],
 ]
 const STATUE_CUP := [Vector2(-46, -266), Vector2(-12, -266), Vector2(-20, -250), Vector2(-38, -250)]
+## The statue's crown: four stone tongues rising from its head (centre 24, -204),
+## the centre two tallest, as on the knight.
+const STATUE_CROWN := [
+	[Vector2(9, -212), Vector2(12, -232), Vector2(17, -217)],
+	[Vector2(16, -218), Vector2(20, -242), Vector2(25, -220)],
+	[Vector2(24, -220), Vector2(29, -242), Vector2(33, -218)],
+	[Vector2(32, -217), Vector2(37, -232), Vector2(40, -212)],
+]
 
 ## The boss room paints the throne apse and hangs its sconces there.
 func _in_throne_room() -> bool:
@@ -1286,8 +1294,10 @@ func _draw_apse_column(ci: CanvasItem, x: float, horizon: float, t: float, phase
 	if sconce_heat > 0.1:
 		VFX.draw_flame(ci, at + Vector2(0.0, -6.0), 30.0 * sconce_heat, 16.0 * sconce_heat, t, phase, mood.torch, VFX.GOLD)
 
-## A kneeling stone knight, a past bearer of the flame, turned toward the throne
-## (`side` +1 faces right). The torch cup it raises is charred and cold.
+## A kneeling stone knight turned toward the throne (`side` +1 faces right): a
+## past Warden, in the same four-tongue crown the knight wears. The torch cup
+## it raises is charred and cold; only its crown still holds a spark, and that
+## sinks with the sconces when the throne goes cold.
 func _draw_statue(ci: CanvasItem, foot: Vector2, side: float) -> void:
 	var stone: Color = _haze(mood.stone, 0.65)
 	ci.draw_set_transform(foot, 0.0, Vector2(side, 1.0))
@@ -1295,6 +1305,11 @@ func _draw_statue(ci: CanvasItem, foot: Vector2, side: float) -> void:
 		var pts := PackedVector2Array(part)
 		VFX.draw_shaded_polygon(ci, pts, stone)
 		VFX.draw_rim(ci, pts, 1.0, 0.5, mood.torch)
+	for tongue in STATUE_CROWN:
+		var pts := PackedVector2Array(tongue)
+		VFX.draw_shaded_polygon(ci, pts, stone)
+		VFX.draw_rim(ci, pts, 1.0, 0.5, mood.torch)
+		VFX.draw_ember_dot(ci, pts[1] + Vector2(0.0, 2.0), 1.5, mood.torch, 0.5 * sconce_heat)
 	ci.draw_circle(Vector2(24.0, -204.0), 17.0, stone)
 	ci.draw_line(Vector2(28.0, -206.0), Vector2(40.0, -204.0), VFX.VOID, 2.0)
 	ci.draw_circle(Vector2(62.0, -150.0), 5.0, stone.darkened(0.2))
