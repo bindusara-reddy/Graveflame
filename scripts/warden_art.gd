@@ -281,8 +281,11 @@ static func paint(b,p: Dictionary) -> void:
 			ci.draw_circle(tip,2.0,fire)
 		else:
 			VFX.draw_flame(ci,base,height*crown_scale,width,t,[1.0,2.3,4.0][i],fire,Content.PAL.attack)
-	ci.draw_polyline(STROKES.crest,INK,7.0,true)
-	ci.draw_polyline(STROKES.crest,RIDGE.darkened(0.15),2.2,true)
+	# The crest is the crown's backswept ridge; with the flames burnt to stubs it
+	# would stand alone and read as a horn, so it goes with them.
+	if not p.get("spent",false):
+		ci.draw_polyline(STROKES.crest,INK,7.0,true)
+		ci.draw_polyline(STROKES.crest,RIDGE.darkened(0.15),2.2,true)
 	arm(ci,p.shoulder,p.elbow,p.hand,float(p.claw_angle),rust)
 	if phase2:
 		ci.draw_line(p.elbow+Vector2(3,0),p.hand,fire,2.0,true)
