@@ -173,6 +173,20 @@ func _ready() -> void:
 	_reset_stats()
 	_restore_options()
 	music.play_track("title")
+	_set_world_shown(false)
+
+
+## The title and its menus are opaque, so the world stops rendering and
+## painting behind them instead of drawing unseen. Hiding the container pauses
+## its SubViewport and a hidden CPUParticles2D stops simulating, but painters
+## inside a SubViewport still count as visible, so their processing stops too.
+## Feedback keeps running: it owns the camera and the sound pool menu cues use.
+func _set_world_shown(shown: bool) -> void:
+	_world_container.visible = shown
+	_vignette.visible = shown
+	_atmosphere.visible = shown
+	for painter: Node in [_backdrop, _light_layer, _lights]:
+		painter.set_process(shown)
 
 
 ## Name `node` and add it under `parent`. World layers are pausable: they freeze
@@ -813,6 +827,7 @@ func _teardown_run() -> void:
 	ui.hide_banners()
 
 func _begin_run() -> void:
+	_set_world_shown(true)
 	_teardown_run()
 	score = 0
 	_run_cells = 0
@@ -1345,6 +1360,7 @@ func _on_quit_to_title() -> void:
 	ui.hide_all_panels()
 	ui.show_panel("title")
 	state = GState.TITLE
+	_set_world_shown(false)
 	mood = Content.mood_for(0.0)
 	RenderingServer.set_default_clear_color(mood.bg_top)
 	_lights.set_ambient(mood.ambient)
