@@ -270,15 +270,15 @@ func _test_wave_generation() -> void:
 		check(w1 == w2, "wave generation deterministic for room %d" % idx)
 		check(w1.size() >= 1, "room %d has at least one wave" % idx)
 		for wave in w1:
-			check(wave.size() >= 1 and wave.size() <= Content.WAVE_MAX_ENEMIES, "room %d wave size in range" % idx)
+			check(wave.size() >= 1 and wave.size() <= 4, "room %d wave size in range" % idx)
 			var brutes := 0
 			var bombers := 0
 			for k in wave:
 				check(k >= 0 and k < Content.EnemyKind.size(), "generated kind in range")
 				if k == Content.EnemyKind.BRUTE: brutes += 1
 				if k == Content.EnemyKind.BOMBER: bombers += 1
-				if idx < 3:
-					check(k != Content.EnemyKind.BRUTE, "brutes only appear from room 3")
+				if idx < 4:
+					check(k != Content.EnemyKind.BRUTE, "brutes only appear from room 4")
 			check(brutes <= 1 and bombers <= 1, "at most one brute and one bomber per wave")
 	var r0 := RandomNumberGenerator.new()
 	check(Content.generate_waves(1, r0) == Content.OPENING_WAVES[1], "early rooms keep their authored waves")

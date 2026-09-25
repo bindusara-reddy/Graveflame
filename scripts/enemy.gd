@@ -5,6 +5,7 @@ extends CharacterBody2D
 ## of them may spawn as an elite: larger, tougher, gilded, and worth more cells.
 
 const VFX := preload("res://scripts/vfx.gd")
+const GroundFire := preload("res://scripts/ground_fire.gd")
 
 signal died(score: int)
 signal damaged(amount: float, pos: Vector2, blocked: bool)
@@ -16,6 +17,8 @@ signal telegraphed(kind: String, pos: Vector2, elite: bool)
 ## A beat the game names over the creature and/or voices: a broken guard, a
 ## ring-out. Either part may be empty.
 signal announced(text: String, cue: String, pos: Vector2)
+## A twinned elite at half health: the room sets a plain copy of it at `pos`.
+signal twin_requested(kind: int, pos: Vector2)
 
 enum Kind { STALKER, HOPPER, WISP, BRUTE, BOMBER, CROW }
 enum EState { SPAWN, SEEK, WINDUP, ATTACK, RECOVER, STAGGER, DEAD }
@@ -51,6 +54,11 @@ const HOP_REACH := 150.0
 const HOP_UP_REACH := 230.0
 ## The deepest drop a walker will take to floor below it.
 const SAFE_DROP := 420.0
+## Kindled oath: seconds between the embers it sheds while walking, and each
+## ember's bite. Warded oath: blows its runes swallow whole.
+const KINDLED_EVERY := 0.5
+const KINDLED_BITE := 6.0
+const WARD_RUNES := 2
 
 ## Pyre boon damage, mirrored from the player's build by the game so a burning
 ## enemy can detonate against its neighbours without holding a player reference.
@@ -127,6 +135,11 @@ var _poise_flash := 0.0  # visual only: a committed blow rings gold
 ## Seconds left of a broken guard's opening (BREAK_DAMAGE_MUL applies).
 var _vulnerable_t := 0.0
 var _spawn_grace := 0.0
+## An elite's oath (Content.ELITE_OATHS), or "".
+var oath := ""
+var _wards := 0
+var _twinned := false
+var _ember_t := 0.0
 ## Seconds since the knight's side last struck this creature; drives ring-out credit.
 var _since_struck := INF
 
@@ -137,6 +150,7 @@ func echo() -> Node2D:
 	g.kind = kind
 	g.data = data
 	g.elite = elite
+	g.oath = oath
 	g.facing = facing
 	g.state = EState.STAGGER
 	g.stagger_t = 0.18
@@ -148,7 +162,8 @@ func echo() -> Node2D:
 	g._hurt_flash = 0.1
 	return g
 
-## `mods` may carry hp_mul, dmg_mul (difficulty curve) and elite (bool).
+## `mods` may carry hp_mul, dmg_mul (difficulty curve), elite (bool) and an
+## elite's oath.
 func setup(p_kind: int, p_pos: Vector2, mods: Dictionary = {}) -> void:
 	kind = p_kind
 	data = Content.ENEMY[p_kind]
@@ -161,6 +176,8 @@ func setup(p_kind: int, p_pos: Vector2, mods: Dictionary = {}) -> void:
 		if data.has("fuse"):
 			data.fuse = float(data.fuse) * 0.85
 	elite = bool(mods.get("elite", false))
+	oath = str(mods.get("oath", "")) if elite else ""
+	_wards = WARD_RUNES if oath == "warded" else 0
 	_poise = poise_max()
 	_elite_anim = 0.25 if elite else 0.0
 	var hp_mul := float(mods.get("hp_mul", 1.0)) * (Content.ELITE_HP_MUL if elite else 1.0)
@@ -318,6 +335,20 @@ func _physics_process(delta: float) -> void:
 		EState.DEAD: pass
 	if _is_flyer():
 		global_position.x = clampf(global_position.x, FLYER_LEFT, FLYER_RIGHT)
+	if oath == "kindled":
+		_shed_embers(delta)
+
+## A kindled elite sheds a patch of burning ground every KINDLED_EVERY seconds
+## it walks, so its path stays dangerous behind it.
+func _shed_embers(delta: float) -> void:
+	_ember_t -= delta
+	if _ember_t > 0.0 or not is_on_floor() or absf(velocity.x) < 30.0:
+		return
+	_ember_t = KINDLED_EVERY
+	var fire := GroundFire.new()
+	fire.bite = KINDLED_BITE * damage_mul
+	fire.position = position + Vector2(0.0, float(data.h) * 0.5)
+	get_parent().add_child(fire)
 
 func _step_seek(delta: float) -> void:
 	var player = _get_player()
@@ -558,7 +589,7 @@ func take_damage(amount: float, from_dir: Vector2, kb: float, poise_dmg := 1.0) 
 	if dead: return
 	_last_hit_dir = from_dir
 	_since_struck = 0.0
-	last_hit_blocked = _shield_blocks(amount, from_dir, kb)
+	last_hit_blocked = _ward_blocks(amount, from_dir, kb) or _shield_blocks(amount, from_dir, kb)
 	if last_hit_blocked:
 		return
 	if _vulnerable_t > 0.0:
@@ -573,7 +604,20 @@ func take_damage(amount: float, from_dir: Vector2, kb: float, poise_dmg := 1.0) 
 		else:
 			_die()
 		return
+	if oath == "twinned" and not _twinned and hp <= hp_max * 0.5:
+		_twinned = true
+		twin_requested.emit(kind, global_position + Vector2(-facing * 44.0, -12.0))
 	_react_to_blow(from_dir, kb, poise_dmg)
+
+## A warded elite's runes each swallow one blow whole, whatever dealt it.
+func _ward_blocks(amount: float, from_dir: Vector2, kb: float) -> bool:
+	if _wards <= 0:
+		return false
+	_wards -= 1
+	_shield_flash = 0.12
+	emit_signal("damaged", amount, global_position + Vector2(0.0, -float(data.h) * 0.5), true)
+	velocity = from_dir.normalized() * kb * 0.2
+	return true
 
 ## The brute's tower shield takes a blow from the front: it rings off, or the
 ## shield finally breaks and staggers its bearer. True when the hit was absorbed.
@@ -636,6 +680,8 @@ func _stagger(seconds: float, knock: Vector2) -> void:
 	_disarm()
 
 func apply_burn(dps: float, duration: float) -> void:
+	if oath == "kindled":
+		return  # it is already on fire, and feeds on it
 	burn_dps = dps if burn_time <= 0.0 else maxf(burn_dps, dps)
 	burn_time = maxf(burn_time, duration)
 	queue_redraw()
@@ -785,6 +831,8 @@ func _draw() -> void:
 		VFX.set_pose(self, Vector2(0.0, h * 0.5), facing, Vector2(pop * (2.0 - squash) * escale, pop * squash * escale), lean)
 		draw_circle(Vector2(0.0, -h * 0.1), w * 1.15, Color(Content.ELITE_COLOR, pulse))
 		draw_circle(Vector2(0.0, -h * 0.1), w * 0.8, Color(Content.ELITE_COLOR, pulse * 0.8))
+		# A thin rim in the archetype's own hue, so the kind still reads under the gold.
+		draw_arc(Vector2(0.0, -h * 0.1), w * 1.15, 0.0, TAU, 32, Color(data.color, 0.85), 2.0)
 		# Gilded crest so elites read instantly, even mid-swarm.
 		var crest_y := -h * 0.72 - 9.0 - h * 0.16 - 10.0
 		draw_colored_polygon(PackedVector2Array([
@@ -792,6 +840,7 @@ func _draw() -> void:
 			Vector2(0.0, crest_y - 11.0), Vector2(3.0, crest_y - 3.0), Vector2(6.0, crest_y - 8.0), Vector2(9.0, crest_y),
 		]), Content.ELITE_COLOR)
 		draw_circle(Vector2(0.0, crest_y - 11.0), 2.0, VFX.HOT)
+		_draw_oath(w, h, t, Vector2(16.0, crest_y - 5.0))
 	match kind:
 		Kind.STALKER: _draw_stalker(w, h, base, mid, t, tw, ta, flash)
 		Kind.HOPPER: _draw_hopper(w, h, base, mid, t, tw, flash, air)
@@ -832,6 +881,31 @@ func _draw() -> void:
 	if burn_time > 0.0:
 		for i in range(3):
 			VFX.draw_flame(self, Vector2(-w * 0.28 + float(i) * w * 0.28, -h * 0.4), 14.0, 8.0, t, float(i) * 2.1)
+
+## An elite's oath as a small cut-paper sigil beside its crest at `at`; a
+## warded elite also carries its remaining runes circling its body.
+func _draw_oath(w: float, h: float, t: float, at: Vector2) -> void:
+	var bone := Color("e8dcc0")
+	match oath:
+		"kindled":
+			VFX.draw_flame(self, at + Vector2(0.0, 5.0), 11.0, 6.0, t, 0.7)
+		"warded":
+			var rune := PackedVector2Array([Vector2(0.0, -6.0), Vector2(4.0, 0.0), Vector2(0.0, 6.0), Vector2(-4.0, 0.0)])
+			draw_colored_polygon(Transform2D(0.0, at) * rune, bone)
+			for i in range(_wards):
+				var a := t * 1.8 + float(i) * PI
+				var spot := Vector2(cos(a) * w * 0.95, -h * 0.1 + sin(a) * h * 0.35)
+				var paper := Transform2D(0.0, spot) * rune
+				draw_colored_polygon(paper, Color.WHITE if _shield_flash > 0.0 else bone)
+				draw_polyline(paper + PackedVector2Array([paper[0]]), Content.ELITE_COLOR, 1.2, true)
+		"vengeful":
+			var star := PackedVector2Array()
+			for k in range(8):
+				star.append(at + Vector2.UP.rotated(float(k) * PI / 4.0) * (6.5 if k % 2 == 0 else 2.5))
+			draw_colored_polygon(star, VFX.EMBER)
+		"twinned":
+			draw_circle(at + Vector2(-3.0, 0.0), 3.5, Content.ELITE_COLOR)
+			draw_arc(at + Vector2(3.0, 0.0), 3.5, 0.0, TAU, 12, bone, 1.5)
 
 ## A committed windup rings gold where a blow glances off it; a broken guard
 ## hangs round the body as a torn gold hoop until the opening closes.

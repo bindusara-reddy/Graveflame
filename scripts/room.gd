@@ -23,6 +23,16 @@ signal prop_shattered(pos: Vector2, force: Vector2, color: Color)
 signal boss_shattered(pos: Vector2)
 ## A creature's named or voiced beat (see Enemy.announced).
 signal enemy_announced(text: String, cue: String, pos: Vector2)
+## A first-time lesson worth showing now: a HINTS id the game teaches once.
+signal lesson_requested(id: String)
+
+## A wave never spawns closer than this to the knight.
+const SPAWN_CLEARANCE := 220.0
+## A vengeful elite's dying ring (see _loose_vengeance).
+const VENGEANCE_DELAY := 0.3
+const VENGEANCE_SHARDS := 6
+const VENGEANCE_SPEED := 200.0
+const VENGEANCE_BITE := 8.0
 
 var template: Dictionary = {}
 var enemies: Array[Node] = []
@@ -43,6 +53,9 @@ var chosen_exit := "boon"
 var trial := false
 ## Depth of this chamber in the run, set by the game before _ready.
 var room_index := 0
+## The descent's seed, set by the game before _ready: it picks which chambers
+## stage which set piece (Content.set_piece_for).
+var run_seed := 0
 var _near_idx := -1
 var _rng := RandomNumberGenerator.new()
 var _player_ref: Node = null
@@ -54,6 +67,10 @@ var _near_exit := false
 var _room_cleared := false
 var _ambient_t := 0.0
 var _elite_slot := Vector2i(-1, -1)   # (wave, index) that spawns as an elite
+var _elite_oath := ""
+## This chamber's set piece (Content.SET_PIECES) and the wave that stages it.
+var _set_piece: Dictionary = {}
+var _set_piece_wave := -1
 var _difficulty: Dictionary = { "hp_mul": 1.0, "dmg_mul": 1.0 }
 ## Depth palette handed down by the game (see Content.MOODS).
 var mood: Dictionary = {}
@@ -197,18 +214,23 @@ func _spawn_encounter() -> void:
 	if is_boss:
 		_spawn_boss()
 		return
-	_waves = Content.generate_waves(room_index, _rng)
+	_set_piece = Content.set_piece_for(room_index, run_seed)
+	_waves = Content.generate_waves(room_index, _rng, _set_piece)
+	_set_piece_wave = _waves.size() - 1 if not _set_piece.is_empty() else -1
 	_wave_index = 0
 	if trial and not _waves.is_empty():
 		# A Trial doubles down: one more wave, and it always carries an elite.
 		_waves.append((_waves[_waves.size() - 1] as Array).duplicate())
 		_difficulty.hp_mul = float(_difficulty.hp_mul) * 1.15
-	# At most one elite per room, placed in a random wave slot.
+	# At most one elite per room, placed in a random wave slot. The last chamber
+	# before the throne always has one, leading its final wave as a champion.
 	var gilded := Enemy.vows.has("v_gilded")
-	if not _waves.is_empty() and (trial or gilded or _rng.randf() < Content.elite_chance(room_index)):
-		var w := _rng.randi_range(0, _waves.size() - 1)
+	var champion := room_index >= Content.ROOMS_BEFORE_BOSS
+	if not _waves.is_empty() and (trial or gilded or champion or _rng.randf() < Content.elite_chance(room_index)):
+		var w := _waves.size() - 1 if champion else _rng.randi_range(0, _waves.size() - 1)
 		var wave: Array = _waves[w]
-		_elite_slot = Vector2i(w, _rng.randi_range(0, wave.size() - 1))
+		_elite_slot = Vector2i(w, 0 if champion else _rng.randi_range(0, wave.size() - 1))
+		_elite_oath = Content.roll_oath(int(wave[_elite_slot.y]), room_index, _rng)
 	_spawn_wave()
 
 func _spawn_wave() -> void:
@@ -216,31 +238,58 @@ func _spawn_wave() -> void:
 		_unlock_exit()
 		return
 	var kinds: Array = _waves[_wave_index]
-	var slots: Array = template.get("slots", [])
-	if slots.is_empty(): 
+	var slots := _clear_slots()
+	if slots.is_empty():
 		_unlock_exit()
 		return
 	emit_signal("wave_started", _wave_index + 1, _waves.size())
 	for i in range(kinds.size()):
-		var slot_idx := (i + _wave_index) % slots.size()
-		var slot: Vector2 = slots[slot_idx]
-		# Enemies sharing a slot fan out a little so they do not stack perfectly.
-		if i >= slots.size():
-			slot.x += float(((i / slots.size()) % 2) * 2 - 1) * 36.0
+		var slot: Vector2 = slots[(i + _wave_index) % slots.size()]
+		# Enemies sharing a slot fan out to alternate sides so they never stack.
+		var lap := i / slots.size()
+		slot.x += 36.0 * float((lap + 1) / 2) * (1.0 if lap % 2 == 1 else -1.0)
 		var mods := _difficulty.duplicate()
-		mods["elite"] = _elite_slot == Vector2i(_wave_index, i)
-		_spawn_enemy(kinds[i], slot, mods)
+		if _elite_slot == Vector2i(_wave_index, i):
+			mods["elite"] = true
+			mods["oath"] = _elite_oath
+		var foe := _spawn_enemy(kinds[i], slot, mods)
+		if _wave_index == _set_piece_wave and _set_piece.has("stagger"):
+			# First strikes spaced out, counted from the end of the spawn grace.
+			foe.cd = Enemy.SPAWN_GRACE + float(_set_piece.stagger) * float(i)
+	for kind in Content.DEBUTS:
+		if int(Content.DEBUTS[kind]) == room_index and kinds.has(kind):
+			lesson_requested.emit("debut_" + Enemy.telegraph_id(kind))
+
+## The template's spawn slots that stand clear of the knight, so no wave lands
+## on top of them; when none is clear, the farthest. The opening wave spawns
+## before the knight steps in, so it measures from the entry.
+func _clear_slots() -> Array:
+	var slots: Array = template.get("slots", [])
+	var knight := get_entry_point()
+	if _wave_index > 0 and is_instance_valid(_player_ref):
+		knight = _player_ref.global_position
+	var clear := slots.filter(func(s: Vector2): return s.distance_to(knight) >= SPAWN_CLEARANCE)
+	if clear.is_empty() and not slots.is_empty():
+		var far: Vector2 = slots[0]
+		for s: Vector2 in slots:
+			if s.distance_to(knight) > far.distance_to(knight):
+				far = s
+		clear = [far]
+	return clear
 
 func wave_count() -> int:
 	return _waves.size()
 
-func _spawn_enemy(kind: int, pos: Vector2, mods: Dictionary = {}) -> void:
+func _spawn_enemy(kind: int, pos: Vector2, mods: Dictionary = {}) -> Enemy:
 	var e := Enemy.new()
 	e.setup(kind, pos, mods)
 	add_child(e)
 	_relay(e)
 	enemies.append(e)
 	emit_signal("enemy_spawned", pos, Content.ELITE_COLOR if bool(mods.get("elite", false)) else Color(e.data.color))
+	if not e.oath.is_empty():
+		enemy_announced.emit("%s %s" % [e.oath.to_upper(), e.data.name], "", pos + Vector2(0.0, -float(e.data.h) - 30.0))
+	return e
 
 ## Pass a creature's combat signals up as the room's own: the game listens to
 ## the room, never to the creatures inside it.
@@ -252,6 +301,7 @@ func _relay(foe: Enemy) -> void:
 	foe.pyre_burst.connect(pyre_burst.emit)
 	foe.telegraphed.connect(telegraphed.emit)
 	foe.announced.connect(enemy_announced.emit)
+	foe.twin_requested.connect(_on_boss_summon)
 
 func _spawn_boss() -> void:
 	boss = Boss.new()
@@ -265,8 +315,17 @@ func _spawn_boss() -> void:
 	boss.shattered.connect(boss_shattered.emit)
 	emit_signal("boss_spawned")
 
+## A plain creature called into the fight mid-wave: the Warden's wisps, or
+## the copy a twinned elite splits off.
 func _on_boss_summon(kind: int, pos: Vector2) -> void:
 	_spawn_enemy(kind, pos, _difficulty.duplicate())
+
+## A vengeful elite's dying ring: slow embers burst from where it fell, each
+## one parryable back.
+func _loose_vengeance(pos: Vector2, damage: float) -> void:
+	for i in range(VENGEANCE_SHARDS):
+		var dir := Vector2.RIGHT.rotated(TAU * float(i) / float(VENGEANCE_SHARDS))
+		projectile_requested.emit("enemy", pos, dir * VENGEANCE_SPEED, damage, 140.0, 0, 2.2, Content.ELITE_COLOR)
 
 func _on_enemy_died(score: int, who: Node) -> void:
 	var tier := 0
@@ -285,6 +344,10 @@ func _on_enemy_died(score: int, who: Node) -> void:
 		# fell into the pit or blew itself up leaves nothing to split.
 		if score > 0 and tier < 2 and not who.exploded_out:
 			Severed.spawn(self, who, who._last_hit_dir, int(who.get_instance_id()))
+		if who.oath == "vengeful":
+			# Named at once; the embers follow a beat later, time to back off.
+			enemy_announced.emit("VENGEANCE", "", pos + Vector2(0.0, -60.0))
+			get_tree().create_timer(VENGEANCE_DELAY, false).timeout.connect(_loose_vengeance.bind(pos, VENGEANCE_BITE * float(who.damage_mul)))
 	emit_signal("enemy_died", score, pos, tier, color, kind)
 	_clean_dead()
 	if is_boss:

@@ -945,6 +945,7 @@ func _advance_room() -> void:
 	room.trial = run.trial_next
 	run.trial_next = false
 	room.room_index = run.room_index
+	room.run_seed = run.seed_value
 	# Connect before _ready() because boss_spawned and the first wave happen there.
 	room.completed.connect(_on_room_completed)
 	room.cleared.connect(_on_room_cleared)
@@ -959,6 +960,7 @@ func _advance_room() -> void:
 	room.wave_started.connect(_on_wave_started)
 	room.telegraphed.connect(_on_enemy_telegraphed)
 	room.enemy_announced.connect(_on_enemy_announced)
+	room.lesson_requested.connect(_teach)
 	room.prop_shattered.connect(feedback.shatter)
 	room.boss_shattered.connect(_on_boss_shattered)
 	Enemy.pyre_damage = float(run.build.get("pyre_dmg", 0.0))

@@ -50,29 +50,14 @@ func _test_physics_layers() -> void:
 	check(seen.size() == layers.size(), "all eight physics layer masks are distinct")
 
 
+## No chamber may drop an enemy on the knight as they step in.
 func _test_chamber_spawn_separation() -> void:
-	var chamber: Dictionary = {}
 	for template in Content.ROOM_TEMPLATES:
-		if str(template.get("tag", "")) == "chamber":
-			chamber = template
-			break
-	check(not chamber.is_empty(), "chamber room template is available")
-	if chamber.is_empty():
-		return
-	var slots: Array = chamber.get("slots", [])
-	check(not slots.is_empty(), "chamber room defines enemy spawn slots")
-	if slots.is_empty():
-		return
-	var entry: Vector2 = chamber.get("entry", Vector2.ZERO)
-	var first_slot: Vector2 = slots[0]
-	var largest_enemy := Vector2.ZERO
-	for enemy_data: Dictionary in Content.ENEMY.values():
-		largest_enemy.x = maxf(largest_enemy.x, float(enemy_data.get("w", 0.0)))
-		largest_enemy.y = maxf(largest_enemy.y, float(enemy_data.get("h", 0.0)))
-	var center_delta := (first_slot - entry).abs()
-	var half_extents := (Vector2(Content.P_BODY_W, Content.P_BODY_H) + largest_enemy) * 0.5
-	var clearance := center_delta - half_extents
-	check(clearance.x >= 32.0 or clearance.y >= 32.0, "chamber entry has safe clearance from its first enemy spawn")
+		var slots: Array = template.get("slots", [])
+		check(not slots.is_empty(), "%s defines enemy spawn slots" % template.tag)
+		var entry: Vector2 = template.get("entry", Vector2.ZERO)
+		for slot: Vector2 in slots:
+			check(slot.distance_to(entry) >= Room.SPAWN_CLEARANCE, "%s slot %s stands clear of the entry" % [template.tag, slot])
 
 
 func _test_project_boot() -> void:

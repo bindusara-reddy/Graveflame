@@ -102,15 +102,16 @@ const COMBO := [
 
 # --- Enemy archetypes ---
 enum EnemyKind { STALKER, HOPPER, WISP, BRUTE, BOMBER, CROW }
+## `name` is what the game calls a creature aloud: its debut lesson and an elite's oath.
 const ENEMY := {
-	EnemyKind.STALKER: { "hp": 40.0,  "speed": 150.0, "damage": 14.0, "knock": 240.0, "cd": 1.3, "windup": 0.45, "recover": 0.5,  "score": 12, "w": 34.0, "h": 46.0, "color": Color("c44b3f") },
-	EnemyKind.HOPPER:  { "hp": 28.0,  "speed": 210.0, "damage": 12.0, "knock": 200.0, "cd": 1.6, "windup": 0.30, "recover": 0.4,  "score": 14, "w": 32.0, "h": 38.0, "color": Color("d98c2b") },
-	EnemyKind.WISP:    { "hp": 20.0,  "speed": 120.0, "damage": 10.0, "knock": 160.0, "cd": 2.4, "windup": 0.55, "recover": 0.45, "score": 18, "w": 30.0, "h": 30.0, "color": Color("7b6bd1") },
-	EnemyKind.BRUTE:   { "hp": 80.0,  "speed": 95.0,  "damage": 20.0, "knock": 360.0, "cd": 1.8, "windup": 0.60, "recover": 0.65, "score": 24, "w": 48.0, "h": 58.0, "color": Color("5a7a3a"), "shielded": true, "shield_hp": 30.0, "poise": 4.0 },
-	EnemyKind.BOMBER:  { "hp": 22.0,  "speed": 170.0, "damage": 20.0, "knock": 100.0, "cd": 1.4, "windup": 0.80, "recover": 0.0,  "score": 20, "w": 34.0, "h": 36.0, "color": Color("b85c2e"), "explodes": true, "fuse": 0.8, "blast_radius": 90.0 },
+	EnemyKind.STALKER: { "name": "STALKER", "hp": 40.0,  "speed": 150.0, "damage": 14.0, "knock": 240.0, "cd": 1.3, "windup": 0.45, "recover": 0.5,  "score": 12, "w": 34.0, "h": 46.0, "color": Color("c44b3f") },
+	EnemyKind.HOPPER:  { "name": "HOPPER", "hp": 28.0,  "speed": 210.0, "damage": 12.0, "knock": 200.0, "cd": 1.6, "windup": 0.30, "recover": 0.4,  "score": 14, "w": 32.0, "h": 38.0, "color": Color("d98c2b") },
+	EnemyKind.WISP:    { "name": "WISP", "hp": 20.0,  "speed": 120.0, "damage": 10.0, "knock": 160.0, "cd": 2.4, "windup": 0.55, "recover": 0.45, "score": 18, "w": 30.0, "h": 30.0, "color": Color("7b6bd1") },
+	EnemyKind.BRUTE:   { "name": "IRON PENITENT", "hp": 80.0,  "speed": 95.0,  "damage": 20.0, "knock": 360.0, "cd": 1.8, "windup": 0.60, "recover": 0.65, "score": 24, "w": 48.0, "h": 58.0, "color": Color("5a7a3a"), "shielded": true, "shield_hp": 30.0, "poise": 4.0 },
+	EnemyKind.BOMBER:  { "name": "POWDER PILGRIM", "hp": 22.0,  "speed": 170.0, "damage": 20.0, "knock": 100.0, "cd": 1.4, "windup": 0.80, "recover": 0.0,  "score": 20, "w": 34.0, "h": 36.0, "color": Color("b85c2e"), "explodes": true, "fuse": 0.8, "blast_radius": 90.0 },
 	## Carrion crow: circles overhead, shrieks while it hangs in the air, then
 	## dives along a line it commits to. Sidestep the line or parry it down.
-	EnemyKind.CROW:    { "hp": 24.0,  "speed": 230.0, "damage": 13.0, "knock": 220.0, "cd": 1.9, "windup": 0.55, "recover": 0.55, "score": 18, "w": 34.0, "h": 26.0, "color": Color("5a4a78"), "dive_speed": 760.0 },
+	EnemyKind.CROW:    { "name": "CARRION CROW", "hp": 24.0,  "speed": 230.0, "damage": 13.0, "knock": 220.0, "cd": 1.9, "windup": 0.55, "recover": 0.55, "score": 18, "w": 34.0, "h": 26.0, "color": Color("5a4a78"), "dive_speed": 760.0 },
 }
 const CROW_HOVER := 165.0
 const WISP_SHOT_SPEED := 420.0
@@ -149,6 +150,13 @@ const ELITE_SCORE_MUL := 3
 const ELITE_COLOR := Color("ffd166")
 ## Extra blows an elite's committed windup shrugs off (see Enemy.poise_max).
 const ELITE_POISE := 2.0
+## Elites from this chamber on swear an oath, named as they arrive:
+## kindled - leaves a trail of burning ground, and cannot be set alight;
+## warded - two paper runes each swallow a blow before it can be hurt;
+## vengeful - bursts into a ring of slow, parryable embers when it falls;
+## twinned - at half health a plain copy of it steps out beside it.
+const OATH_FROM_ROOM := 3
+const ELITE_OATHS := ["kindled", "warded", "vengeful", "twinned"]
 
 # --- Kill streaks: chained kills inside the window multiply score ---
 const STREAK_WINDOW := 3.4
@@ -306,7 +314,7 @@ static var ROOM_TEMPLATES: Array = [
 			Rect2(680, FLOOR_Y - 180, 140, 40),
 		],
 		"hazards": [ Rect2(620, FLOOR_Y + 20, 240, 100) ],
-		"slots": [ Vector2(300, FLOOR_Y - 40), Vector2(720, FLOOR_Y - 220), Vector2(1040, FLOOR_Y - 40) ],
+		"slots": [ Vector2(430, FLOOR_Y - 40), Vector2(720, FLOOR_Y - 220), Vector2(1040, FLOOR_Y - 40) ],
 		"entry": Vector2(180, FLOOR_Y - 80),
 		"exit": Vector2(1180, FLOOR_Y - 80),
 	},
@@ -348,7 +356,7 @@ static var ROOM_TEMPLATES: Array = [
 			Rect2(560, FLOOR_Y - 300, 120, 34),
 		],
 		"hazards": [ Rect2(460, FLOOR_Y + 20, 360, 100) ],
-		"slots": [ Vector2(560, FLOOR_Y - 200), Vector2(820, FLOOR_Y - 200), Vector2(640, FLOOR_Y - 340) ],
+		"slots": [ Vector2(500, FLOOR_Y - 200), Vector2(760, FLOOR_Y - 200), Vector2(640, FLOOR_Y - 340) ],
 		"entry": Vector2(180, FLOOR_Y - 80),
 		"exit": Vector2(1180, FLOOR_Y - 80),
 	},
@@ -383,7 +391,7 @@ static var ROOM_TEMPLATES: Array = [
 			Rect2(560, FLOOR_Y - 360, 160, 34),
 		],
 		"hazards": [ Rect2(360, FLOOR_Y + 20, 560, 100) ],
-		"slots": [ Vector2(330, FLOOR_Y - 260), Vector2(950, FLOOR_Y - 260), Vector2(640, FLOOR_Y - 400), Vector2(120, FLOOR_Y - 40) ],
+		"slots": [ Vector2(330, FLOOR_Y - 260), Vector2(950, FLOOR_Y - 260), Vector2(640, FLOOR_Y - 400), Vector2(300, FLOOR_Y - 40) ],
 		"entry": Vector2(40, FLOOR_Y - 80),
 		"exit": Vector2(1180, FLOOR_Y - 80),
 	},
@@ -406,58 +414,114 @@ const OPENING_WAVES := [
 	[[EnemyKind.STALKER, EnemyKind.HOPPER], [EnemyKind.WISP, EnemyKind.STALKER]],
 ]
 
+## Enemies per wave for each generated chamber, from the first after the
+## opening waves: a steady climb to three full waves just before the throne.
+## Deeper chambers reuse the last row.
+const WAVE_PLAN := [[2, 3], [2, 4], [2, 3, 3], [2, 3, 4], [3, 4, 4]]
+
+## The chamber where each archetype first appears; the stalker is there from
+## the start. A generated chamber opens with its newcomer beside a lone
+## stalker, and the game names it (HINTS "debut_<kind>") the first time.
+const DEBUTS := {
+	EnemyKind.HOPPER: 1, EnemyKind.WISP: 1, EnemyKind.BOMBER: 2, EnemyKind.CROW: 3, EnemyKind.BRUTE: 4,
+}
+
+## Authored waves that test a lesson from an earlier chamber. A seeded few of
+## the last chambers each stage one as their final wave (see set_piece_for).
+## `stagger` spaces the members' first strikes, so dives come in a rhythm.
+const SET_PIECES := [
+	{ "name": "powder keg", "from_room": 3, "kinds": [EnemyKind.BOMBER, EnemyKind.STALKER, EnemyKind.BOMBER, EnemyKind.STALKER] },
+	{ "name": "murder", "from_room": 4, "kinds": [EnemyKind.CROW, EnemyKind.CROW, EnemyKind.CROW], "stagger": 0.7 },
+	{ "name": "shieldwall", "from_room": 5, "kinds": [EnemyKind.BRUTE, EnemyKind.WISP, EnemyKind.WISP] },
+]
+
 ## Threat costs used by the wave generator. Heavier archetypes unlock with depth.
 const THREAT_COST := {
 	EnemyKind.STALKER: 2.0, EnemyKind.HOPPER: 2.0, EnemyKind.WISP: 2.5, EnemyKind.BRUTE: 4.0, EnemyKind.BOMBER: 3.0, EnemyKind.CROW: 2.5,
 }
-const WAVE_MAX_ENEMIES := 4
 
 static func _unlocked_kinds(room_index: int) -> Array:
-	var kinds: Array = [EnemyKind.STALKER, EnemyKind.HOPPER, EnemyKind.WISP]
-	# One new threat per chamber: bombers, then crows, then brutes.
-	if room_index >= 2:
-		kinds.append(EnemyKind.BOMBER)
-	if room_index >= 3:
-		kinds.append(EnemyKind.CROW)
-	if room_index >= 4:
-		kinds.append(EnemyKind.BRUTE)
+	var kinds: Array = [EnemyKind.STALKER]
+	for kind in DEBUTS:
+		if int(DEBUTS[kind]) <= room_index:
+			kinds.append(kind)
 	return kinds
 
 ## Encounter waves for a route position. The first two rooms are authored so the
-## opening curve is stable; deeper rooms are filled from a threat budget with the
-## room's seeded RNG, so a seed always reproduces the same gauntlet.
-static func generate_waves(room_index: int, rng: RandomNumberGenerator) -> Array:
+## opening curve is stable; deeper rooms follow WAVE_PLAN, open with the
+## chamber's debut, close with its set piece (if any), and fill the rest from
+## the room's seeded RNG, so a seed always reproduces the same gauntlet.
+static func generate_waves(room_index: int, rng: RandomNumberGenerator, set_piece: Dictionary = {}) -> Array:
 	if room_index < OPENING_WAVES.size():
 		# Copied: rooms append a Trial wave to the array they are handed.
 		return (OPENING_WAVES[room_index] as Array).duplicate(true)
-	var wave_count := 3 if room_index >= 4 else 2
-	var budget := 5.0 + 2.2 * float(room_index)
+	var plan: Array = WAVE_PLAN[mini(room_index - OPENING_WAVES.size(), WAVE_PLAN.size() - 1)]
 	var kinds := _unlocked_kinds(room_index)
+	var debut = DEBUTS.find_key(room_index)
+	var staged: Array = set_piece.get("kinds", [])
 	var waves: Array = []
-	for w in range(wave_count):
-		var wave: Array = []
-		# Later waves inside a room are heavier than the opener.
-		var wave_budget := budget * (0.8 + 0.2 * float(w))
-		var spent := 0.0
-		var guard := 0
-		while wave.size() < WAVE_MAX_ENEMIES and guard < 32:
-			guard += 1
-			var kind: int = kinds[rng.randi_range(0, kinds.size() - 1)]
-			var cost := float(THREAT_COST[kind])
-			if spent + cost > wave_budget and not wave.is_empty():
-				break
-			# At most one brute and one bomber per wave keeps waves readable.
-			if (kind == EnemyKind.BRUTE or kind == EnemyKind.BOMBER) and wave.has(kind):
-				continue
-			# Two divers at once is a coin flip, not a read.
-			if kind == EnemyKind.CROW and wave.count(kind) >= 2:
-				continue
-			wave.append(kind)
-			spent += cost
-		if wave.is_empty():
-			wave.append(EnemyKind.STALKER)
-		waves.append(wave)
+	for w in range(plan.size()):
+		if w == 0 and debut != null:
+			waves.append([debut, EnemyKind.STALKER])
+		elif w == plan.size() - 1 and not staged.is_empty():
+			waves.append(staged.duplicate())
+		else:
+			waves.append(_roll_wave(int(plan[w]), room_index, kinds, rng, waves + [staged]))
 	return waves
+
+## One wave of `size` foes drawn from `kinds`. A draw that would break a
+## composition rule or the wave's threat cap becomes a stalker, so the wave
+## keeps its size and stays readable. `room` holds the chamber's other waves.
+static func _roll_wave(size: int, room_index: int, kinds: Array, rng: RandomNumberGenerator, room: Array) -> Array:
+	var cap := 2.6 * float(size) + 0.5 * float(room_index)
+	var wave: Array = []
+	var threat := 0.0
+	for i in range(size):
+		var kind: int = kinds[rng.randi_range(0, kinds.size() - 1)]
+		if threat + float(THREAT_COST[kind]) > cap or not _fits(kind, wave, room, room_index):
+			kind = EnemyKind.STALKER
+		wave.append(kind)
+		threat += float(THREAT_COST[kind])
+	return wave
+
+## Composition rules: one bomber and one brute a wave, never more than two
+## flyers at once (two divers is a coin flip, not a read), and at most two
+## brutes a chamber, one where they debut.
+static func _fits(kind: int, wave: Array, room: Array, room_index: int) -> bool:
+	match kind:
+		EnemyKind.BOMBER:
+			return not wave.has(kind)
+		EnemyKind.WISP, EnemyKind.CROW:
+			return wave.count(EnemyKind.WISP) + wave.count(EnemyKind.CROW) < 2
+		EnemyKind.BRUTE:
+			var in_room := 0
+			for other: Array in room:
+				in_room += other.count(kind)
+			return not wave.has(kind) and in_room < (1 if int(DEBUTS[kind]) == room_index else 2)
+	return true
+
+## The set piece a chamber stages this descent, or {}. Seeded by the run so a
+## replayed seed matches; no piece repeats in a descent, and none comes before
+## the chamber it may first appear in.
+static func set_piece_for(room_index: int, run_seed: int) -> Dictionary:
+	var rng := RandomNumberGenerator.new()
+	rng.seed = run_seed
+	var staged := {}
+	# Latest-opening piece first, so every piece still finds a chamber of its own.
+	for i in range(SET_PIECES.size() - 1, -1, -1):
+		var piece: Dictionary = SET_PIECES[i]
+		var open: Array = range(int(piece.from_room), ROOMS_BEFORE_BOSS + 1).filter(func(r): return not staged.has(r))
+		staged[open[rng.randi_range(0, open.size() - 1)]] = piece
+	return staged.get(room_index, {})
+
+## An elite's oath (ELITE_OATHS), drawn from the chamber's RNG from
+## OATH_FROM_ROOM on; "" before then. A kindled trail burns along the ground,
+## so flyers never swear it.
+static func roll_oath(kind: int, room_index: int, rng: RandomNumberGenerator) -> String:
+	if room_index < OATH_FROM_ROOM:
+		return ""
+	var oaths: Array = ELITE_OATHS.filter(func(o): return o != "kindled" or not (kind == EnemyKind.WISP or kind == EnemyKind.CROW))
+	return str(oaths[rng.randi_range(0, oaths.size() - 1)])
 
 static func room_name(template: Dictionary) -> String:
 	return str(template.get("name", str(template.get("tag", "unknown")).to_upper()))
@@ -492,6 +556,12 @@ const HINTS := {
 	"slam": "DOWN + J in the air — down-slam onto a crowd.",
 	"wall_jump": "Against a wall, jump again to kick away.",
 	"flask": "F — FLASK.  One charge returns with every chamber cleared.",
+	# Each archetype, named the first time the descent shows it (DEBUTS).
+	"debut_hopper": "HOPPER.  It leaps at you from afar: step back, then cut it as it lands.",
+	"debut_wisp": "WISP.  It shoots from above: parry the bolt back, or climb to reach it.",
+	"debut_bomber": "POWDER PILGRIM.  Dash clear of its ring, or cut it down before it lights.",
+	"debut_crow": "CARRION CROW.  Watch its dashed line, then sidestep or parry the dive.",
+	"debut_brute": "IRON PENITENT.  Its shield faces you: strike from behind, or break its guard.",
 }
 
 # --- Vows (unlocked by the first victory) ---

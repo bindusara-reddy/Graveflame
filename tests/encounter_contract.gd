@@ -16,10 +16,100 @@ func run() -> void:
 	await _test_spawn_grace()
 	await _test_wisp_skirmishes()
 	await _test_bomber_blast()
+	await _test_oaths()
 	_clear_arena()
 	await _test_pits()
 	await _test_ledge_drop()
+	_test_wave_plan()
+	await _test_room_plan()
 	await finish("ENCOUNTER")
+
+
+## Chambers climb steadily, open with their newcomer, stage each set piece
+## once per descent and keep generated waves readable.
+func _test_wave_plan() -> void:
+	var sizes: Array = []
+	for idx in range(Content.ROOMS_BEFORE_BOSS + 1):
+		var rng := RandomNumberGenerator.new()
+		rng.seed = 40 + idx
+		var total := 0
+		for wave: Array in Content.generate_waves(idx, rng):
+			total += wave.size()
+			var flyers := wave.count(Content.EnemyKind.WISP) + wave.count(Content.EnemyKind.CROW)
+			check(flyers <= 2, "room %d: no generated wave carries more than two flyers" % idx)
+		sizes.append(total)
+	for idx in range(1, sizes.size()):
+		check(int(sizes[idx]) > int(sizes[idx - 1]), "room %d holds more foes than the one before (%s)" % [idx, sizes])
+	for kind in Content.DEBUTS:
+		var room := int(Content.DEBUTS[kind])
+		if room >= Content.OPENING_WAVES.size():
+			var opener: Array = Content.generate_waves(room, RandomNumberGenerator.new())[0]
+			check(opener == [kind, Content.EnemyKind.STALKER], "room %d opens with its newcomer beside a stalker" % room)
+	for run_seed in [1, 2, 3, 77, 4242]:
+		var staged := {}
+		for idx in range(Content.ROOMS_BEFORE_BOSS + 1):
+			var piece: Dictionary = Content.set_piece_for(idx, run_seed)
+			if piece.is_empty():
+				continue
+			check(idx >= int(piece.from_room), "%s never comes before room %d" % [piece.name, piece.from_room])
+			staged[piece.name] = int(staged.get(piece.name, 0)) + 1
+			var waves := Content.generate_waves(idx, RandomNumberGenerator.new(), piece)
+			check(waves[-1] == piece.kinds, "a chamber's set piece is its final wave")
+		check(staged.size() == Content.SET_PIECES.size() and staged.values().max() == 1, "seed %d stages every set piece exactly once" % run_seed)
+
+
+## A live chamber names its newcomer, keeps its first wave clear of the entry,
+## and the last chamber before the throne always fields a champion.
+func _test_room_plan() -> void:
+	var lessons: Array = []
+	var room := Room.new()
+	var stand_in := Node2D.new()
+	root.add_child(stand_in)
+	room.setup(Content.ROOM_TEMPLATES[1], false, stand_in, 11)
+	room.room_index = Content.DEBUTS[Content.EnemyKind.BOMBER]
+	room.lesson_requested.connect(func(id: String): lessons.append(id))
+	root.add_child(room)
+	check(lessons.has("debut_bomber") and Content.HINTS.has("debut_bomber"), "a chamber names its newcomer with a lesson")
+	for foe in room.enemies:
+		check(foe.global_position.distance_to(room.get_entry_point()) >= Room.SPAWN_CLEARANCE, "the first wave lands clear of the entry")
+	room.queue_free()
+	for run_seed in [5, 6, 7]:
+		var last := Room.new()
+		last.setup(Content.ROOM_TEMPLATES[2], false, stand_in, run_seed)
+		last.room_index = Content.ROOMS_BEFORE_BOSS
+		last.run_seed = run_seed
+		root.add_child(last)
+		check(last._elite_slot.x == last.wave_count() - 1, "the last chamber's final wave carries a champion")
+		last.queue_free()
+	stand_in.queue_free()
+	await ticks(1)
+
+
+## Each oath does what its name promises.
+func _test_oaths() -> void:
+	var warded := await _foe(Enemy.Kind.STALKER, 900.0, { "elite": true, "oath": "warded" })
+	for i in range(Enemy.WARD_RUNES):
+		warded.take_damage(5.0, Vector2.LEFT, 0.0)
+	check(warded.last_hit_blocked and is_equal_approx(warded.hp, warded.hp_max), "a warded elite's runes swallow its first blows")
+	warded.take_damage(5.0, Vector2.LEFT, 0.0)
+	check(warded.hp < warded.hp_max, "with its runes spent, a warded elite is hurt")
+	warded.queue_free()
+	var twinned := await _foe(Enemy.Kind.STALKER, 900.0, { "elite": true, "oath": "twinned" })
+	var twins: Array = []
+	twinned.twin_requested.connect(func(kind: int, _pos: Vector2): twins.append(kind))
+	twinned.take_damage(twinned.hp_max * 0.6, Vector2.LEFT, 0.0)
+	twinned.take_damage(1.0, Vector2.LEFT, 0.0)
+	check(twins == [Enemy.Kind.STALKER], "a twinned elite splits once, at half health")
+	twinned.queue_free()
+	var kindled := await _foe(Enemy.Kind.STALKER, 1000.0, { "elite": true, "oath": "kindled" })
+	kindled._spawn_grace = 0.0
+	kindled.apply_burn(10.0, 3.0)
+	check(is_zero_approx(kindled.burn_time), "a kindled elite cannot be set alight")
+	await ticks(60)
+	var fires := root.get_children().filter(func(n): return n.get_script() == Enemy.GroundFire)
+	check(not fires.is_empty() and fires.all(func(f): return f.bite > 0.0), "a kindled elite sheds burning ground as it walks")
+	kindled.queue_free()
+	await ticks(1)
 
 
 ## An empty copy of the tagged chamber (no waves), with the stand-in knight at
@@ -181,6 +271,13 @@ func _test_pits() -> void:
 	room._spawn_enemy(Enemy.Kind.STALKER, Vector2(740.0, Content.FLOOR_Y - 40.0))
 	await ticks(60)
 	check(deaths.size() == 2 and int(deaths[1]) == 0, "a creature that falls in untouched earns nothing")
+	room._spawn_enemy(Enemy.Kind.STALKER, Vector2(1200.0, Content.FLOOR_Y - 40.0), { "elite": true, "oath": "vengeful" })
+	var shards: Array = []
+	room.projectile_requested.connect(func(team: String, _p: Vector2, _v: Vector2, _d: float, _k: float, _pi: int, _l: float, _c: Color): shards.append(team))
+	room.enemies[-1].take_damage(99999.0, Vector2.LEFT, 0.0)
+	check(shards.is_empty(), "a vengeful elite's embers wait a beat after it falls")
+	await ticks(30)
+	check(shards.size() == Room.VENGEANCE_SHARDS and shards.all(func(t): return t == "enemy"), "then its ring of embers bursts")
 	await _free_room(room)
 
 
