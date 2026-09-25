@@ -75,7 +75,11 @@ func _layer(layer_name: String, painter: Callable, mat: Material) -> Control:
 		layer.material = mat
 	add_child(layer)
 	layer.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
-	layer.draw.connect(painter.bind(layer))
+	# Nothing to paint until the tableau has been laid out at a real size.
+	layer.draw.connect(func() -> void:
+		if layer.size.x > 0.0 and layer.size.y > 0.0 and not _rings.is_empty():
+			painter.call(layer)
+	)
 	return layer
 
 
@@ -170,18 +174,23 @@ func _relayout() -> void:
 			if VFX.hash01(i * 31 + j, 9) < 0.72:
 				continue
 			var a := lerpf(PI + 0.25, TAU - 0.25, (float(j) + 0.5) / float(count))
-			var p: Vector2 = ring.c + Vector2(cos(a) * ring.rx, sin(a) * ring.ry)
+			var p := _on_ring(ring, a)
 			_torches.append({ "p": p + Vector2(0.0, 10.0 * _k()), "u": ring.u, "seed": i * 7 + j })
 	_embers.position = Vector2(s.x * 0.60, s.y * 0.93)
 	_embers.emission_rect_extents = Vector2(s.x * 0.16, 8.0)
 	_redraw_all()
 
 
-func _arc(ring: Dictionary, from: float, to: float, steps: int, y_off: float = 0.0) -> PackedVector2Array:
+## Point on a ring's ledge ellipse at the given angle.
+func _on_ring(ring: Dictionary, angle: float) -> Vector2:
+	return Vector2(ring.c.x + cos(angle) * ring.rx, ring.c.y + sin(angle) * ring.ry)
+
+
+func _arc(ring: Dictionary, from: float, to: float, steps: int) -> PackedVector2Array:
 	var pts := PackedVector2Array()
 	for i in range(steps + 1):
 		var a := lerpf(from, to, float(i) / float(steps))
-		pts.append(Vector2(ring.c.x + cos(a) * ring.rx, ring.c.y + sin(a) * ring.ry + y_off))
+		pts.append(_on_ring(ring, a))
 	return pts
 
 
@@ -194,8 +203,6 @@ func _ease(x: float) -> float:
 
 func _draw_depth(ci: Control) -> void:
 	var s := ci.size
-	if s.x <= 0.0 or s.y <= 0.0 or _rings.is_empty():
-		return
 	var k := _k()
 	_last_reveal_drawn = reveal
 	var e := _ease(reveal)
@@ -251,8 +258,8 @@ func _draw_depth(ci: Control) -> void:
 		for j in range(count):
 			var seed := i * 17 + j
 			var a := lerpf(PI + 0.12, TAU - 0.12, (float(j) + 0.5 + (VFX.hash01(seed, 8) - 0.5) * 0.5) / float(count))
-			var base := Vector2(bot.c.x + cos(a) * bot.rx, bot.c.y + sin(a) * bot.ry)
-			var crown := Vector2(top.c.x + cos(a) * top.rx, top.c.y + sin(a) * top.ry)
+			var base := _on_ring(bot, a)
+			var crown := _on_ring(top, a)
 			var h := (base - crown).length()
 			if h < 8.0:
 				continue
@@ -292,8 +299,8 @@ func _draw_depth(ci: Control) -> void:
 		var shift := (VFX.hash01(i, 33) - 0.5) * 0.5 / float(ribs)
 		for j in range(ribs):
 			var a := lerpf(PI + 0.16, TAU - 0.16, (float(j) + 0.5) / float(ribs) + shift)
-			var p0 := Vector2(top.c.x + cos(a) * top.rx, top.c.y + sin(a) * top.ry)
-			var p1 := Vector2(bot.c.x + cos(a) * bot.rx, bot.c.y + sin(a) * bot.ry)
+			var p0 := _on_ring(top, a)
+			var p1 := _on_ring(bot, a)
 			var wdt := (7.0 - 4.0 * u) * k
 			var rib := PackedVector2Array([p0 + Vector2(-wdt, 0.0), p0 + Vector2(wdt, 0.0), p1 + Vector2(wdt * 0.7, 0.0), p1 + Vector2(-wdt * 0.7, 0.0)])
 			ci.draw_polygon(rib, PackedColorArray([face.darkened(0.55), face.darkened(0.2), lower.darkened(0.2), lower.darkened(0.55)]))
@@ -383,8 +390,6 @@ func _draw_depth(ci: Control) -> void:
 
 func _draw_glow(ci: Control) -> void:
 	var s := ci.size
-	if s.x <= 0.0 or s.y <= 0.0 or _rings.is_empty():
-		return
 	var k := _k()
 	var e := _ease(reveal)
 	var t := time
@@ -418,9 +423,6 @@ func _draw_glow(ci: Control) -> void:
 # --- Knight: the gameplay figure's geometry, presented on the landing -----------
 
 func _draw_knight(ci: Control) -> void:
-	var s := ci.size
-	if s.x <= 0.0 or s.y <= 0.0:
-		return
 	var h := BODY_H
 	var facing := 1.0
 	var sc := KNIGHT_SCALE * _k()
@@ -449,8 +451,6 @@ func _draw_knight(ci: Control) -> void:
 
 func _draw_fog(ci: Control) -> void:
 	var s := ci.size
-	if s.x <= 0.0 or s.y <= 0.0:
-		return
 	var k := _k()
 	var still := Feedback.motion_reduced
 	var t := 0.0 if still else time
