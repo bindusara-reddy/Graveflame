@@ -233,10 +233,26 @@ static func draw_chain(ci: CanvasItem, from: Vector2, length: float, sway: float
 
 ## Pose transform that scales and leans about a pivot (normally the feet) and
 ## mirrors on X for facing, so creature geometry can be authored facing right.
+## A jolted creature (see jolt) also shivers side to side about the pivot.
 static func set_pose(ci: CanvasItem, pivot: Vector2, facing: float, scale: Vector2, lean: float) -> void:
 	var xf := Transform2D(lean * signf(facing), Vector2(scale.x * signf(facing), scale.y), 0.0, Vector2.ZERO)
-	xf.origin = pivot - xf * pivot
+	xf.origin = pivot - xf * pivot + _jolt_offset(ci)
 	ci.draw_set_transform_matrix(xf)
+
+## Hit shiver: a creature the knight strikes vibrates in place for `seconds`
+## of real time, so it reads as struck even while hit-stop freezes the world.
+## Reduced motion keeps it still.
+const JOLT_PX := 3.0
+const JOLT_HZ := 27.0
+static func jolt(ci: CanvasItem, seconds: float) -> void:
+	if not Feedback.motion_reduced:
+		ci.set_meta("jolt_until_usec", Time.get_ticks_usec() + int(seconds * 1000000.0))
+
+static func _jolt_offset(ci: CanvasItem) -> Vector2:
+	var now := Time.get_ticks_usec()
+	if now >= int(ci.get_meta("jolt_until_usec", 0)):
+		return Vector2.ZERO
+	return Vector2(sin(float(now) * 0.000001 * TAU * JOLT_HZ) * JOLT_PX, 0.0)
 
 ## Points transformed into a limb frame: rotated by `angle`, placed at `origin`.
 static func limb(pts: PackedVector2Array, origin: Vector2, angle: float) -> PackedVector2Array:

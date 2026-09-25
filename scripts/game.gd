@@ -507,7 +507,7 @@ func _update_low_hp_vignette(delta: float) -> void:
 	_set_vignette(VIGNETTE_EDGE.lerp(VIGNETTE_LOW_HP, strength))
 
 func _set_vignette(edge: Color) -> void:
-	_vignette_mat.set_shader_parameter("edge_color", edge)
+	_vignette_mat.set_shader_parameter("edge_color", feedback.vignette_edge(edge))
 
 func _paint_backdrop(ci: CanvasItem) -> void:
 	# Camera-driven parallax crypt. Each plane is shifted by (1 - depth) of the
@@ -1084,6 +1084,7 @@ func _begin_run() -> void:
 	player.z_index = 1
 	player.add_to_group("player")
 	player.setup(run)
+	player.feedback = feedback
 	# Wire before entering the tree so _ready()'s initial resource signals are not lost.
 	player.hp_changed.connect(ui.set_hp)
 	player.special_changed.connect(ui.set_special)
@@ -1225,10 +1226,10 @@ func _clear_projectiles() -> void:
 
 # --- Signal handlers ---
 func _on_player_hit(_damage: float, pos: Vector2, heavy: bool) -> void:
-	feedback.impact(pos, Content.PAL.player_accent if player._flame_time > 0.0 else Content.PAL.attack, heavy)
+	feedback.impact(pos, Content.PAL.player_accent if player._flame_time > 0.0 else Content.PAL.attack, heavy, Vector2(player.facing, -0.2))
 	feedback.hit_stop(0.065 if heavy else 0.045)
 	feedback.shake(6.0 if heavy else 3.0, 0.14 if heavy else 0.08)
-	feedback.play("hit_heavy" if heavy else "hit")
+	feedback.play("hit_heavy" if heavy else "hit", 1.0 if heavy else 1.0 + 0.07 * float(player.attack_index))
 	feedback.rumble(0.35 if heavy else 0.2, 0.25 if heavy else 0.0, 0.08)
 
 func _on_player_hurt(amount: float, pos: Vector2) -> void:

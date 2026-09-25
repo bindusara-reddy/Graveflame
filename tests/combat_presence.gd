@@ -16,6 +16,7 @@ func run() -> void:
 	await test_dash_trail()
 	await test_riposte_feedback()
 	await test_breakable_crypt()
+	await test_impact_grammar()
 	release(["attack", "parry"])
 	Feedback.motion_reduced = false
 	await finish("COMBAT_PRESENCE")
@@ -119,6 +120,44 @@ func test_riposte_feedback() -> void:
 	check(game.feedback._streams.has("riposte"), "counterattack has a distinct synthesized audio cue")
 	await ticks(30)
 	check(game.feedback._particles.filter(func(v): return v.kind == "riposte").is_empty(), "counterattack effect cleans itself up")
+
+## A sturdy stalker a step ahead of the knight, for blows that must land.
+func dummy_ahead(dx := 56.0) -> Enemy:
+	var p := game.player
+	var foe := Enemy.new()
+	foe.setup(Enemy.Kind.STALKER, p.global_position + Vector2(p.facing * dx, 0.0))
+	foe.hp_max = 400.0
+	foe.hp = 400.0
+	game.world.add_child(foe)
+	return foe
+
+## A blade hit lands on the silhouette's edge with a cut sliver, a shivering
+## victim and a freeze; being struck freezes the world too.
+func test_impact_grammar() -> void:
+	var p := game.player
+	p.respawn_at(Vector2(480.0, Content.FLOOR_Y - Content.P_BODY_H * 0.5))
+	p.facing = 1.0
+	await ticks(5)
+	game.feedback.set_reduced_motion(false)
+	game.feedback._particles.clear()
+	var foe := dummy_ahead()
+	var contacts := []
+	var probe := func(_dmg, pos, _heavy): contacts.append(pos)
+	p.hit_landed.connect(probe)
+	await hold_action("attack")
+	await ticks(10)
+	p.hit_landed.disconnect(probe)
+	check(contacts.size() == 1 and contacts[0].x < foe.global_position.x - 4.0, "a blade hit lands on the foe's near edge, not its centre")
+	check(game.feedback._particles.any(func(v): return v.kind == "cut"), "a blade hit leaves a cut sliver along the swing")
+	check(foe.has_meta("jolt_until_usec"), "the struck foe shivers through the freeze")
+	foe.queue_free()
+	await ticks(30)
+	p.iframes = 0.0
+	p.take_damage(1.0, Vector2.LEFT, 100.0)
+	check(game.feedback._hit_stop_active, "being struck freezes the world")
+	check(game.feedback.vignette_edge(Game.VIGNETTE_EDGE) != Game.VIGNETTE_EDGE, "being struck flushes the vignette edge")
+	await ticks(40)
+	game.feedback.set_reduced_motion(true)
 
 func test_breakable_crypt() -> void:
 	var props := game.room.props

@@ -11,6 +11,23 @@ const KnightArt := preload("res://scripts/knight_art.gd")
 const FLIP_TIME := 0.3
 ## One full stride (two steps) per this much ground covered, so feet never skate.
 const STRIDE := 62.0
+## How each blade blow lands. stop: hit-stop seconds, extending the game's base
+## freeze (0.045, or 0.065 on heavies). slant: the cut sliver's screen angle
+## when facing right. kick: camera shove in px. poise: guard damage dealt.
+const BLOWS := {
+	"cut": { "stop": 0.045, "slant": 0.55, "kick": 3.0, "poise": 1.0 },
+	"cleave": { "stop": 0.05, "slant": -0.55, "kick": 3.0, "poise": 1.0 },
+	"finish": { "stop": 0.075, "slant": 1.0, "kick": 6.0, "poise": 2.0 },
+	"riposte": { "stop": 0.10, "slant": 0.0, "kick": 6.0, "poise": 99.0 },
+}
+## A killing blow holds the freeze this much longer.
+const KILL_STOP_BONUS := 0.03
+## Being struck freezes the world longest of all: it is the hit that must read.
+const HURT_STOP := 0.085
+const SLAM_POISE := 2.0
+const PARRY_POISE := 99.0
+## A finisher or riposte that lands on the ground rocks the knight back (px/s).
+const HEAVY_RECOIL := 90.0
 
 signal hp_changed(hp: float, max_hp: float)
 signal special_changed(value: float, maximum: float)
@@ -27,6 +44,9 @@ enum State { LOCOMOTION, ATTACK, SLAM, DASH, PARRY, HEAL, HURT, DEAD }
 
 ## Shared by reference with RunModel.build, so there is nothing to sync.
 var build: Dictionary = {}
+## The game's camera, particles and sound, for the parts of a blow's feel only
+## the knight knows (which swing, a kill, a perfect parry). Null in bare rigs.
+var feedback: Feedback
 var state: State = State.LOCOMOTION
 var facing: float = 1.0
 var coyote := 0.0
@@ -507,20 +527,58 @@ func _scan_attack_hits(def: Dictionary) -> void:
 				tgt.take_damage(float(def.damage), Vector2(facing, -0.3), float(def.knock))
 				continue # no meter, lifesteal, damage stats or hit-stop from props
 			var finisher := is_finisher()
+			var blow: Dictionary = BLOWS[def.name]
 			var dmg: float = def.damage * _damage_mul(tgt)
 			if finisher:
 				dmg *= float(build.get("finish_mul", 1.0))
 			if _flame_time > 0.0:
 				dmg *= Content.P_FLAME_DAMAGE_MUL
-			tgt.take_damage(dmg, Vector2(facing, -0.2), def.knock)
+			deal(tgt, dmg, Vector2(facing, -0.2), def.knock, blow.poise)
 			# Graveflame ignites every hit; Kindling makes finishers ignite too.
 			var kindling := float(build.get("burn_bonus_dps", 0.0)) > 0.0
 			if (_flame_time > 0.0 or (finisher and kindling)) and tgt.has_method("apply_burn"):
 				tgt.apply_burn(Content.P_FLAME_BURN_DPS + float(build.get("burn_bonus_dps", 0.0)), Content.P_FLAME_BURN_TIME + float(build.get("burn_bonus_time", 0.0)))
-			emit_signal("hit_landed", dmg, tgt.global_position, finisher)
+			var contact := _contact_point(area)
+			emit_signal("hit_landed", dmg, contact, finisher)
+			_feel_blow(tgt, contact, blow, finisher)
+			if finisher and is_on_floor() and atk_hit.size() == 1:
+				velocity.x -= facing * HEAVY_RECOIL
 			_gain_special(Content.P_SPECIAL_GAIN * float(build.get("special_mul", 1.0)))
 			if float(build.get("lifesteal", 0.0)) > 0.0:
 				_heal(float(build.lifesteal))
+
+## Deal a blow through `tgt`'s take_damage, with the poise damage it carries
+## when the target's take_damage accepts it (creatures do; scenery does not).
+static func deal(tgt: Object, amount: float, dir: Vector2, knock: float, poise: float) -> void:
+	if tgt.get_method_argument_count("take_damage") >= 4:
+		tgt.take_damage(amount, dir, knock, poise)
+	else:
+		tgt.take_damage(amount, dir, knock)
+
+## Where the blade meets the hurtbox `area`: its near edge at the knight's chest
+## height, so sparks and the cut land on the silhouette rather than inside it.
+func _contact_point(area: Area2D) -> Vector2:
+	var box := area.get_child(0) as CollisionShape2D
+	var center := area.global_position
+	var half := Vector2(14.0, 20.0)
+	if box != null and box.shape is RectangleShape2D:
+		center += box.position
+		half = (box.shape as RectangleShape2D).size * 0.5
+	var y := clampf(global_position.y - 10.0, center.y - half.y * 0.8, center.y + half.y * 0.6)
+	return Vector2(center.x - facing * half.x * 0.6, y)
+
+## A blow's own weight on top of the game's sparks and base freeze: the victim
+## shivers, the world holds per the swing (longer on a kill), and the camera is
+## shoved along the blade over a cut sliver slanted like the swing.
+func _feel_blow(tgt: Node, contact: Vector2, blow: Dictionary, heavy: bool) -> void:
+	var stop: float = blow.stop + (KILL_STOP_BONUS if tgt.get("dead") == true else 0.0)
+	VFX.jolt(tgt, stop)
+	if feedback == null:
+		return
+	var slant: float = blow.slant
+	feedback.cut_line(contact, slant if facing > 0.0 else PI - slant, heavy)
+	feedback.hit_stop(stop)
+	feedback.kick(Vector2(facing, 0.0), blow.kick)
 
 # --- Down-slam ---
 func _begin_slam() -> void:
@@ -553,7 +611,7 @@ func _do_slam_impact() -> void:
 	for prop in get_tree().get_nodes_in_group("breakable_prop"):
 		if is_instance_valid(prop) and prop.global_position.distance_to(center) <= radius:
 			prop.take_damage(base_dmg, Vector2(signf(prop.global_position.x - center.x), -0.7), Content.P_SLAM_KNOCK)
-	var hit_any := false
+	var struck := 0
 	for area in get_tree().get_nodes_in_group("enemy_hurtbox"):
 		if not is_instance_valid(area): continue
 		if area.global_position.distance_to(center) <= radius + 24.0:
@@ -561,10 +619,16 @@ func _do_slam_impact() -> void:
 			if tgt != null and is_instance_valid(tgt) and tgt.has_method("take_damage"):
 				var kdir: Vector2 = (tgt.global_position - center).normalized()
 				if kdir == Vector2.ZERO: kdir = Vector2.UP
-				tgt.take_damage(base_dmg * _damage_mul(tgt), Vector2(kdir.x, -0.7), Content.P_SLAM_KNOCK)
-				hit_any = true
-	if hit_any:
+				deal(tgt, base_dmg * _damage_mul(tgt), Vector2(kdir.x, -0.7), Content.P_SLAM_KNOCK, SLAM_POISE)
+				struck += 1
+				# Each foe caught gets its own contact burst, thrown away from the crater.
+				VFX.jolt(tgt, 0.05)
+				if feedback != null:
+					feedback.impact(tgt.global_position + Vector2(0.0, 10.0), Content.PAL.attack, true, Vector2(kdir.x, -0.6))
+	if struck > 0:
 		_gain_special(Content.P_SPECIAL_GAIN * float(build.get("special_mul", 1.0)) * 2.0)
+		if feedback != null:
+			feedback.hit_stop(minf(0.05 + 0.015 * float(struck), 0.11))
 	_draw_slam_impact = 0.3
 	emit_signal("slam_landed", center, radius)
 	if bool(build.get("skyfall", false)):
@@ -774,6 +838,7 @@ func take_damage(amount: float, from_dir: Vector2, kb: float) -> void:
 	if float(build.hp) <= 0.0:
 		_die()
 		return
+	_feel_hurt(from_dir)
 	state = State.HURT
 	_hurt_started_airborne = not is_on_floor()
 	iframes = Content.P_HURT_IFRAMES + float(build.get("iframes_bonus", 0.0))
@@ -781,6 +846,15 @@ func take_damage(amount: float, from_dir: Vector2, kb: float) -> void:
 	velocity = Vector2(hit_dir.x * kb, minf(-kb * 0.35, hit_dir.y * kb))
 	if float(build.get("thorns", 0.0)) > 0.0:
 		_thorns_burst()
+
+## Being struck must read above everything else: the world holds, the view is
+## shoved along the blow and the vignette flushes red for an instant.
+func _feel_hurt(from_dir: Vector2) -> void:
+	if feedback == null:
+		return
+	feedback.hit_stop(HURT_STOP)
+	feedback.kick(from_dir, 6.0)
+	feedback.flash_edge(Game.VIGNETTE_LOW_HP, 0.12)
 
 ## A ring of flame around the knight: damages and ignites every enemy within
 ## `radius`. Shared by Flare Parry and Phoenix Flask.

@@ -11,13 +11,34 @@ const MOTION := {
 	"ring": [3.0, 0.0], "afterimage": [3.0, 0.0], "parry_ring": [3.0, 0.0], "ground_ring": [3.0, 0.0],
 	"slash": [3.0, 0.0], "flash": [3.0, 0.0], "riposte": [3.0, 0.0],
 	"shard": [2.2, 400.0], "hitspark": [3.0, 400.0], "number": [4.0, 240.0],
-	"puff": [4.5, -15.0], "ember": [1.5, -40.0],
+	"puff": [4.5, -15.0], "ember": [1.5, -40.0], "cut": [3.0, 0.0],
 }
 const SPARK_MOTION := [3.0, 600.0]
 
 var camera: Camera2D
-var shake_amp := 0.0
-var shake_time := 0.0
+## Trauma shake: every shake() adds amp / SHAKE_TRAUMA_PX of trauma (capped at
+## 1), the camera wanders SHAKE_MAX_PX * trauma^2 along smooth noise, and the
+## trauma drains at SHAKE_DECAY per second once the caller's hold has passed.
+## Squaring keeps a lone light hit subtle while a pile-up really rocks.
+const SHAKE_TRAUMA_PX := 18.0
+const SHAKE_MAX_PX := 14.0
+const SHAKE_DECAY := 2.2
+## Screen-shake strength (Options); 0 turns shake off without touching the rest.
+static var shake_scale := 1.0
+var _trauma := 0.0
+var _trauma_hold := 0.0
+## Directional kick: a shove of the view that peaks KICK_PEAK real seconds
+## after the blow and springs back, critically damped, in about five times that.
+const KICK_PEAK := 0.03
+var _kick := Vector2.ZERO
+var _kick_at := -1.0
+var _zoom_tween: Tween
+## The zoom a punch returns to, held while a punch is running.
+var _zoom_rest := Vector2.ONE
+## Vignette edge pulse (see flash_edge): its colour and real-time window.
+var _edge_color := Color.TRANSPARENT
+var _edge_from_usec := 0
+var _edge_until_usec := 0
 ## Accessibility switches, static so visual-only nodes can honor them without a
 ## reference to this instance; write them through set_reduced_motion /
 ## set_reduced_flash, which also clear effects.
@@ -350,10 +371,71 @@ func rumble(weak: float, strong: float, duration: float) -> void:
 	for pad in Input.get_connected_joypads():
 		Input.start_joy_vibration(pad, clampf(weak, 0.0, 1.0), clampf(strong, 0.0, 1.0), duration)
 
+## Add trauma worth `amp` pixels; it holds for half of `time` before draining.
 func shake(amp: float, time: float) -> void:
 	if motion_reduced: return
-	shake_amp = maxf(shake_amp, amp)
-	shake_time = maxf(shake_time, time)
+	_trauma = minf(1.0, _trauma + amp / SHAKE_TRAUMA_PX)
+	_trauma_hold = maxf(_trauma_hold, time * 0.5)
+
+## Shove the world `px` pixels along `dir` (the way the blow travelled) and let
+## it spring back, so a hit reads as a push rather than noise. Real time, so it
+## plays through a hit-stop freeze.
+func kick(dir: Vector2, px: float) -> void:
+	if motion_reduced or dir == Vector2.ZERO:
+		return
+	_kick = -dir.normalized() * px
+	_kick_at = _now()
+
+## Punch the camera in by `mul` over `in_t` real seconds and ease it back over
+## `out_t`, for the moments that deserve a lean-in: a perfect parry, ignition,
+## a chamber's last kill. Back-to-back punches return to the original zoom.
+func punch_zoom(mul: float, in_t: float, out_t: float) -> void:
+	if motion_reduced or not is_inside_tree():
+		return
+	if _zoom_tween != null and _zoom_tween.is_valid():
+		_zoom_tween.kill()
+	else:
+		_zoom_rest = camera.zoom
+	_zoom_tween = create_tween().set_ignore_time_scale(true)
+	_zoom_tween.tween_property(camera, "zoom", _zoom_rest * mul, in_t).set_trans(Tween.TRANS_SINE).set_ease(Tween.EASE_OUT)
+	_zoom_tween.tween_property(camera, "zoom", _zoom_rest, out_t).set_trans(Tween.TRANS_SINE).set_ease(Tween.EASE_IN_OUT)
+
+## Tint the vignette's edge toward `color`, fading back over `seconds` of real
+## time. The game passes its own edge colour through vignette_edge().
+func flash_edge(color: Color, seconds: float) -> void:
+	_edge_color = color
+	_edge_from_usec = Time.get_ticks_usec()
+	_edge_until_usec = _edge_from_usec + int(seconds * 1000000.0)
+
+## `edge` with any running flash_edge pulse blended over it; reduced flash
+## keeps the pulse faint.
+func vignette_edge(edge: Color) -> Color:
+	var now := Time.get_ticks_usec()
+	if now >= _edge_until_usec:
+		return edge
+	var left := float(_edge_until_usec - now) / float(maxi(1, _edge_until_usec - _edge_from_usec))
+	return edge.lerp(_edge_color, left * (0.45 if flash_reduced else 1.0))
+
+## Real seconds; the camera's kick and shake noise run on it.
+func _now() -> float:
+	return float(Time.get_ticks_usec()) * 0.000001
+
+## Smooth noise in -1..1: two detuned sines, so the shake drifts instead of
+## jumping to a fresh random spot every frame.
+static func _wobble(x: float) -> float:
+	return (sin(x) + 0.5 * sin(x * 2.3 + 1.7)) / 1.5
+
+## Shake plus kick: the camera's whole offset this frame.
+func _camera_offset() -> Vector2:
+	var offset := Vector2.ZERO
+	var now := _now()
+	if _trauma > 0.0:
+		var amp := SHAKE_MAX_PX * _trauma * _trauma * shake_scale
+		offset += Vector2(_wobble(now * 38.0), _wobble(now * 41.0 + 7.0)) * amp
+	var k := (now - _kick_at) / KICK_PEAK
+	if _kick_at >= 0.0 and k < 6.0:
+		offset += _kick * k * exp(1.0 - k)
+	return offset
 
 func burst(pos: Vector2, count: int, color: Color, speed: float = 220.0) -> void:
 	if motion_reduced:
@@ -418,15 +500,18 @@ func flash_death(pos: Vector2, color: Color, big: bool = false) -> void:
 	if not motion_reduced and not flash_reduced:
 		_add_ring(pos, color, 12.0, 54.0, 0.28, 4.0)
 
-## Directional sparks that stretch along their velocity and ramp white -> tint -> ember.
-func burst_sparks(pos: Vector2, count: int, speed: float, tint: Color = VFX.GOLD) -> void:
+## Sparks that stretch along their velocity and ramp white -> tint -> ember.
+## Given a `dir` they spray within SPARK_CONE of it, out through the far side
+## of a blow; without one they burst all around.
+const SPARK_CONE := 0.7
+func burst_sparks(pos: Vector2, count: int, speed: float, tint: Color = VFX.GOLD, dir := Vector2.ZERO) -> void:
 	if motion_reduced:
 		count = maxi(2, count / 4)
 		speed *= 0.35
 	var tint_col := _accessible_color(tint)
 	for i in range(count):
 		if _particles.size() >= MAX_PARTICLES: break
-		var a := randf() * TAU
+		var a := dir.angle() + randf_range(-SPARK_CONE, SPARK_CONE) if dir != Vector2.ZERO else randf() * TAU
 		_push_particle({
 			"kind": "hitspark", "pos": pos, "vel": Vector2(cos(a), sin(a)) * speed * randf_range(0.55, 1.0),
 			"life": randf_range(0.14, 0.22), "max": 0.22, "color": tint_col, "size": 2.0,
@@ -449,6 +534,17 @@ func riposte_cut(origin: Vector2, facing: float, reach: float) -> void:
 	_push_particle({
 		"kind": "riposte", "pos": origin, "vel": Vector2.ZERO, "life": 0.22, "max": 0.22,
 		"color": _accessible_color(VFX.TEAL), "radius": reach, "facing": facing, "size": 1.0,
+	})
+
+## A paper-cut sliver through the point of contact, slanted along the swing
+## (`angle` in screen radians): white-hot for CUT_HOT seconds, then cooling to
+## ember as it fades. It never moves, so reduced motion keeps it.
+const CUT_HOT := 0.06
+const CUT_LIFE := 0.16
+func cut_line(pos: Vector2, angle: float, heavy: bool) -> void:
+	_push_particle({
+		"kind": "cut", "pos": pos, "vel": Vector2.ZERO, "life": CUT_LIFE, "max": CUT_LIFE,
+		"color": _accessible_color(Color.WHITE), "size": 92.0 if heavy else 64.0, "angle": angle,
 	})
 
 ## Teal-to-gold dual ring for a successful deflect.
@@ -503,9 +599,10 @@ func afterimage(pos: Vector2, facing: float, color: Color = Color("e8e0d0"), pos
 		"pose": pose.duplicate(),
 	})
 
-## Stretched sparks plus a compact additive ring at the actual point of contact.
-func impact(pos: Vector2, color: Color = Color("ffa827"), heavy: bool = false) -> void:
-	burst_sparks(pos, 18 if heavy else 14, 380.0 if heavy else 300.0, color)
+## Stretched sparks plus a compact additive ring at the actual point of
+## contact; `dir` (the way the blow travelled) sprays the sparks through.
+func impact(pos: Vector2, color: Color = Color("ffa827"), heavy: bool = false, dir := Vector2.ZERO) -> void:
+	burst_sparks(pos, 18 if heavy else 14, 380.0 if heavy else 300.0, color, dir)
 	if not motion_reduced:
 		_add_ring(pos, color, 6.0, 36.0 if heavy else 25.0, 0.16, 4.0 if heavy else 2.5)
 
@@ -550,14 +647,12 @@ func _push_particle(particle: Dictionary) -> void:
 func _process(delta: float) -> void:
 	if _sfx_thread != null:
 		_collect_sfx()
-	# Shake
-	if shake_time > 0.0 and not motion_reduced:
-		shake_time -= delta
-		var o := Vector2(randf_range(-1, 1), randf_range(-1, 1)) * shake_amp
-		camera.offset = o
-		if shake_time <= 0.0: shake_amp = 0.0
+	# Trauma drains on game time, so a freeze holds the shake it started.
+	if _trauma_hold > 0.0:
+		_trauma_hold -= delta
 	else:
-		camera.offset = camera.offset.lerp(Vector2.ZERO, 12.0 * delta)
+		_trauma = maxf(0.0, _trauma - SHAKE_DECAY * delta)
+	camera.offset = _camera_offset()
 	# Particles
 	var i := 0
 	while i < _particles.size():
@@ -606,7 +701,7 @@ func _draw() -> void:
 				var vel: Vector2 = p.get("vel", Vector2.RIGHT)
 				var tail := vel.normalized() * float(p.get("length", 18.0)) * a
 				draw_line(pos, pos - tail, c, maxf(1.0, size * a), true)
-			"ring", "parry_ring", "slash", "flash":
+			"ring", "parry_ring", "slash", "flash", "cut":
 				pass  # drawn on the additive glow layer
 			"hitspark":
 				var vel: Vector2 = p.get("vel", Vector2.RIGHT)
@@ -659,7 +754,7 @@ func _draw() -> void:
 func _draw_glow() -> void:
 	for p in _particles:
 		var kind := String(p.get("kind", "spark"))
-		if kind not in ["ring", "parry_ring", "slash", "flash"]:
+		if kind not in ["ring", "parry_ring", "slash", "flash", "cut"]:
 			continue
 		var a := clampf(float(p.get("life", 0.0)) / maxf(float(p.get("max", 0.001)), 0.001), 0.0, 1.0)
 		var c: Color = p.get("color", Color.WHITE)
@@ -691,13 +786,25 @@ func _draw_glow() -> void:
 				_glow.draw_set_transform(Vector2.ZERO, 0.0, Vector2.ONE)
 			"flash":
 				_glow.draw_circle(pos, size, Color(c.r, c.g, c.b, c.a * 0.8))
+			"cut":
+				# Full strength while hot, then cooling and fading together.
+				var base: Color = p.color
+				var cool := clampf((CUT_LIFE - float(p.life) - CUT_HOT) / (CUT_LIFE - CUT_HOT), 0.0, 1.0)
+				var col := base.lerp(VFX.EMBER, cool)
+				col.a = base.a * (1.0 - cool) * (0.55 if flash_reduced else 1.0)
+				var along := Vector2.from_angle(float(p.angle)) * size * 0.5
+				var across := along.orthogonal().normalized() * 2.5
+				_glow.draw_colored_polygon(PackedVector2Array([pos - along, pos + across, pos + along, pos - across]), col)
 
 func set_reduced_motion(v: bool) -> void:
 	motion_reduced = v
 	if v:
-		shake_amp = 0.0
-		shake_time = 0.0
+		_trauma = 0.0
+		_kick_at = -1.0
 		camera.offset = Vector2.ZERO
+		if _zoom_tween != null and _zoom_tween.is_valid():
+			_zoom_tween.kill()
+			camera.zoom = _zoom_rest
 		_particles.clear()
 		_restore_hit_stop()
 		end_slow_motion()
