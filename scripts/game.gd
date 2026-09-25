@@ -1843,6 +1843,7 @@ func _unhandled_input(event: InputEvent) -> void:
 	if not paused:
 		get_tree().paused = true
 		paused = true
+		ui.set_descent(run.taken, _seed)
 		ui.show_panel("pause")
 	elif ui.is_panel_visible("keys"):
 		_on_back_from_keys()

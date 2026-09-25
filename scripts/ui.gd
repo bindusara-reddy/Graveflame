@@ -147,12 +147,20 @@ var _fade: ColorRect
 var _panels: Dictionary = {}
 ## { panel, actions } while a results panel waits for held keys to lift.
 var _input_lock: Dictionary = {}
+var _quit_button: Button
+## Running while QUIT TO TITLE waits for its confirming second press.
+var _quit_confirm: Tween
+## The pause card's ledger of the descent so far (see set_descent).
+var _descent_grid: GridContainer
+var _descent_detail: Label
+var _descent_relics: Label
+var _descent_vows: Label
+var _descent_seed: Label
 var _upgrade_row: HBoxContainer
 var _forge_rows: VBoxContainer
 ## The options screen's reduced-motion box; the menu contracts toggle it.
 var _reduced_motion_check: CheckBox
-## Save option key -> every CheckBox showing it. The pause card repeats the
-## accessibility and music toggles, so a toggle updates its twins.
+## Save option key -> the CheckBox on the options screen that shows it.
 var _option_checks: Dictionary = {}
 ## key -> { slider, readout } for every volume control on the options screen.
 var _option_sliders: Dictionary = {}
@@ -876,36 +884,143 @@ func _unhandled_input(event: InputEvent) -> void:
 
 func _build_pause() -> void:
 	var panel := _screen("pause", false, C_BLUE)
-	var content := _dialog(panel, Vector2(640, 600), C_BLUE, 48, 32)
+	var content := _dialog(panel, Vector2(640, 0), C_BLUE, 48, 32)
 	content.add_theme_constant_override("separation", 10)
 
-	content.add_child(_make_label("RUN SUSPENDED", 13, C_BLUE))
-	content.add_child(_make_label("PAUSED", 54, C_TEXT))
+	content.add_child(_make_label("DESCENT SUSPENDED", 13, C_BLUE))
+	content.add_child(_make_label("PAUSED", 50, C_TEXT))
 	content.add_child(_make_label("The keep will wait. Catch your breath.", 16, C_MUTED))
 	content.add_child(_separator(C_EDGE))
 
 	var actions := _button_row(content)
-	var resume := _button("RESUME", "resume", true, Vector2(230, 54))
+	var resume := _button("RESUME", "resume", true, Vector2(200, 54))
 	resume.pressed.connect(resume_requested.emit)
 	actions.add_child(resume)
-	var quit := _button("QUIT TO TITLE", "quit", false, Vector2(230, 54))
-	quit.pressed.connect(quit_to_title_requested.emit)
-	actions.add_child(quit)
-	var options_button := _button("OPTIONS", "pause_options", false, Vector2(230, 54))
+	var options_button := _button("OPTIONS", "pause_options", false, Vector2(200, 54))
 	options_button.pressed.connect(options_requested.emit)
 	actions.add_child(options_button)
+	_quit_button = _button("QUIT TO TITLE", "quit", false, Vector2(200, 54))
+	_quit_button.pressed.connect(_on_quit_pressed)
+	actions.add_child(_quit_button)
 
-	var options_panel := _passive_panel(content, _panel_box(C_INK, C_EDGE, 10, 1, 0))
-	var options := _padded_stack(options_panel, 22, 16, 10)
-	options.add_child(_make_label("ACCESSIBILITY", 12, C_EMBER_HI, HORIZONTAL_ALIGNMENT_LEFT))
-	_option_check(options, "reduced_motion", "Reduced motion", "Disables camera shake and softens particles.")
-	_option_check(options, "reduced_flash", "Reduced flash", "Reduces high-contrast impact flashes.")
-	options.add_child(_make_label("SOUND", 12, C_EMBER_HI, HORIZONTAL_ALIGNMENT_LEFT))
-	_option_check(options, "music_on", "Music", "Procedural ambient score and boss theme.")
+	# The descent so far: boons carried, relics, vows and the seed.
+	var ledger := _padded_stack(_passive_panel(content, _panel_box(C_INK, C_EDGE, 10, 1, 0)), 22, 14, 8)
+	ledger.add_child(_make_label("THIS DESCENT", 12, C_EMBER_HI, HORIZONTAL_ALIGNMENT_LEFT))
+	_descent_grid = GridContainer.new()
+	_descent_grid.columns = 8
+	_descent_grid.add_theme_constant_override("h_separation", 8)
+	_descent_grid.add_theme_constant_override("v_separation", 8)
+	ledger.add_child(_descent_grid)
+	_descent_detail = _make_label("", 13, C_TEXT, HORIZONTAL_ALIGNMENT_LEFT)
+	_descent_detail.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	_descent_detail.custom_minimum_size.y = 36.0
+	ledger.add_child(_descent_detail)
+	_descent_relics = _make_label("", 12, C_MUTED, HORIZONTAL_ALIGNMENT_LEFT)
+	ledger.add_child(_descent_relics)
+	var foot := HBoxContainer.new()
+	foot.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	ledger.add_child(foot)
+	_descent_vows = _make_label("", 12, C_RED, HORIZONTAL_ALIGNMENT_LEFT)
+	foot.add_child(_descent_vows)
+	_descent_seed = _make_label("", 12, C_MUTED, HORIZONTAL_ALIGNMENT_RIGHT)
+	foot.add_child(_descent_seed)
+	set_descent({}, 0)
 
 	var footer := _make_label("", 12, C_MUTED)
 	content.add_child(footer)
 	panel.set_meta("footer_label", footer)
+
+
+## Fill the pause card's ledger: a medallion per boon carried (with its stack
+## count), the relics owned, the vows sworn and the seed. Called as the pause
+## card opens, so it always shows the descent as it stands.
+func set_descent(taken: Dictionary, seed_value: int) -> void:
+	_clear_children(_descent_grid)
+	var defs := {}
+	for u in Content.UPGRADES:
+		defs[u.id] = u
+	for id in taken:
+		if defs.has(id):
+			_descent_grid.add_child(_descent_tile(defs[id], int(taken[id])))
+	_descent_detail.text = "No boons yet. The first chamber waits." if taken.is_empty() else "Focus a boon to read it."
+	var relics: Array = []
+	for u in Content.META_UPGRADES:
+		var rank := Save.get_meta_rank(str(u.id))
+		if rank > 0:
+			relics.append("%s %s" % [str(u.title).to_upper(), _roman(rank)])
+	_descent_relics.text = "RELICS   " + ("  ·  ".join(relics) if not relics.is_empty() else "none yet")
+	var vows: Array = []
+	if Save.vows_unlocked():
+		for v in Content.VOWS:
+			if Save.get_vows().has(v.id):
+				vows.append(str(v.title).trim_prefix("Vow of ").to_upper())
+	_descent_vows.text = ("SWORN   " + "  ·  ".join(vows)) if not vows.is_empty() else ""
+	_descent_seed.text = ("SEED  %d" % seed_value) if seed_value != 0 else ""
+
+
+## One boon in the ledger: a focusable medallion with a ×N badge for stacks.
+## Focusing or hovering it writes its name and effect under the grid, so the
+## ledger reads the same on a pad as with a mouse.
+func _descent_tile(upgrade: Dictionary, count: int) -> Button:
+	var rc := Content.rarity_color(Content.upgrade_rarity(upgrade))
+	var tile := Button.new()
+	tile.name = "Taken_%s" % upgrade.id
+	tile.custom_minimum_size = Vector2(56, 56)
+	tile.focus_mode = Control.FOCUS_ALL
+	tile.add_theme_stylebox_override("normal", StyleBoxEmpty.new())
+	for state in ["hover", "focus", "pressed"]:
+		tile.add_theme_stylebox_override(state, _panel_box(Color(C_SURFACE_HI, 0.6), C_GOLD, 8, 1, 0))
+	var medallion := BoonMedallion.new()
+	medallion.setup(str(upgrade.id), rc, Content.upgrade_rarity(upgrade) == "epic", Vector2(52, 52))
+	tile.add_child(medallion)
+	medallion.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	if count > 1:
+		var badge := _make_label("×%d" % count, 13, C_GOLD, HORIZONTAL_ALIGNMENT_RIGHT)
+		badge.add_theme_constant_override("outline_size", 4)
+		badge.add_theme_color_override("font_outline_color", C_VOID)
+		tile.add_child(badge)
+		badge.set_anchors_and_offsets_preset(Control.PRESET_BOTTOM_RIGHT)
+		badge.offset_left = -30.0
+		badge.offset_top = -20.0
+	var stack := "  ×%d" % count if count > 1 else ""
+	var line := "%s%s  —  %s" % [str(upgrade.title).to_upper(), stack, str(upgrade.desc)]
+	tile.focus_entered.connect(func(): _descent_detail.text = line)
+	return tile
+
+
+## QUIT TO TITLE abandons the descent, so the first press only asks: the
+## button reads ABANDON DESCENT? in red for two seconds, and a second press
+## within them quits.
+func _on_quit_pressed() -> void:
+	if _quit_confirm != null and _quit_confirm.is_valid():
+		_set_quit_warning(false)
+		quit_to_title_requested.emit()
+		return
+	_set_quit_warning(true)
+	_quit_confirm = _ui_tween()
+	_quit_confirm.tween_interval(2.0)
+	_quit_confirm.tween_callback(_set_quit_warning.bind(false))
+
+
+func _set_quit_warning(on: bool) -> void:
+	_kill_tween(_quit_confirm)
+	_quit_confirm = null
+	_quit_button.text = "ABANDON DESCENT?" if on else "QUIT TO TITLE"
+	_style_button(_quit_button, false)
+	if on:
+		for state in ["normal", "hover", "focus"]:
+			_quit_button.add_theme_stylebox_override(state, _button_box(Color("3a1418"), C_RED, 2))
+		_quit_button.add_theme_color_override("font_focus_color", C_RED)
+
+
+## Small numbers as Roman numerals, the keep's way of counting ranks and chambers.
+static func _roman(n: int) -> String:
+	var out := ""
+	for pair in [[10, "X"], [9, "IX"], [5, "V"], [4, "IV"], [1, "I"]]:
+		while n >= int(pair[0]):
+			out += str(pair[1])
+			n -= int(pair[0])
+	return out
 
 
 func _build_reward() -> void:
@@ -1112,25 +1227,36 @@ func _slider_row(parent: VBoxContainer, title: String, key: String, value: float
 ## and accessibility are not locked behind starting a run.
 func _build_options() -> void:
 	var panel := _screen("options", true, C_EMBER)
-	var content := _dialog(panel, Vector2(680, 620), C_EMBER, 48, 30)
+	var content := _dialog(panel, Vector2(880, 0), C_EMBER, 44, 28)
 	content.add_theme_constant_override("separation", 8)
 
 	content.add_child(_make_label("SETTINGS", 12, C_EMBER_HI))
 	content.add_child(_make_label("OPTIONS", 44, C_TEXT))
 	content.add_child(_separator(C_EDGE))
 
-	content.add_child(_make_label("AUDIO", 12, C_EMBER_HI, HORIZONTAL_ALIGNMENT_LEFT))
-	_slider_row(content, "Master volume", "master", 0.9)
-	_slider_row(content, "Music", "music", 0.75)
-	_slider_row(content, "Effects", "sfx", 0.9)
+	# Two columns, so the screen has room to grow without scrolling.
+	var columns := HBoxContainer.new()
+	columns.add_theme_constant_override("separation", 36)
+	content.add_child(columns)
+	var sound := VBoxContainer.new()
+	var seen := VBoxContainer.new()
+	for column in [sound, seen]:
+		column.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		column.add_theme_constant_override("separation", 8)
+		columns.add_child(column)
 
-	content.add_child(_make_label("DISPLAY", 12, C_EMBER_HI, HORIZONTAL_ALIGNMENT_LEFT))
-	_option_check(content, "fullscreen", "Fullscreen", "Fill the display instead of running in a window.")
-	_option_check(content, "vibration", "Controller vibration", "The pad rumbles with hits, parries and falls.")
+	sound.add_child(_make_label("AUDIO", 12, C_EMBER_HI, HORIZONTAL_ALIGNMENT_LEFT))
+	_slider_row(sound, "Master volume", "master", 0.9)
+	_slider_row(sound, "Music", "music", 0.75)
+	_slider_row(sound, "Effects", "sfx", 0.9)
+	_option_check(sound, "music_on", "Score", "The procedural score and the Warden's theme.")
 
-	content.add_child(_make_label("ACCESSIBILITY", 12, C_EMBER_HI, HORIZONTAL_ALIGNMENT_LEFT))
-	_reduced_motion_check = _option_check(content, "reduced_motion", "Reduced motion", "Disables camera shake and softens particles.")
-	_option_check(content, "reduced_flash", "Reduced flash", "Reduces high-contrast impact flashes.")
+	seen.add_child(_make_label("DISPLAY", 12, C_EMBER_HI, HORIZONTAL_ALIGNMENT_LEFT))
+	_option_check(seen, "fullscreen", "Fullscreen", "Fill the display instead of a window.")
+	_option_check(seen, "vibration", "Controller vibration", "The pad rumbles with hits, parries and falls.")
+	seen.add_child(_make_label("ACCESSIBILITY", 12, C_EMBER_HI, HORIZONTAL_ALIGNMENT_LEFT))
+	_reduced_motion_check = _option_check(seen, "reduced_motion", "Reduced motion", "Disables camera shake and softens particles.")
+	_option_check(seen, "reduced_flash", "Reduced flash", "Reduces high-contrast impact flashes.")
 
 	var footer := _button_row(content)
 	var keys := _button("KEYS", "options_keys", false, Vector2(200, 50))
@@ -1152,8 +1278,7 @@ func sync_options(opts: Dictionary) -> void:
 		slider.set_value_no_signal(value)
 		(entry["readout"] as Label).text = "%d%%" % roundi(value * 100.0)
 	for key in _option_checks:
-		for check: CheckBox in _option_checks[key]:
-			check.set_pressed_no_signal(bool(opts.get(key, false)))
+		(_option_checks[key] as CheckBox).set_pressed_no_signal(bool(opts.get(key, false)))
 
 
 ## Keyboard text for one action, or a dash when nothing is bound.
@@ -1625,7 +1750,12 @@ func _button(text: String, node_name: String, primary: bool, minimum: Vector2, c
 	button.add_theme_color_override("font_outline_color", Color("00000080"))
 	if not cue_kind.is_empty():
 		button.pressed.connect(cue.emit.bind(cue_kind))
+	_style_button(button, primary)
+	return button
 
+
+## The ember (primary) or quiet (secondary) look of a menu button in every state.
+func _style_button(button: Button, primary: bool) -> void:
 	var normal_bg := C_EMBER if primary else C_SURFACE_HI
 	var normal_border := C_EMBER_HI if primary else C_EDGE
 	var normal_text := C_INK if primary else C_TEXT
@@ -1639,7 +1769,6 @@ func _button(text: String, node_name: String, primary: bool, minimum: Vector2, c
 	button.add_theme_color_override("font_pressed_color", C_TEXT)
 	button.add_theme_color_override("font_focus_color", C_TEXT)
 	button.add_theme_color_override("font_disabled_color", Color("6f6578"))
-	return button
 
 
 func _button_box(background: Color, border: Color, border_width: int) -> StyleBoxFlat:
@@ -1730,19 +1859,13 @@ static func _lozenge_image(fill: Color) -> Image:
 	return img
 
 
-## A toggle bound to Save option `key`. Toggling it updates every other copy of
-## the key first, so the pause card and the options screen never disagree.
+## A toggle bound to Save option `key`, registered so sync_options can
+## restore it without emitting.
 func _option_check(parent: Container, key: String, title: String, description: String) -> CheckBox:
 	var check := _check(title, description)
 	parent.add_child(check)
-	var copies: Array = _option_checks.get_or_add(key, [])
-	copies.append(check)
-	check.toggled.connect(func(value: bool):
-		for twin: CheckBox in copies:
-			if twin != check:
-				twin.set_pressed_no_signal(value)
-		option_toggled.emit(key, value)
-	)
+	_option_checks[key] = check
+	check.toggled.connect(func(value: bool): option_toggled.emit(key, value))
 	return check
 
 
@@ -1957,12 +2080,12 @@ class BoonMedallion extends Control:
 	var tint := Color.WHITE
 	var epic := false
 	var _t := 0.0
-	func setup(p_id: String, p_tint: Color, p_epic: bool) -> void:
+	func setup(p_id: String, p_tint: Color, p_epic: bool, box := Vector2(0.0, 112.0)) -> void:
 		boon_id = p_id
 		tint = p_tint
 		epic = p_epic
 		mouse_filter = Control.MOUSE_FILTER_IGNORE
-		custom_minimum_size = Vector2(0.0, 112.0)
+		custom_minimum_size = box
 		set_process(epic)
 		if not resized.is_connected(queue_redraw):
 			resized.connect(queue_redraw)

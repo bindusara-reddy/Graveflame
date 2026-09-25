@@ -35,7 +35,32 @@ func run() -> void:
 	await _test_reward_cards()
 	await _test_gameover_arming()
 	await _test_prompts()
+	await _test_pause_ledger()
 	await finish("UI_CONTRACT")
+
+
+## The pause card shows the build, and quitting asks before abandoning it.
+func _test_pause_ledger() -> void:
+	await start_run(20)
+	game.run.apply_upgrade(upgrade("power"))
+	game.run.apply_upgrade(upgrade("power"))
+	game.run.apply_upgrade(upgrade("leech"))
+	await tap_key(KEY_ESCAPE)
+	var grid: GridContainer = game.ui._descent_grid
+	check(grid.get_child_count() == 2, "one ledger tile per boon taken (got %d)" % grid.get_child_count())
+	var power := grid.get_node("Taken_power") as Button
+	check(power.find_children("*", "Label", true, false).any(func(l: Label): return l.text == "×2"), "a stacked boon shows its count")
+	power.grab_focus()
+	await ticks(1)
+	check(game.ui._descent_detail.text.contains("+20% melee damage"), "focusing a tile reads out its effect")
+	check(game.ui._descent_seed.text.contains(str(game._seed)), "the seed is shown")
+	var quits := [0]
+	game.ui.quit_to_title_requested.connect(func(): quits[0] += 1)
+	game.ui._quit_button.pressed.emit()
+	check(quits[0] == 0 and game.ui._quit_button.text == "ABANDON DESCENT?", "the first QUIT press only asks")
+	game.ui._quit_button.pressed.emit()
+	await ticks(2)
+	check(quits[0] == 1 and game.state == Game.GState.TITLE, "a second press abandons the descent")
 
 
 func _stick(axis: JoyAxis, value: float) -> void:
