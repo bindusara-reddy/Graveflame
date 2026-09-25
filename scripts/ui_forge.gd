@@ -4,6 +4,12 @@ extends "res://scripts/ui_screen.gd"
 ## for free once the Warden has fallen, each paying in renown and cells, and
 ## sealed in wax when sworn. The roll of every descent is read at the foot.
 
+## Row heights, and the list's height: five relics exactly, or the vows'
+## head and all five vows, so no row is ever shown cut in half.
+const RELIC_H := 60.0
+const VOW_H := 54.0
+const LIST_H := 5.0 * VOW_H + 4.0 * T.S1 + 34.0 + T.S1
+
 ## Every row of both pages (the suites read them here).
 var rows: VBoxContainer
 var _tabs: Kit.Tabs
@@ -18,7 +24,7 @@ var _cells := 0
 
 func build() -> void:
 	veil(0.62, 0.94, T.EMBER)
-	var column := sheet(Vector2(860, 640), T.EMBER, T.S7, T.S6)
+	var column := sheet(Vector2(860, 0), T.EMBER, T.S7, T.S6)
 	var head := HBoxContainer.new()
 	column.add_child(head)
 	var words := VBoxContainer.new()
@@ -41,7 +47,7 @@ func build() -> void:
 	column.add_child(_tabs)
 	set_meta("tabs", _tabs)
 	column.add_child(Kit.separator(T.HAIRLINE))
-	rows = Kit.scroll_list(column, 330.0, T.S1)
+	rows = Kit.scroll_list(column, LIST_H, T.S1)
 	rows.name = "ForgeRows"
 	_relics = VBoxContainer.new()
 	_vows = VBoxContainer.new()
@@ -114,7 +120,7 @@ func _relic_row(i: int, relic: Dictionary) -> Button:
 		# Gold while the purse can pay, ash while it cannot.
 		price.add_child(Kit.label(str(cost), T.NUMERAL, T.GOLD if _cells >= cost else T.SOOT, HORIZONTAL_ALIGNMENT_RIGHT))
 		price.add_child(_cell_mark())
-	var row := Kit.row("Buy%d" % i, str(relic.title).to_upper(), str(relic.desc), trailing, sigil, 58.0)
+	var row := Kit.row("Buy%d" % i, str(relic.title).to_upper(), str(relic.desc), trailing, sigil, RELIC_H)
 	row.pressed.connect(_temper.bind(i, cost))
 	return row
 
@@ -156,7 +162,7 @@ func _fill_vows() -> void:
 		word.custom_minimum_size.x = 64.0
 		trailing.add_child(word)
 		var caption := "%s   +%d%% renown" % [str(vow.desc), roundi(float(vow.score) * 100.0)]
-		var row := Kit.row("Vow%d" % i, str(vow.title).to_upper(), caption, trailing, Kit.seal(36.0, T.WAX, "flame", on), 56.0)
+		var row := Kit.row("Vow%d" % i, str(vow.title).to_upper(), caption, trailing, Kit.seal(34.0, T.WAX, "flame", on), VOW_H)
 		row.pressed.connect(ui.vow_toggled.emit.bind(str(vow.id)))
 		_vows.add_child(row)
 
