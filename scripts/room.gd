@@ -308,6 +308,7 @@ func _spawn_boss() -> void:
 	boss = Boss.new()
 	# The Warden waits seated on its throne and rises when the knight comes.
 	boss.seated = true
+	boss.trial = trial
 	boss.global_position = Boss.THRONE_SEAT
 	# Trial of the Throne: the Warden reads this as it readies, so it goes first.
 	boss.set("trial", trial)

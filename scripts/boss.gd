@@ -6,7 +6,8 @@ extends Enemy
 ## any parry) drops it to one knee for a real punish window. Phase 2 below 50%
 ## HP: it roars, its mantle catches, it strings its moves and calls wisps.
 ## Phase 3, the Last Ember, below 22%: it kneels as if spent, rises white-hot,
-## and fights faster over a floor that catches fire.
+## and fights faster over a floor that catches fire. The Trial of the Throne
+## and the Vow of Haste both harden it.
 
 const WardenArt := preload("res://scripts/warden_art.gd")
 
@@ -70,6 +71,14 @@ const SKIM_HEIGHT := 12.0
 const WAVE_LOW := 14.0
 const WAVE_HIGH := 84.0
 
+# --- The Trial of the Throne and the Vow of Haste ---
+## A Trial taken just before the throne room: a hardier Warden that calls a
+## third wisp when it ignites.
+const TRIAL_HP := 1.15
+## The Vow of Haste shortens the Warden's tells and rests as it does every
+## foe's (Enemy.setup), and quickens its stride to match.
+const HASTE := 0.85
+
 # --- Phase beats ---
 ## Health fraction where the Last Ember begins.
 const LAST_EMBER_AT := 0.22
@@ -98,6 +107,10 @@ var action_t := 1.5
 var action_idx: int = Action.LUNGE
 ## Set by the room before _ready: start seated on the throne, not standing.
 var seated := false
+## Set by the room before _ready: this is the Trial of the Throne.
+var trial := false
+## Timing multiplier: HASTE under the Vow of Haste, else 1.
+var _haste := 1.0
 var _seated_t := 0.0
 ## Seconds since waking from the throne; negative while it never sat.
 var _rise_t := -1.0
@@ -153,6 +166,10 @@ func _ready() -> void:
 	if Enemy.vows.has("v_pyre"):
 		# Vow of the Pyre: a hardier Warden that is already burning.
 		hp_max = Content.BOSS_HP * 1.2
+	if trial:
+		hp_max *= TRIAL_HP
+	if Enemy.vows.has("v_haste"):
+		_haste = HASTE
 	kind = Kind.STALKER  # reuse melee shape
 	data = Content.ENEMY[Kind.STALKER].duplicate()
 	data.w = Content.BOSS_W
@@ -274,6 +291,8 @@ func _ignite() -> void:
 	_begin_beat(Beat.ROAR)
 	emit_signal("summon_requested", Content.BOSS_SUMMON_KIND, Vector2(300.0, Content.FLOOR_Y - 260.0))
 	emit_signal("summon_requested", Content.BOSS_SUMMON_KIND, Vector2(980.0, Content.FLOOR_Y - 260.0))
+	if trial:
+		emit_signal("summon_requested", Content.BOSS_SUMMON_KIND, Vector2(640.0, Content.FLOOR_Y - 300.0))
 
 ## Phase three, the Last Ember: the Warden crashes to one knee as if spent,
 ## then rises white-hot for a faster, burning finish.
@@ -334,7 +353,7 @@ func _boss_seek(delta: float) -> void:
 	var target_speed := 0.0
 	_face_player()
 	if player != null and absf(player.global_position.x - global_position.x) > 120.0:
-		target_speed = facing * Content.BOSS_SPEED
+		target_speed = facing * Content.BOSS_SPEED / _haste
 	velocity.x = move_toward(velocity.x, target_speed, 1600.0 * delta)
 	move_and_slide()
 	action_t -= delta
@@ -352,7 +371,7 @@ func _face_player() -> void:
 ## quickens everything again.
 func _timing(calm: float, hot: float) -> float:
 	var seconds := calm if phase < BPhase.TWO else hot
-	return seconds * (0.85 if phase == BPhase.THREE else 1.0)
+	return seconds * (0.85 if phase == BPhase.THREE else 1.0) * _haste
 
 func _choose_action(player) -> void:
 	var dx := 0.0

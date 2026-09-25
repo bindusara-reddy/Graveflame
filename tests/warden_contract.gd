@@ -1,7 +1,7 @@
 extends "res://tests/harness.gd"
 ## The Warden's fight contract: poise and hyper-armour, the throne entrance,
-## the deeper moveset, the Last Ember, and its shots and waves. Real Boss
-## nodes on a bare floor.
+## the deeper moveset, the Last Ember, its shots and waves, and the Trial and
+## Vow of Haste. Real Boss nodes on a bare floor.
 
 var _floor: StaticBody2D
 
@@ -18,6 +18,7 @@ func run() -> void:
 	await _test_moveset()
 	await _test_phases()
 	await _test_shots()
+	await _test_trial_and_haste()
 	_floor.queue_free()
 	await finish("WARDEN")
 
@@ -65,10 +66,11 @@ func _knight(x: float) -> Node2D:
 
 
 ## A throne room with a stand-in knight at x; the room seats its Warden.
-func _throne_room(knight_x: float) -> Room:
+func _throne_room(knight_x: float, trial := false) -> Room:
 	var knight := _knight(knight_x)
 	var room := Room.new()
 	room.setup(Content.BOSS_TEMPLATE, true, knight, 11)
+	room.trial = trial
 	room.add_child(knight)
 	root.add_child(room)
 	return room
@@ -232,3 +234,21 @@ func _test_shots() -> void:
 	knight.queue_free()
 	await process_frame
 
+
+func _test_trial_and_haste() -> void:
+	var room := _throne_room(40.0, true)
+	var boss := room.boss
+	var summons := [0]
+	boss.summon_requested.connect(func(_kind, _pos): summons[0] += 1)
+	check(boss.trial and is_equal_approx(boss.hp_max, Content.BOSS_HP * Boss.TRIAL_HP), "the Trial of the Throne hardens the Warden")
+	boss._ignite()
+	check(summons[0] == 3, "the Trial of the Throne calls a third wisp")
+	room.queue_free()
+	await process_frame
+	Enemy.vows = {"v_haste": true}
+	boss = await _fighting_warden()
+	boss._begin_lunge()
+	check(boss.st_timer < 0.55 and boss._timing(0.55, 0.4) < 0.55, "the Vow of Haste quickens the Warden's tells")
+	Enemy.vows = {}
+	boss.queue_free()
+	await process_frame
