@@ -268,6 +268,16 @@ func hide_banners() -> void:
 	hud.hide_banners()
 
 
+## Story contract: a quiet inscription over the first chamber, line by line.
+func show_inscription(lines: Array) -> void:
+	hud.show_inscription(lines)
+
+
+## Story contract: the litany line under the chamber-clear card.
+func show_litany(text: String) -> void:
+	hud.show_litany(text)
+
+
 # --- Rift veil ---------------------------------------------------------------------
 
 ## Arrival in a new chamber: the black page burns away from where the knight

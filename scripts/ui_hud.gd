@@ -65,6 +65,16 @@ var _hint_tween: Tween
 var _boss_phase_tag: Label
 var _boss_phase_tween: Tween
 var _hud_tween: Tween
+## The keep's voice over a chamber (show_inscription): one label per line.
+var _inscription: VBoxContainer
+var _inscription_tween: Tween
+## The litany line on the chamber-clear card (show_litany).
+var _litany: Label
+var _litany_tween: Tween
+## How long the clear card stands before it steps aside into the chip, and
+## how much longer it stands while it carries a litany line to read.
+const CLEAR_HOLD := 1.4
+const LITANY_HOLD := 2.6
 
 
 ## Lay out every HUD element. Called once the HUD fills the frame.
@@ -83,6 +93,7 @@ func build() -> void:
 	_room_intro = _build_banner("RoomIntro", 18.0, 96.0, Vector2(470, 70), 26, 11, T.C_EMBER, Color("14101ceb"))
 	_boss_intro = _build_banner("BossIntro", 546.0, 666.0, Vector2(620, 118), 40, 14, T.C_RED, Color("1a0c11f0"))
 	_build_hint()
+	_build_story_lines()
 	_threat_pips = ThreatPips.new()
 	_threat_pips.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	add_child(_threat_pips)
@@ -260,7 +271,23 @@ func _build_room_clear_banner() -> void:
 	stack.add_child(Kit.label("CHAMBER CLEARED", 22, T.C_MINT))
 	_room_clear_name = Kit.label("PATH UNSEALED", 12, T.C_MUTED)
 	stack.add_child(_room_clear_name)
+	# The litany is printed on the card itself, so it is read with the card
+	# and leaves with it (show_litany).
+	_litany = Kit.label("", T.VOICE, T.ASH)
+	_litany.visible = false
+	stack.add_child(_litany)
 	_room_clear_banner.visible = false
+
+
+## The inscription carries no paper: only the keep's voice, ink-haloed so it
+## holds over a lit chamber, placed above the fight.
+func _build_story_lines() -> void:
+	var holder := _hud_strip("Inscription", Control.PRESET_TOP_WIDE, 150.0, 290.0)
+	_inscription = VBoxContainer.new()
+	_inscription.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_inscription.add_theme_constant_override("separation", T.S2)
+	holder.add_child(_inscription)
+	holder.visible = false
 
 
 ## A full-width HUD strip that centres whatever card it holds. With
@@ -589,26 +616,40 @@ func show_room_intro(idx: int, total: int, room_name: String, trial: bool = fals
 func show_room_clear(room_name: String) -> void:
 	hide_room_clear()
 	_hide_banner(_room_intro)
+	_hide_inscription()
 	_room_clear_name.text = room_name.to_upper() if not room_name.strip_edges().is_empty() else "PATH UNSEALED"
 	_room_clear_banner.visible = true
 	_room_clear_banner.modulate = Color(1.0, 1.0, 1.0, 0.0)
+	_play_clear_card(CLEAR_HOLD)
+
+
+## Land the clear card (from wherever its fade stands), hold it `hold`
+## seconds, then shrink it into the chip in the top slot.
+func _play_clear_card(hold: float) -> void:
+	Kit.kill_tween(_room_clear_tween)
 	_room_clear_banner.pivot_offset = Vector2(_room_clear_banner.size.x * 0.5, 0.0)
 	var settle := 0.0 if Feedback.motion_reduced else 0.35
 	_room_clear_tween = Kit.tween(self)
 	_room_clear_tween.tween_property(_room_clear_banner, "modulate", Color.WHITE, 0.16)
-	_room_clear_tween.tween_interval(1.4)
+	_room_clear_tween.tween_interval(hold)
 	_room_clear_tween.tween_callback(_room_clear_to_chip)
 	_room_clear_tween.tween_property(_room_clear_banner, "scale", Vector2.ONE * 0.7, settle).set_trans(Tween.TRANS_SINE)
 	_room_clear_tween.parallel().tween_property(_room_clear_banner, "position:y", 12.0, settle).set_trans(Tween.TRANS_SINE)
 
 
 ## The chip says what to do next, set larger so it stays legible once shrunk.
+## The litany has been read by now; the chip carries only the direction.
 func _room_clear_to_chip() -> void:
 	_room_clear_name.text = "PATH UNSEALED  ·  CHOOSE A RIFT"
 	_room_clear_name.add_theme_font_size_override("font_size", 16)
+	Kit.kill_tween(_litany_tween)
+	_litany.visible = false
 
 
 func hide_room_clear() -> void:
+	if _litany != null:
+		Kit.kill_tween(_litany_tween)
+		_litany.visible = false
 	if _room_clear_banner != null:
 		Kit.kill_tween(_room_clear_tween)
 		_room_clear_banner.visible = false
@@ -635,7 +676,57 @@ func hide_hint() -> void:
 		_hint_panel.visible = false
 
 
+## The keep speaks over a chamber: each line fades up in turn (the last in
+## gold), the lines hold, then all fade together. Replaces any inscription
+## still showing; never takes input. Opacity only, so reduced motion keeps it.
+func show_inscription(lines: Array) -> void:
+	Kit.kill_tween(_inscription_tween)
+	Kit.clear_children(_inscription)
+	var holder := _inscription.get_parent() as Control
+	holder.visible = true
+	holder.modulate = Color.WHITE
+	_inscription_tween = Kit.tween(self)
+	for i in range(lines.size()):
+		var last := i == lines.size() - 1 and i > 0
+		if i > 0:
+			var mark := Kit.ornament(T.GOLD)
+			mark.modulate.a = 0.0
+			_inscription.add_child(mark)
+			_inscription_tween.tween_interval(0.5)
+			_inscription_tween.tween_property(mark, "modulate:a", 1.0, 0.3)
+		var line := Kit.outlined(Kit.label(str(lines[i]), T.VOICE, T.GOLD if last else T.BONE), 5)
+		line.add_theme_font_size_override("font_size", 24)
+		line.modulate.a = 0.0
+		_inscription.add_child(line)
+		_inscription_tween.tween_property(line, "modulate:a", 1.0, 0.9).set_trans(Tween.TRANS_SINE)
+	_inscription_tween.tween_interval(3.5)
+	_inscription_tween.tween_property(holder, "modulate:a", 0.0, 0.9)
+	_inscription_tween.tween_callback(holder.hide)
+
+
+## A litany line printed on the chamber-clear card: it fades in just after
+## the card lands, the card stands longer so the line can be read, and it
+## leaves when the card steps aside into its chip. Call it with or after
+## show_room_clear.
+func show_litany(text: String) -> void:
+	Kit.kill_tween(_litany_tween)
+	_litany.text = text
+	_litany.visible = true
+	_litany.modulate.a = 0.0
+	_litany_tween = Kit.tween(self)
+	_litany_tween.tween_interval(0.4)
+	_litany_tween.tween_property(_litany, "modulate:a", 1.0, 0.6)
+	if _room_clear_banner.visible and _room_clear_banner.scale == Vector2.ONE:
+		_play_clear_card(CLEAR_HOLD + LITANY_HOLD)
+
+
+func _hide_inscription() -> void:
+	Kit.kill_tween(_inscription_tween)
+	_inscription.get_parent().visible = false
+
+
 func hide_banners() -> void:
+	_hide_inscription()
 	_threat_pips.show_pips([])
 	Kit.kill_tween(_boss_phase_tween)
 	if _boss_phase_tag != null:

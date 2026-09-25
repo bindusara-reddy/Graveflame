@@ -38,6 +38,7 @@ func run() -> void:
 	await _test_prompts()
 	await _test_pause_ledger()
 	await _test_chamber_banners()
+	await _test_story_lines()
 	await _test_burn_veil()
 	await _test_title_return()
 	_test_hud_affordances()
@@ -92,6 +93,36 @@ func _test_hud_affordances() -> void:
 	ui.show_boss_bar(1000.0)
 	check(not ui._boss_ignited, "a fresh boss bar starts unlit")
 	ui.hide_boss_bar()
+
+
+## The story contracts: an inscription speaks line by line over the chamber
+## (the last line in gold) and fades on its own; the litany sits under the
+## clear card, and leaves with it.
+func _test_story_lines() -> void:
+	game.ui.show_inscription(["They light a flame on every knight's grave.", "Yours got up."])
+	var lines: Array = game.ui.hud._inscription.get_children().filter(func(c): return c is Label)
+	check(lines.size() == 2 and lines[0].text.begins_with("They light") and lines[1].text == "Yours got up.", "the inscription sets one line per entry")
+	check(lines[1].get_theme_color("font_color") == UiTheme.GOLD, "the inscription's last line is gold")
+	await _wait_real(2.6)
+	var holder: Control = game.ui.hud._inscription.get_parent()
+	check(holder.is_visible_in_tree() and lines[1].modulate.a > 0.9, "both lines are up within the first seconds")
+	var box := holder.get_global_rect()
+	check(box.position.y >= 100.0 and box.end.y <= 320.0, "the inscription sits above the combat plane (got %s)" % box)
+	await _wait_real(5.2)
+	check(not holder.visible, "the inscription fades on its own")
+	game.ui.show_room_clear("Ashen Cells")
+	game.ui.show_litany("A flame is lit on every knight's grave.")
+	await _wait_real(2.2)
+	var litany: Label = game.ui.hud._litany
+	var clear: Control = game.ui._room_clear_banner
+	check(litany.is_visible_in_tree() and litany.modulate.a > 0.9 and litany.text == "A flame is lit on every knight's grave.", "the litany shows on the clear card")
+	check(clear.scale == Vector2.ONE and clear.is_ancestor_of(litany), "the card stands full size while its litany is read")
+	await _wait_real(2.4)
+	check(clear.visible and clear.scale.x < 0.8 and not litany.visible, "the card then steps aside into its chip without the litany")
+	game.ui.show_room_clear("Ashen Cells")
+	game.ui.show_litany("Some of them get up.")
+	game.ui.hide_room_clear()
+	check(not litany.is_visible_in_tree(), "hiding the clear card takes the litany with it")
 
 
 ## The chamber veil burns fully open from any arrival point and leaves nothing.
