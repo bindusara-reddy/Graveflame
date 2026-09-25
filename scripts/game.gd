@@ -87,6 +87,7 @@ var _vignette: CanvasLayer
 var _world_container: SubViewportContainer
 var world_view: SubViewport
 var _backdrop: Node2D
+var _foreground: Node2D
 var _lights: Node2D
 var _view_center := Vector2(Content.VIEW_W, Content.VIEW_H) * 0.5
 var _atmo_t := 0.0
@@ -138,7 +139,7 @@ func _ready() -> void:
 	world_view.canvas_item_default_texture_filter = Viewport.DEFAULT_CANVAS_ITEM_TEXTURE_FILTER_LINEAR
 	_world_container.add_child(world_view)
 	_backdrop = _add_layer(BackdropPainter.new(), "Backdrop", world_view)
-	_backdrop.game = self
+	_backdrop.paint = _paint_backdrop
 	# Additive lights and ambient particles (pausable, like the world they belong to).
 	_light_layer = _add_layer(load("res://scripts/light_layer.gd").new(), "LightLayer", world_view)
 	_light_layer.game = self
@@ -147,6 +148,10 @@ func _ready() -> void:
 	world = _add_layer(Node2D.new(), "World", world_view)
 	projectiles = _add_layer(Node2D.new(), "Projectiles", world)
 	projectiles.z_index = 2
+	# Foreground silhouettes: over the knight and creatures, under shots and effects.
+	_foreground = _add_layer(BackdropPainter.new(), "Foreground", world_view)
+	_foreground.paint = _paint_foreground
+	_foreground.z_index = 1
 	# Feedback (pausable): camera, particles, audio.
 	feedback = _add_layer(Feedback.new(), "Feedback", world_view)
 	feedback.z_index = 3
@@ -222,7 +227,7 @@ func _set_world_shown(shown: bool) -> void:
 	_world_container.visible = shown
 	_vignette.visible = shown
 	_atmosphere.visible = shown
-	for painter: Node in [_backdrop, _light_layer, _lights]:
+	for painter: Node in [_backdrop, _foreground, _light_layer, _lights]:
 		painter.set_process(shown)
 
 
@@ -1293,6 +1298,133 @@ func _draw_statue(ci: CanvasItem, foot: Vector2, side: float) -> void:
 	ci.draw_colored_polygon(PackedVector2Array(STATUE_CUP), Color("1a1216"))
 	ci.draw_polyline(PackedVector2Array(STATUE_CUP), Color(VFX.SLATE, 0.5), 1.5)
 	ci.draw_set_transform(Vector2.ZERO, 0.0, Vector2.ONE)
+## Foreground parallax depth: nearer than the play plane, so it slides past faster
+## than the world. Its pillars stand nearer still.
+const FG_DEPTH := 1.3
+const FG_INK := Color("05040a")
+
+## Paper silhouettes between the camera and the fight, in three places only:
+## along the floor's face (never above the deck, never over a pit), hanging from
+## the top of the view, and a rare full-height pillar. A silhouette with a
+## fighter behind it fades, so the layer frames the fight but never hides it.
+func _paint_foreground(ci: CanvasItem) -> void:
+	if not is_instance_valid(room):
+		return
+	_view_center = feedback.camera.get_screen_center_position()
+	var half := Vector2(Content.VIEW_W, Content.VIEW_H) * 0.5 / feedback.camera.zoom
+	var view := Rect2(_view_center - half, half * 2.0)
+	var rim := Color((mood.edge as Color).lightened(0.2), 0.8)
+	_draw_fg_floor(ci, view, rim)
+	# The throne keeps its vault and its duel clear: only the balustrade.
+	if zone != "throne":
+		_draw_fg_top(ci, view)
+		_draw_fg_pillars(ci, view, rim)
+
+## Along the floor's face: headstones in the crypt, half-sunk gears in the works,
+## charred roots in the ashpit, a balustrade before the throne. Tops stop 28px
+## under the deck so feet stay clear, and pits are left open.
+func _draw_fg_floor(ci: CanvasItem, view: Rect2, rim: Color) -> void:
+	var bottom := view.end.y + 8.0
+	var ceiling := Content.FLOOR_Y + 28.0
+	if bottom - ceiling < 12.0:
+		return
+	if zone == "throne":
+		var rail := maxf(bottom - 60.0, ceiling)
+		ci.draw_rect(Rect2(view.position.x - 20.0, rail, view.size.x + 40.0, 10.0), FG_INK)
+		ci.draw_line(Vector2(view.position.x - 20.0, rail), Vector2(view.end.x + 20.0, rail), rim, 1.5)
+		var posts := _plane_range(FG_DEPTH, 34.0, 40.0)
+		for k in range(posts.x, posts.y + 1):
+			var x := _plane_x(FG_DEPTH, float(k) * 34.0)
+			var belly := (rail + bottom) * 0.5
+			ci.draw_colored_polygon(PackedVector2Array([
+				Vector2(x - 4.0, rail), Vector2(x + 4.0, rail), Vector2(x + 9.0, belly), Vector2(x + 3.0, bottom), Vector2(x - 3.0, bottom), Vector2(x - 9.0, belly),
+			]), FG_INK)
+			if posmod(k, 6) == 0:
+				ci.draw_circle(Vector2(x, rail - 7.0), 8.0, FG_INK)
+		return
+	var r := _plane_range(FG_DEPTH, 380.0, 260.0)
+	var pits: Array = room.template.get("hazards", [])
+	for k in range(r.x, r.y + 1):
+		if _plane_hash(k, 141) > 0.55:
+			continue
+		var x := _plane_x(FG_DEPTH, float(k) * 380.0 + _plane_hash(k, 142) * 200.0)
+		var top := maxf(bottom - 40.0 - _plane_hash(k, 143) * 70.0, ceiling)
+		if pits.any(func(pit: Rect2) -> bool: return x > pit.position.x - 70.0 and x < pit.end.x + 70.0):
+			continue
+		match zone:
+			"works":
+				var hub := Vector2(x, bottom + 10.0)
+				var radius := hub.y - top
+				var teeth := PackedVector2Array()
+				for i in range(24):
+					teeth.append(hub + Vector2.from_angle(TAU * float(i) / 24.0) * (radius if i % 2 == 0 else radius * 0.86))
+				ci.draw_colored_polygon(teeth, FG_INK)
+				ci.draw_arc(hub, radius * 0.86, PI * 1.15, PI * 1.85, 16, rim, 1.5)
+			"ashpit":
+				for i in range(3):
+					var rx := x - 22.0 + float(i) * 22.0
+					var tip := top + float(i % 2) * 18.0
+					ci.draw_polyline(PackedVector2Array([Vector2(rx, bottom), Vector2(rx + 8.0, (tip + bottom) * 0.5), Vector2(rx - 6.0, tip)]), FG_INK, 9.0 - float(i) * 2.0)
+			_:
+				var w := 26.0 + _plane_hash(k, 144) * 16.0
+				ci.draw_rect(Rect2(x - w * 0.5, top + w * 0.5, w, bottom - top - w * 0.5), FG_INK)
+				ci.draw_circle(Vector2(x, top + w * 0.5), w * 0.5, FG_INK)
+				ci.draw_arc(Vector2(x, top + w * 0.5), w * 0.5, PI, TAU, 12, rim, 1.5)
+
+## Hanging from the top of the view, never more than 60px into it: sagging
+## chains, some carrying a smouldering censer, or a curtain of roots in the ashpit.
+func _draw_fg_top(ci: CanvasItem, view: Rect2) -> void:
+	var r := _plane_range(FG_DEPTH, 460.0, 240.0)
+	var top := view.position.y - 4.0
+	for k in range(r.x, r.y + 1):
+		if _plane_hash(k, 151) > 0.5:
+			continue
+		var x := _plane_x(FG_DEPTH, float(k) * 460.0 + _plane_hash(k, 152) * 160.0)
+		var fade := _fg_alpha(Rect2(x - 64.0, top, 128.0, 64.0))
+		var ink := Color(FG_INK, fade)
+		if zone == "ashpit":
+			for i in range(5):
+				var rx := x - 40.0 + float(i) * 20.0
+				var drop := 26.0 + _plane_hash(k * 5 + i, 153) * 36.0
+				ci.draw_polyline(PackedVector2Array([Vector2(rx, top), Vector2(rx + 5.0, top + drop * 0.5), Vector2(rx - 2.0, top + drop)]), ink, 5.0 - float(i % 3))
+			continue
+		var sag := PackedVector2Array()
+		for i in range(9):
+			var u := float(i) / 8.0
+			sag.append(Vector2(x - 60.0 + u * 120.0, top + 4.0 + 140.0 * u * (1.0 - u)))
+		ci.draw_polyline(sag, ink, 4.0)
+		if _plane_hash(k, 154) > 0.5:
+			var cup := Vector2(x + 34.0, top + 44.0)
+			ci.draw_line(Vector2(cup.x, top), cup, ink, 2.0)
+			ci.draw_colored_polygon(PackedVector2Array([cup + Vector2(-9.0, 0.0), cup + Vector2(9.0, 0.0), cup + Vector2(5.0, 12.0), cup + Vector2(-5.0, 12.0)]), ink)
+			ci.draw_circle(cup + Vector2(0.0, 3.0), 2.0, Color(mood.torch, 0.7 * fade))
+
+## A rare full-height pillar sliding past close to the camera, lit down one edge.
+func _draw_fg_pillars(ci: CanvasItem, view: Rect2, rim: Color) -> void:
+	var depth := 1.45
+	var r := _plane_range(depth, 900.0, 340.0)
+	for k in range(r.x, r.y + 1):
+		if _plane_hash(k, 161) > 0.5:
+			continue
+		var x := _plane_x(depth, float(k) * 900.0 + _plane_hash(k, 162) * 300.0)
+		var shaft := Rect2(x - 35.0, view.position.y - 10.0, 70.0, view.size.y + 20.0)
+		var fade := _fg_alpha(shaft)
+		ci.draw_rect(shaft, Color(FG_INK, fade))
+		ci.draw_rect(Rect2(shaft.end.x - 16.0, shaft.position.y, 10.0, shaft.size.y), Color(FG_INK.lightened(0.05), fade))
+		ci.draw_line(shaft.position + Vector2(1.0, 0.0), Vector2(shaft.position.x + 1.0, shaft.end.y), Color(rim, rim.a * fade), 1.5)
+
+## Opacity for a foreground silhouette over `area`: full with nobody behind it,
+## thinning to 0.3 as the knight or a creature comes within 70px, so a fighter
+## always shows through.
+func _fg_alpha(area: Rect2) -> float:
+	var nearest := INF
+	var fighters: Array = room.enemies.duplicate()
+	fighters.append(player)
+	for f in fighters:
+		if is_instance_valid(f):
+			var p: Vector2 = f.global_position
+			nearest = minf(nearest, Vector2(maxf(0.0, maxf(area.position.x - p.x, p.x - area.end.x)), maxf(0.0, maxf(area.position.y - p.y, p.y - area.end.y))).length())
+	return lerpf(0.3, 1.0, clampf((nearest - 70.0) / 80.0, 0.0, 1.0))
 
 # --- Run lifecycle ---
 ## Clear every trace of the current run: its finale (first, so it can put back
