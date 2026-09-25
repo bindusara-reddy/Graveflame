@@ -165,11 +165,16 @@ var _last_panel := ""
 var _title_controls: Control
 var _title_controls_button: Button
 var _title_nav_buttons: Array = []
+## Frame of the player's last navigation press or hover. Focus that moves in
+## that frame was moved by the player and ticks; focus grabbed by code (a
+## screen opening, a list rebuilding) stays silent.
+var _nav_frame := -1
 
 
 func _ready() -> void:
 	layer = 50
 	_ensure_pad_menu_bindings()
+	get_viewport().gui_focus_changed.connect(_on_focus_changed)
 
 	_root = Control.new()
 	_root.name = "InterfaceRoot"
@@ -684,20 +689,75 @@ static func _boon_index_for_key(keycode: int) -> int:
 	return -1
 
 
-func _unhandled_input(event: InputEvent) -> void:
-	# A pending rebind consumes the very next keypress, whatever it is.
+## Runs before GUI navigation, so a pending rebind can take the arrow keys and
+## Enter, and so a navigation press is known before focus moves.
+func _input(event: InputEvent) -> void:
 	if not _listening_action.is_empty():
-		if event is InputEventKey and event.pressed and not (event as InputEventKey).echo:
-			var code := _event_keycode(event as InputEventKey)
-			if code == KEY_ESCAPE:
-				_cancel_rebind()
-			elif code != 0:
-				var action := _listening_action
-				_listening_action = ""
-				_listening_button = null
-				binding_changed.emit(action, code)
+		if event is InputEventKey and event.pressed and not event.is_echo():
+			_capture_rebind(_event_keycode(event as InputEventKey))
 			get_viewport().set_input_as_handled()
 		return
+	if event is InputEventMouseMotion:
+		_focus_hovered()
+		return
+	for action in ["ui_up", "ui_down", "ui_left", "ui_right", "ui_focus_next", "ui_focus_prev"]:
+		if event.is_action_pressed(action, true):
+			_nav_frame = Engine.get_process_frames()
+
+
+## The pending rebind takes this key; Escape stays reserved for cancelling.
+func _capture_rebind(code: int) -> void:
+	if code == KEY_ESCAPE:
+		_cancel_rebind()
+	elif code != 0:
+		var action := _listening_action
+		_listening_action = ""
+		_listening_button = null
+		binding_changed.emit(action, code)
+
+
+## Hovering a button or slider focuses it, so the mouse and the pad never
+## light two controls at once.
+func _focus_hovered() -> void:
+	var hovered := get_viewport().gui_get_hovered_control()
+	if hovered == null or hovered.has_focus() or hovered.focus_mode == Control.FOCUS_NONE:
+		return
+	if not (hovered is BaseButton or hovered is Slider):
+		return
+	if hovered is BaseButton and (hovered as BaseButton).disabled:
+		return
+	_nav_frame = Engine.get_process_frames()
+	hovered.grab_focus()
+
+
+func _on_focus_changed(_control: Control) -> void:
+	if Engine.get_process_frames() == _nav_frame:
+		cue.emit("ui_move")
+
+
+func is_panel_visible(name: String) -> bool:
+	return _panels.has(name) and (_panels[name] as Control).visible
+
+
+## Esc, pad B and pad START leave a settings screen through its own BACK
+## button, so every screen exits one way and a paused run behind it never sees
+## the press. B on the pause card resumes. Returns whether a screen took it.
+func _back_out(event: InputEvent) -> bool:
+	for name in ["keys", "options", "forge"]:
+		if is_panel_visible(name):
+			((_panels[name] as Control).get_meta("back_button") as Button).pressed.emit()
+			return true
+	if is_panel_visible("pause") and event.is_action_pressed("ui_cancel"):
+		resume_requested.emit()
+		return true
+	return false
+
+
+func _unhandled_input(event: InputEvent) -> void:
+	if event.is_action_pressed("ui_cancel") or event.is_action_pressed("pause"):
+		if _back_out(event):
+			get_viewport().set_input_as_handled()
+			return
 	# Boon cards print their index, so the number keys have to actually pick one.
 	if event is InputEventKey and event.pressed and not event.echo:
 		var reward: Control = _panels.get("reward", null)
@@ -937,6 +997,7 @@ func _slider_row(parent: VBoxContainer, title: String, key: String, value: float
 	slider.custom_minimum_size = Vector2(0, 20)
 	slider.focus_mode = Control.FOCUS_ALL
 	slider.mouse_default_cursor_shape = Control.CURSOR_POINTING_HAND
+	_paper_slider(slider)
 	row.add_child(slider)
 	slider.value_changed.connect(func(v: float):
 		readout.text = "%d%%" % roundi(v * 100.0)
@@ -976,6 +1037,7 @@ func _build_options() -> void:
 	var back := _button("BACK", "options_back", false, Vector2(200, 50), "ui_back")
 	back.pressed.connect(back_from_options_requested.emit)
 	footer.add_child(back)
+	panel.set_meta("back_button", back)
 
 
 ## Reflect the persisted options onto the controls without re-emitting signals,
@@ -1019,6 +1081,7 @@ func _build_keys() -> void:
 		back_from_keys_requested.emit()
 	)
 	_button_row(content).add_child(back)
+	panel.set_meta("back_button", back)
 
 
 ## Rebuild the rebinding rows against the live input map.
@@ -1026,6 +1089,7 @@ func sync_keys() -> void:
 	if _key_rows == null:
 		return
 	_cancel_rebind()
+	var kept := _focused_name_in(_key_rows)
 	_clear_children(_key_rows)
 	for row in Content.CONTROLS_ROWS:
 		var action := str(row.action)
@@ -1039,6 +1103,9 @@ func sync_keys() -> void:
 		var button := _button(_key_text_for(action), "Key_%s" % action, false, Vector2(200, 40), "")
 		button.pressed.connect(_begin_rebind.bind(action, button))
 		line.add_child(button)
+	# A rebind rebuilds the list under the cursor: stay on the same row.
+	if not kept.is_empty():
+		_focus_row(_key_rows, kept, null)
 
 
 func _begin_rebind(action: String, button: Button) -> void:
@@ -1309,6 +1376,15 @@ func _scroll_list(parent: Container, min_height: float, separation: int) -> VBox
 	scroll.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	scroll.custom_minimum_size.y = min_height
 	scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
+	# Pad and keyboard focus may walk below the fold; the list must follow it.
+	scroll.follow_focus = true
+	# A narrow ink channel with an ember grip, not the stock grey bar.
+	var bar := scroll.get_v_scroll_bar()
+	bar.add_theme_stylebox_override("scroll", _flat_box(C_INK, 3.0))
+	bar.add_theme_stylebox_override("scroll_focus", _flat_box(C_INK, 3.0))
+	bar.add_theme_stylebox_override("grabber", _flat_box(Color(C_EMBER, 0.55), 3.0))
+	bar.add_theme_stylebox_override("grabber_highlight", _flat_box(C_EMBER_HI, 3.0))
+	bar.add_theme_stylebox_override("grabber_pressed", _flat_box(C_GOLD, 3.0))
 	parent.add_child(scroll)
 	var rows := VBoxContainer.new()
 	rows.size_flags_horizontal = Control.SIZE_EXPAND_FILL
@@ -1470,7 +1546,7 @@ func _button_box(background: Color, border: Color, border_width: int) -> StyleBo
 	return box
 
 
-## Toggle glyphs, drawn procedurally like the rest of the game's art.
+## Toggle glyphs and slider grips, drawn procedurally like the rest of the game's art.
 ## The default theme's unchecked icon renders at the panel's own luminance
 ## (measured 0.088 against a 0.086 panel), so an OFF toggle showed as blank space
 ## and the player could not see it, or that the row was interactive at all.
@@ -1483,6 +1559,8 @@ static func _toggle_icons() -> Dictionary:
 	_toggle_icon_cache = {
 		"unchecked": ImageTexture.create_from_image(_toggle_image(false)),
 		"checked": ImageTexture.create_from_image(_toggle_image(true)),
+		"grip": ImageTexture.create_from_image(_lozenge_image(C_GOLD)),
+		"grip_hot": ImageTexture.create_from_image(_lozenge_image(Color.WHITE.lerp(C_GOLD, 0.35))),
 	}
 	return _toggle_icon_cache
 
@@ -1507,6 +1585,43 @@ static func _toggle_image(is_on: bool) -> Image:
 		for i in range(8):
 			for w in range(2):
 				img.set_pixel(9 + i + w, 12 - i, ink)
+	return img
+
+
+## A flat, square-cut fill padded by `margin` on every side: the ink channel
+## and ember grip of scrollbars and sliders.
+func _flat_box(color: Color, margin: float) -> StyleBoxFlat:
+	var box := StyleBoxFlat.new()
+	box.bg_color = color
+	box.set_content_margin_all(margin)
+	box.set_corner_radius_all(2)
+	box.corner_detail = 1
+	return box
+
+
+## Sliders in the keep's idiom: an ink groove filled with ember up to a gold
+## lozenge grip, which brightens under focus or the cursor.
+func _paper_slider(slider: HSlider) -> void:
+	slider.add_theme_stylebox_override("slider", _flat_box(C_SURFACE_HI, 3.0))
+	slider.add_theme_stylebox_override("grabber_area", _flat_box(C_EMBER, 3.0))
+	slider.add_theme_stylebox_override("grabber_area_highlight", _flat_box(C_EMBER_HI, 3.0))
+	slider.add_theme_stylebox_override("focus", StyleBoxEmpty.new())
+	var icons := _toggle_icons()
+	slider.add_theme_icon_override("grabber", icons["grip"])
+	slider.add_theme_icon_override("grabber_highlight", icons["grip_hot"])
+
+
+## An 18px lozenge with a dark rim, drawn pixel by pixel like the toggles.
+static func _lozenge_image(fill: Color) -> Image:
+	var size := 18
+	var img := Image.create_empty(size, size, false, Image.FORMAT_RGBA8)
+	img.fill(Color(0, 0, 0, 0))
+	var c := (size - 1) * 0.5
+	for y in range(size):
+		for x in range(size):
+			var d := absf(x - c) + absf(y - c)
+			if d <= c:
+				img.set_pixel(x, y, fill if d <= c - 2.0 else C_INK)
 	return img
 
 
@@ -1807,9 +1922,7 @@ func _upgrade_card(index: int, upgrade: Dictionary, rarity: String, rc: Color) -
 	if bool(upgrade.get("unique", false)):
 		foot += "  ·  ONCE PER RUN"
 	stack.add_child(_make_label(foot, 11, rc))
-	# Lift toward the hand under the cursor or the pad's focus.
-	button.mouse_entered.connect(_lift_card.bind(button, true))
-	button.mouse_exited.connect(_lift_card.bind(button, false))
+	# Lift toward the hand under focus; hovering a card focuses it.
 	button.focus_entered.connect(_lift_card.bind(button, true))
 	button.focus_exited.connect(_lift_card.bind(button, false))
 	return button
@@ -1884,9 +1997,9 @@ func setup_forge(cells: int) -> void:
 	var panel: Control = _panels["forge"]
 	var balance := panel.get_meta("balance_label") as Label
 	balance.text = "AVAILABLE CELLS   %s" % _format_number(cells)
+	var kept := _focused_name_in(_forge_rows)
 	_clear_children(_forge_rows)
 
-	var focus_target: Button = null
 	for i in range(Content.META_UPGRADES.size()):
 		var upgrade: Dictionary = Content.META_UPGRADES[i]
 		var id := str(upgrade.get("id", ""))
@@ -1922,14 +2035,34 @@ func setup_forge(cells: int) -> void:
 		else:
 			buy.pressed.connect(buy_meta_requested.emit.bind(i))
 		line.add_child(buy)
-		if focus_target == null and not buy.disabled:
-			focus_target = buy
 
 	_build_vow_rows()
+	# A purchase or vow rebuilds every row: the cursor stays on the row it was
+	# on, so a second press can never buy a relic the player did not choose.
+	_focus_row(_forge_rows, kept, panel.get_meta("back_button") as Button)
 
-	if focus_target == null:
-		focus_target = panel.get_meta("back_button") as Button
-	focus_target.grab_focus.call_deferred()
+
+## Name of the focused control when it sits inside `container`, so a list
+## rebuilt under the cursor can hand focus back to the same row.
+func _focused_name_in(container: Node) -> String:
+	var owner := get_viewport().gui_get_focus_owner()
+	return str(owner.name) if owner != null and container.is_ancestor_of(owner) else ""
+
+
+## Focus the button named `kept` in `rows`, or the next usable one after it
+## (the first usable one when nothing was kept), else `fallback`.
+func _focus_row(rows: Node, kept: String, fallback: Button) -> void:
+	var buttons := rows.find_children("*", "Button", true, false)
+	var from := 0
+	for i in range(buttons.size()):
+		if buttons[i].name == kept:
+			from = i
+	for i in range(from, buttons.size()):
+		if not (buttons[i] as Button).disabled:
+			(buttons[i] as Button).grab_focus.call_deferred()
+			return
+	if fallback != null:
+		fallback.grab_focus.call_deferred()
 
 
 ## One ledger row in the forge; its edge colour marks what is owned or sworn.

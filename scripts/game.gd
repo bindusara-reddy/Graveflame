@@ -1844,14 +1844,10 @@ func _unhandled_input(event: InputEvent) -> void:
 		get_tree().paused = true
 		paused = true
 		ui.show_panel("pause")
-	elif _panel_shown("keys"):
+	elif ui.is_panel_visible("keys"):
 		_on_back_from_keys()
-	elif _panel_shown("options"):
+	elif ui.is_panel_visible("options"):
 		_on_back_from_options()
-	else:
+	elif ui.is_panel_visible("pause"):
 		_on_resume()
 	get_viewport().set_input_as_handled()
-
-## Which screen is up decides what pause means (see _unhandled_input).
-func _panel_shown(panel: String) -> bool:
-	return (ui._panels[panel] as Control).visible
