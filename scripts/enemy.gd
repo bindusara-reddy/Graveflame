@@ -38,6 +38,18 @@ static var vows: Dictionary = {}
 static func vow_damage() -> float:
 	return 1.35 if vows.has("v_embers") else 1.0
 
+## Live foes whose origin lies within `radius` of `center`. The knight's nova
+## and Cinder Skin and a burning foe's pyre all strike this same set.
+static func living_near(tree: SceneTree, center: Vector2, radius: float) -> Array:
+	var found := []
+	for area in tree.get_nodes_in_group("enemy_hurtbox"):
+		var foe = area.get_meta("owner")
+		if not is_instance_valid(foe) or foe.dead:
+			continue
+		if foe.global_position.distance_to(center) <= radius:
+			found.append(foe)
+	return found
+
 var kind: int = Kind.STALKER
 var data: Dictionary = {}
 var state: int = EState.SPAWN
@@ -294,13 +306,13 @@ func _seek_wisp(to_p: Vector2, delta: float, player) -> void:
 	# Hover with sine bob, maintain distance, shoot
 	_wisp_t += delta
 	var target_y := _wisp_y + sin(_wisp_t * 2.0) * 22.0
-	velocity.y = _approach(velocity.y, (target_y - global_position.y) * 4.0, 800.0 * delta)
+	velocity.y = move_toward(velocity.y, (target_y - global_position.y) * 4.0, 800.0 * delta)
 	var desired_x: float = global_position.x
 	if absf(to_p.x) > 420.0:
 		desired_x += facing * float(data.speed) * delta
 	elif absf(to_p.x) < 240.0:
 		desired_x -= facing * float(data.speed) * delta
-	velocity.x = _approach(velocity.x, (desired_x - global_position.x) * 4.0, 800.0 * delta)
+	velocity.x = move_toward(velocity.x, (desired_x - global_position.x) * 4.0, 800.0 * delta)
 	global_position += velocity * delta
 	if cd <= 0.0 and absf(to_p.x) < Content.WISP_RANGE and absf(to_p.y) < 200.0:
 		_begin_windup()
@@ -460,7 +472,7 @@ func _step_recover(delta: float) -> void:
 
 func _step_stagger(delta: float) -> void:
 	_apply_gravity(delta)
-	velocity.x = _approach(velocity.x, 0.0, 1800.0 * delta)
+	velocity.x = move_toward(velocity.x, 0.0, 1800.0 * delta)
 	move_and_slide()
 	stagger_t -= delta
 	if stagger_t <= 0.0:
@@ -539,20 +551,15 @@ func _pyre_detonate() -> void:
 	if pyre_damage <= 0.0 or burn_time <= 0.0:
 		return
 	var radius := Content.PYRE_RADIUS
-	for area in get_tree().get_nodes_in_group("enemy_hurtbox"):
-		if not is_instance_valid(area) or area == _hurtbox:
+	# This foe is already dead, so the query leaves it out.
+	for foe in living_near(get_tree(), global_position, radius + 20.0):
+		# The blast's own chain may already have killed a later foe.
+		if foe.dead:
 			continue
-		var other = area.get_meta("owner")
-		if other == null or not is_instance_valid(other) or other == self:
-			continue
-		if not other.has_method("take_damage") or bool(other.get("dead")):
-			continue
-		if other.global_position.distance_to(global_position) <= radius + 20.0:
-			var dir: Vector2 = (other.global_position - global_position).normalized()
-			if dir == Vector2.ZERO: dir = Vector2.UP
-			other.take_damage(pyre_damage, Vector2(dir.x, -0.4), 300.0)
-			if other.has_method("apply_burn"):
-				other.apply_burn(Content.P_FLAME_BURN_DPS, Content.P_FLAME_BURN_TIME * 0.5)
+		var dir: Vector2 = (foe.global_position - global_position).normalized()
+		if dir == Vector2.ZERO: dir = Vector2.UP
+		foe.take_damage(pyre_damage, Vector2(dir.x, -0.4), 300.0)
+		foe.apply_burn(Content.P_FLAME_BURN_DPS, Content.P_FLAME_BURN_TIME * 0.5)
 	emit_signal("pyre_burst", global_position, radius)
 
 func _die(award_reward: bool = true) -> void:
@@ -576,11 +583,7 @@ func _move_x(speed: float, delta: float) -> void:
 		_ledge_ray.force_raycast_update()
 		if not _ledge_ray.is_colliding():
 			speed = 0.0
-	velocity.x = _approach(velocity.x, speed, 2000.0 * delta)
-
-func _approach(c: float, t: float, d: float) -> float:
-	if c < t: return minf(c + d, t)
-	return maxf(c - d, t)
+	velocity.x = move_toward(velocity.x, speed, 2000.0 * delta)
 
 func _get_player():
 	var g = get_tree().get_first_node_in_group("player")

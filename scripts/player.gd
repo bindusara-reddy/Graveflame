@@ -268,7 +268,7 @@ func _step_locomotion(delta: float, controls_locked: bool = false) -> void:
 	if dir != 0.0: facing = signf(dir)
 	var accel := Content.P_AIR_ACCEL if not is_on_floor() else Content.P_ACCEL
 	var target := dir * Content.P_SPEED * _speed_mul()
-	velocity.x = _approach(velocity.x, target, accel * delta)
+	velocity.x = move_toward(velocity.x, target, accel * delta)
 	# Gravity (reduced while wall sliding)
 	var grav := Content.GRAVITY
 	if wall_sliding and velocity.y > 0.0:
@@ -282,7 +282,7 @@ func _step_locomotion(delta: float, controls_locked: bool = false) -> void:
 		velocity.y *= Content.P_JUMP_CUT
 	# Friction on ground when no input
 	if dir == 0.0 and is_on_floor():
-		velocity.x = _approach(velocity.x, 0.0, Content.P_FRICTION * delta)
+		velocity.x = move_toward(velocity.x, 0.0, Content.P_FRICTION * delta)
 	# Dash
 	if not controls_locked and _dash_buffer > 0.0 and dash_cd <= 0.0:
 		_begin_dash()
@@ -382,10 +382,6 @@ func _do_wall_jump() -> void:
 	_wall_dir = 0.0
 	emit_signal("action_feedback", "jump", global_position)
 
-func _approach(current: float, target: float, max_delta: float) -> float:
-	if current < target: return minf(current + max_delta, target)
-	return maxf(current - max_delta, target)
-
 # --- Build-derived multipliers ---
 func _speed_mul() -> float:
 	return float(build.get("speed_mul", 1.0)) + float(build.get("momentum", 0.0)) * float(_momentum_stacks)
@@ -464,7 +460,7 @@ func _step_attack(delta: float) -> void:
 	var air_dir := Input.get_axis("move_left", "move_right")
 	var drag := Content.P_AIR_ACCEL if not is_on_floor() else Content.P_FRICTION
 	var target_x := air_dir * Content.P_SPEED * 0.45 if not is_on_floor() else 0.0
-	velocity.x = _approach(velocity.x, target_x, drag * delta)
+	velocity.x = move_toward(velocity.x, target_x, drag * delta)
 	var def: Dictionary = get_meta("atk_def")
 	atk_time -= delta
 	if atk_phase == "startup" and atk_time <= 0.0:
@@ -549,7 +545,7 @@ func _begin_slam() -> void:
 
 func _step_slam(delta: float) -> void:
 	velocity.y += Content.GRAVITY * delta
-	velocity.x = _approach(velocity.x, 0.0, Content.P_FRICTION * delta)
+	velocity.x = move_toward(velocity.x, 0.0, Content.P_FRICTION * delta)
 	move_and_slide()
 	if is_on_floor():
 		_do_slam_impact()
@@ -665,7 +661,7 @@ func _begin_parry() -> void:
 
 func _step_parry(delta: float) -> void:
 	velocity.y += Content.GRAVITY * delta
-	velocity.x = _approach(velocity.x, 0.0, Content.P_FRICTION * delta)
+	velocity.x = move_toward(velocity.x, 0.0, Content.P_FRICTION * delta)
 	parry_time -= delta
 	_scan_parry()
 	if _parry_succeeded and attack_buffer > 0.0:
@@ -725,7 +721,7 @@ func _begin_heal() -> void:
 
 func _step_heal(delta: float) -> void:
 	velocity.y += Content.GRAVITY * delta
-	velocity.x = _approach(velocity.x, 0.0, Content.P_FRICTION * 2.0 * delta)
+	velocity.x = move_toward(velocity.x, 0.0, Content.P_FRICTION * 2.0 * delta)
 	move_and_slide()
 	_floor_and_wall_tracking()
 	_heal_time -= delta
@@ -808,39 +804,34 @@ func take_damage(amount: float, from_dir: Vector2, kb: float) -> void:
 ## A ring of flame around the knight: damages and ignites every enemy within
 ## `radius`. Shared by Flare Parry and Phoenix Flask.
 func nova(dmg: float, radius: float) -> void:
-	for area in get_tree().get_nodes_in_group("enemy_hurtbox"):
-		if not is_instance_valid(area): continue
-		var tgt = area.get_meta("owner")
-		if tgt == null or not is_instance_valid(tgt) or not tgt.has_method("take_damage"): continue
-		if bool(tgt.get("dead")): continue
-		if tgt.global_position.distance_to(global_position) <= radius:
-			var dir: Vector2 = (tgt.global_position - global_position).normalized()
-			if dir == Vector2.ZERO: dir = Vector2(facing, 0.0)
-			tgt.take_damage(dmg * _damage_mul(tgt), Vector2(dir.x, -0.4), 320.0)
-			if tgt.has_method("apply_burn"):
-				tgt.apply_burn(Content.P_FLAME_BURN_DPS, Content.P_FLAME_BURN_TIME)
+	for foe in Enemy.living_near(get_tree(), global_position, radius):
+		# A pyre chain set off by this blast may already have killed a later foe.
+		if foe.dead:
+			continue
+		var dir: Vector2 = (foe.global_position - global_position).normalized()
+		if dir == Vector2.ZERO: dir = Vector2(facing, 0.0)
+		foe.take_damage(dmg * _damage_mul(foe), Vector2(dir.x, -0.4), 320.0)
+		foe.apply_burn(Content.P_FLAME_BURN_DPS, Content.P_FLAME_BURN_TIME)
 	emit_signal("action_feedback", "nova", global_position)
 
 ## Cinder Skin: a hit taken scorches everything standing close.
 func _thorns_burst() -> void:
 	var dmg := float(build.get("thorns", 0.0))
 	var hit_any := false
-	for area in get_tree().get_nodes_in_group("enemy_hurtbox"):
-		if not is_instance_valid(area): continue
-		var tgt = area.get_meta("owner")
-		if tgt == null or not is_instance_valid(tgt) or not tgt.has_method("take_damage"): continue
-		if bool(tgt.get("dead")): continue
-		if tgt.global_position.distance_to(global_position) <= Content.THORNS_RADIUS:
-			var dir: Vector2 = (tgt.global_position - global_position).normalized()
-			if dir == Vector2.ZERO: dir = Vector2(facing, 0.0)
-			tgt.take_damage(dmg, Vector2(dir.x, -0.3), 260.0)
-			hit_any = true
+	for foe in Enemy.living_near(get_tree(), global_position, Content.THORNS_RADIUS):
+		# A pyre chain set off by this burst may already have killed a later foe.
+		if foe.dead:
+			continue
+		var dir: Vector2 = (foe.global_position - global_position).normalized()
+		if dir == Vector2.ZERO: dir = Vector2(facing, 0.0)
+		foe.take_damage(dmg, Vector2(dir.x, -0.3), 260.0)
+		hit_any = true
 	if hit_any:
 		emit_signal("action_feedback", "thorns", global_position)
 
 func _step_hurt(delta: float) -> void:
 	velocity.y += Content.GRAVITY * delta
-	velocity.x = _approach(velocity.x, 0.0, Content.P_FRICTION * 3.0 * delta)
+	velocity.x = move_toward(velocity.x, 0.0, Content.P_FRICTION * 3.0 * delta)
 	move_and_slide()
 	_floor_and_wall_tracking()
 	# Keep grounded knockback committed to landing. Airborne hits release only

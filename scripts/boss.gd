@@ -109,11 +109,11 @@ func _boss_seek(delta: float) -> void:
 		var to_p: Vector2 = player.global_position - global_position
 		facing = signf(to_p.x) if absf(to_p.x) > 4.0 else facing
 		if absf(to_p.x) > 120.0:
-			velocity.x = _approach(velocity.x, facing * Content.BOSS_SPEED, 1600.0 * delta)
+			velocity.x = move_toward(velocity.x, facing * Content.BOSS_SPEED, 1600.0 * delta)
 		else:
-			velocity.x = _approach(velocity.x, 0.0, 1600.0 * delta)
+			velocity.x = move_toward(velocity.x, 0.0, 1600.0 * delta)
 	else:
-		velocity.x = _approach(velocity.x, 0.0, 1600.0 * delta)
+		velocity.x = move_toward(velocity.x, 0.0, 1600.0 * delta)
 	move_and_slide()
 	action_t -= delta
 	if action_t <= 0.0:
@@ -185,7 +185,7 @@ func _boss_attack(delta: float) -> void:
 		if is_on_wall():
 			_charge_t = 0.0
 	else:
-		velocity.x = _approach(velocity.x, 0.0, 1600.0 * delta)
+		velocity.x = move_toward(velocity.x, 0.0, 1600.0 * delta)
 	move_and_slide()
 	st_timer -= delta
 	if action_idx == Action.SLAM and is_on_floor() and not _slam_wave_emitted:
@@ -208,7 +208,7 @@ func _boss_attack(delta: float) -> void:
 
 func _step_windup(delta: float) -> void:
 	velocity.y += Content.GRAVITY * delta
-	velocity.x = _approach(velocity.x, 0.0, 1800.0 * delta)
+	velocity.x = move_toward(velocity.x, 0.0, 1800.0 * delta)
 	move_and_slide()
 	st_timer -= delta
 	if st_timer <= 0.0:
@@ -268,7 +268,7 @@ func _emit_slam_waves() -> void:
 
 func _boss_recover(delta: float) -> void:
 	velocity.y += Content.GRAVITY * delta
-	velocity.x = _approach(velocity.x, 0.0, 1800.0 * delta)
+	velocity.x = move_toward(velocity.x, 0.0, 1800.0 * delta)
 	move_and_slide()
 	st_timer -= delta
 	if st_timer <= 0.0:
