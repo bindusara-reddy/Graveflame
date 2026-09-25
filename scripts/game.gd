@@ -1427,12 +1427,12 @@ func _on_binding_changed(action: String, keycode: int) -> void:
 	Save.set_binding(action, keycode)
 	_apply_binding(action, keycode)
 	# The controls screen renders from the live map, so it must be rebuilt too.
-	ui.sync_keys(Save.get_bindings())
+	ui.sync_keys()
 	ui.sync_controls()
 
 func _on_keys_requested() -> void:
 	ui.hide_all_panels()
-	ui.sync_keys(Save.get_bindings())
+	ui.sync_keys()
 	ui.show_panel("keys")
 
 func _on_back_from_keys() -> void:

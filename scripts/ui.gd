@@ -1167,7 +1167,7 @@ func _build_keys() -> void:
 
 
 ## Rebuild the rebinding rows against the live input map.
-func sync_keys(_bindings: Dictionary) -> void:
+func sync_keys() -> void:
 	if _key_rows == null:
 		return
 	_cancel_rebind()
