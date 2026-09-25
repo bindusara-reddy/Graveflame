@@ -57,10 +57,7 @@ func build() -> void:
 	var restore := Kit.button("RESTORE EVERY KEY", "keys_restore", Kit.SECONDARY, Vector2(236, 44))
 	confirm_twice(restore, "EVERY KEY, AS FIRST SET?", Kit.SECONDARY, _restore_default_keys)
 	foot.add_child(restore)
-	var spacer := Control.new()
-	spacer.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	spacer.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	foot.add_child(spacer)
+	spring(foot)
 	footer(foot, [["ui_accept", "Set a key"], ["ui_cancel", "Back", "keys_back", back]], "keys_back")
 	repaint()
 
@@ -74,10 +71,7 @@ func _column(forms: Array) -> VBoxContainer:
 	head.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	head.add_theme_constant_override("separation", T.S3)
 	column.add_child(head)
-	var lead := Control.new()
-	lead.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	lead.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	head.add_child(lead)
+	spring(head)
 	for pair in [["KEYBOARD", KEY_W], ["GAMEPAD", PAD_W + T.S4]]:
 		var caption := Kit.label(str(pair[0]), T.MICRO, T.EMBER_HI, HORIZONTAL_ALIGNMENT_RIGHT)
 		caption.custom_minimum_size.x = float(pair[1])
@@ -168,13 +162,22 @@ func _begin_rebind(action: String) -> void:
 		_pulse.tween_property(holder, "modulate:a", 1.0, 0.45).set_trans(Tween.TRANS_SINE)
 
 
+## Give up a rebind in progress: the form keeps its keys.
 func cancel_rebind() -> void:
-	Kit.kill_tween(_pulse)
-	if listening():
-		(_cells[listening_action]["key"] as Control).modulate.a = 1.0
-		listening_action = ""
+	if not _stop_listening().is_empty():
 		repaint()
 		_set_note("")
+
+
+## Stop listening and let the waiting cap rest. Returns the form that was
+## listening, "" when none was.
+func _stop_listening() -> String:
+	Kit.kill_tween(_pulse)
+	var action := listening_action
+	listening_action = ""
+	if not action.is_empty():
+		(_cells[action]["key"] as Control).modulate.a = 1.0
+	return action
 
 
 ## A form's name as CONTROLS_ROWS gives it.
@@ -201,17 +204,15 @@ func hear(event: InputEvent) -> bool:
 ## The pending rebind takes this key; Escape stays reserved for giving up.
 ## A key another form already holds is taken from it: that form keeps its
 ## other keys or, when this was its only one, takes the rebound form's old
-## key, so no form is ever left without a key or sharing one.
+## key, so no form is ever left without a key or sharing one. The game
+## applies each change and has the page repaint (UI.sync_keys).
 func _capture_rebind(code: int) -> void:
 	if code == KEY_ESCAPE:
 		cancel_rebind()
 		return
 	if code == 0:
 		return
-	var action := listening_action
-	Kit.kill_tween(_pulse)
-	(_cells[action]["key"] as Control).modulate.a = 1.0
-	listening_action = ""
+	var action := _stop_listening()
 	var old_keys := UiInput.key_codes(action)
 	var note := ""
 	for form: Dictionary in Content.CONTROLS_ROWS:
@@ -222,10 +223,9 @@ func _capture_rebind(code: int) -> void:
 		keys.erase(code)
 		var kept: int = keys[0] if not keys.is_empty() else (old_keys[0] if not old_keys.is_empty() else 0)
 		ui.binding_changed.emit(other, kept)
-		note = "%s gives up %s  ·  it keeps %s" % [sentence(str(form.label)), OS.get_keycode_string(code), UiInput.key_text_for(other)]
+		note = "%s gives up %s  ·  now %s" % [sentence(str(form.label)), OS.get_keycode_string(code), UiInput.key_text_for(other)]
 	ui.binding_changed.emit(action, code)
 	ui.cue.emit("ui_confirm")
-	repaint()
 	_set_note(note)
 
 

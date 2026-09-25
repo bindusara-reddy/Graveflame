@@ -137,6 +137,14 @@ func gap(column: Container, height: float) -> Control:
 	return space
 
 
+## A spring in a row: it pushes whatever follows to the row's far end.
+func spring(row: HBoxContainer) -> void:
+	var push := Control.new()
+	push.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	push.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	row.add_child(push)
+
+
 ## Lay the sheet down (see Kit.settle_in).
 func settle() -> void:
 	if frame != null:

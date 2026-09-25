@@ -27,7 +27,7 @@ func build() -> void:
 	var column := sheet(Vector2(740, 0), T.SPIRIT, T.S7, T.S6)
 	# The sheet lies on the left of the frame; the held chamber stays in
 	# view on the right.
-	frame.anchor_right = 0.66
+	frame.anchor_right = 0.7
 	frame.offset_left = T.S7
 	frame.offset_right = -T.S5
 	_kicker = heading(column, "", "The Keep Waits", T.SPIRIT)
@@ -51,10 +51,7 @@ func build() -> void:
 	var foot := HBoxContainer.new()
 	column.add_child(foot)
 	footer(foot, [["pause", "Rise", "rise_prompt", ui.resume_requested.emit]])
-	var spacer := Control.new()
-	spacer.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	spacer.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	foot.add_child(spacer)
+	spring(foot)
 	seed_label = Kit.label("", T.MICRO, T.SOOT, HORIZONTAL_ALIGNMENT_RIGHT)
 	seed_label.size_flags_horizontal = Control.SIZE_SHRINK_END
 	foot.add_child(seed_label)
@@ -64,7 +61,8 @@ func build() -> void:
 ## RISE on ember paper, then two quiet words: one bright thing per region.
 func _actions() -> VBoxContainer:
 	var actions := VBoxContainer.new()
-	actions.custom_minimum_size.x = 220.0
+	# Wide enough for ABANDON THE DESCENT?, so asking never shifts the ledger.
+	actions.custom_minimum_size.x = 272.0
 	actions.add_theme_constant_override("separation", T.S1)
 	var rise := Kit.button("RISE", "resume", Kit.PRIMARY, Vector2(220, 52))
 	rise.pressed.connect(ui.resume_requested.emit)
@@ -83,8 +81,10 @@ func _ledger() -> VBoxContainer:
 	ledger.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	ledger.add_theme_constant_override("separation", T.S2)
 	ledger.add_child(Kit.label("THIS DESCENT", T.CAPS, T.EMBER_HI, HORIZONTAL_ALIGNMENT_LEFT))
+	# Headroom for the flame that stands over a focused medallion.
+	gap(ledger, T.S3)
 	boons = GridContainer.new()
-	boons.columns = 7
+	boons.columns = 6
 	boons.add_theme_constant_override("h_separation", T.S2)
 	boons.add_theme_constant_override("v_separation", T.S3)
 	ledger.add_child(boons)
