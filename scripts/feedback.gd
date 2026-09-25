@@ -851,17 +851,21 @@ func _draw_glow() -> void:
 func set_reduced_motion(v: bool) -> void:
 	motion_reduced = v
 	if v:
-		_trauma = 0.0
-		_kick_at = -1.0
-		camera.offset = Vector2.ZERO
-		if _zoom_tween != null and _zoom_tween.is_valid():
-			_zoom_tween.kill()
-			camera.zoom = _zoom_rest
+		calm_camera()
 		_particles.clear()
 		_restore_hit_stop()
 		end_slow_motion()
 	if _glow != null:
 		_glow.queue_redraw()
+
+## Settles the camera at once: no shake, kick or punch-zoom left running.
+func calm_camera() -> void:
+	_trauma = 0.0
+	_kick_at = -1.0
+	camera.offset = Vector2.ZERO
+	if _zoom_tween != null and _zoom_tween.is_valid():
+		_zoom_tween.kill()
+		camera.zoom = _zoom_rest
 
 func set_reduced_flash(v: bool) -> void:
 	flash_reduced = v

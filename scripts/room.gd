@@ -822,7 +822,8 @@ func _draw_rift(c: Vector2, kind: String, m: Dictionary, near: bool, salt: int) 
 ## Hand-placed floor dressing never stands in a rift's doorway, whichever rifts
 ## the chamber rolled.
 func _clear_of_rifts(pos: Vector2) -> bool:
-	return not exits.any(func(e: Dictionary) -> bool: return (e.rect as Rect2).grow(45.0).has_point(pos))
+	# The throne room never opens a rift, so its lights and dressing stay put.
+	return is_boss or not exits.any(func(e: Dictionary) -> bool: return (e.rect as Rect2).grow(45.0).has_point(pos))
 
 func _candles(base: Vector2, n: int, t: float, m: Dictionary) -> void:
 	if not _clear_of_rifts(base):

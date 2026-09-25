@@ -828,8 +828,7 @@ func abort() -> void:
 		player.process_mode = Node.PROCESS_MODE_INHERIT
 		player.cinematic = false
 	game._reset_camera()
-	game.feedback.shake_time = 0.0
-	game.feedback.camera.offset = Vector2.ZERO
+	game.feedback.calm_camera()
 	game.sconce_heat = 1.0
 	game._set_vignette(Game.VIGNETTE_EDGE)
 	game._lights.set_ambient(game.mood.ambient)
