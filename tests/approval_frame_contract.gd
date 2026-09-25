@@ -23,9 +23,8 @@ func run() -> void:
 ## The locked camera contract: tighter frame, fighters read at Blasphemous scale.
 func _test_camera_framing() -> void:
 	check(Content.CAM_ZOOM >= 1.1 and Content.CAM_ZOOM <= 1.2, "CAM_ZOOM stays in the locked 1.1-1.2 band")
-	check(Content.PIXEL_SCALE <= 1.0, "vector-native PIXEL_SCALE stays at or below 1.0")
 	var zoom: Vector2 = game.feedback.camera.zoom
-	check(is_equal_approx(zoom.x, Content.CAM_ZOOM / Content.PIXEL_SCALE), "camera zoom honors the CAM_ZOOM contract")
+	check(is_equal_approx(zoom.x, Content.CAM_ZOOM), "camera zoom honors the CAM_ZOOM contract")
 	# Tighter frame: at 1280 wide the view spans ~1113 world px, never the full room.
 	var view_span: float = float(Content.VIEW_W) / zoom.x
 	check(view_span < float(Content.VIEW_W), "tighter camera shows less than the full authored width")

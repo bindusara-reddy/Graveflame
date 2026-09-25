@@ -1,8 +1,8 @@
 extends Node2D
-## Real 2D lighting for the pixel viewport: an ambient CanvasModulate per mood
-## and pooled PointLight2Ds for the knight's flame, wall torches, room braziers,
-## the open rift, the boss, wisps and elites. Runs inside the pixel viewport so
-## light falls on the same grid as everything else.
+## Real 2D lighting for the world: an ambient CanvasModulate per mood and pooled
+## PointLight2Ds for the knight's flame, wall torches, room braziers, the open
+## rift, the boss, wisps and elites.
+## Runs inside the world viewport, so the ambient and lights act on world art, not the HUD.
 ##
 ## Pairs with LightLayer rather than duplicating it: this node attenuates what is
 ## already drawn, while LightLayer adds the additive glow (and the effects real

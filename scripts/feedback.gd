@@ -38,8 +38,8 @@ func _ready() -> void:
 	# Frame the authored 1280x720 play space, tightened by CAM_ZOOM so fighters
 	# read at the locked approval scale before the follow code takes over.
 	camera.position = Vector2(Content.VIEW_W, Content.VIEW_H) * 0.5
-	# Vector-native viewport at full resolution; CAM_ZOOM is the only scaling.
-	camera.zoom = Vector2.ONE * Content.CAM_ZOOM / Content.PIXEL_SCALE
+	# CAM_ZOOM is the only world scaling.
+	camera.zoom = Vector2.ONE * Content.CAM_ZOOM
 	add_child(camera)
 	# Additive layer for pure-light effects: rings, parry halo, slash afterglow, flashes.
 	_glow = Node2D.new()

@@ -18,9 +18,6 @@ const VIEW_H := 720
 ## Locked camera zoom for the approval frame: a ~15% tighter frame so the
 ## fighters read at Blasphemous scale without losing duel spacing.
 const CAM_ZOOM := 1.15
-## World pixels per rendered pixel. The whole frame renders vector-native at
-## full resolution: no pixel grid, no nearest filtering, smooth sub-pixel art.
-const PIXEL_SCALE := 1.0
 const FLOOR_Y := 600.0
 const ROOM_LEFT := -200.0
 const ROOM_RIGHT := 1480.0

@@ -136,7 +136,7 @@ func _finish() -> void:
 		"process_p95_ms":percentile(process_ms,0.95),"physics_p95_ms":percentile(physics_ms,0.95),
 		"backdrop_p95_ms":percentile(backdrop_ms,0.95),"draw_calls_p50":percentile(draw_calls,0.5),
 		"player_hp":game.player.build.hp,"boss_hp":game.room.boss.hp,"boss_paints":game.paint_count,
-		"renderer":RenderingServer.get_video_adapter_name(),"viewport":str(game.pixel_view.size),
+		"renderer":RenderingServer.get_video_adapter_name(),"viewport":str(game.world_view.size),
 		"mean_fps":mean_fps,"boss_phase":game.room.boss.phase,
 	}
 	var passed := valid and samples.size() >= 180 and float(result.p95_ms) <= P95_LIMIT_MS and float(result.max_ms) <= 40.0 and mean_fps >= 58.0

@@ -62,10 +62,10 @@ const TORCH_Y := Content.FLOOR_Y - 200.0
 var _light_layer: Node2D
 var _atmosphere: Node2D
 var _vignette: CanvasLayer
-## The world renders vector-native at full resolution with linear filtering,
-## so actors, environment and lighting share one smooth coherent frame.
-var _pixel_container: SubViewportContainer
-var pixel_view: SubViewport
+## The world renders at the 1280x720 design size and is upscaled with linear
+## filtering, so actors, environment and lighting share one smooth coherent frame.
+var _world_container: SubViewportContainer
+var world_view: SubViewport
 var _backdrop: Node2D
 var _lights: Node2D
 var _view_center := Vector2(Content.VIEW_W, Content.VIEW_H) * 0.5
@@ -83,43 +83,42 @@ var _beat_embers_at := 0.0
 func _ready() -> void:
 	process_mode = Node.PROCESS_MODE_ALWAYS
 	RenderingServer.set_default_clear_color(mood.bg_top)
-	# Pixel viewport: the whole world draws at 1/PIXEL_SCALE resolution.
-	_pixel_container = SubViewportContainer.new()
-	_pixel_container.name = "PixelView"
-	_pixel_container.stretch = true
-	_pixel_container.stretch_shrink = int(Content.PIXEL_SCALE)
-	_pixel_container.size = Vector2(Content.VIEW_W, Content.VIEW_H)
-	_pixel_container.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	_pixel_container.texture_filter = CanvasItem.TEXTURE_FILTER_LINEAR
-	add_child(_pixel_container)
-	pixel_view = SubViewport.new()
-	pixel_view.name = "Viewport"
-	pixel_view.disable_3d = true
-	pixel_view.handle_input_locally = false
-	pixel_view.gui_disable_input = true
-	pixel_view.canvas_item_default_texture_filter = Viewport.DEFAULT_CANVAS_ITEM_TEXTURE_FILTER_LINEAR
-	pixel_view.snap_2d_transforms_to_pixel = false
-	_pixel_container.add_child(pixel_view)
+	# World viewport: backdrop, lights, world and feedback camera render inside it
+	# at the 1280x720 design size; the UI stays outside.
+	_world_container = SubViewportContainer.new()
+	_world_container.name = "WorldView"
+	_world_container.stretch = true
+	_world_container.size = Vector2(Content.VIEW_W, Content.VIEW_H)
+	_world_container.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_world_container.texture_filter = CanvasItem.TEXTURE_FILTER_LINEAR
+	add_child(_world_container)
+	world_view = SubViewport.new()
+	world_view.name = "Viewport"
+	world_view.disable_3d = true
+	world_view.handle_input_locally = false
+	world_view.gui_disable_input = true
+	world_view.canvas_item_default_texture_filter = Viewport.DEFAULT_CANVAS_ITEM_TEXTURE_FILTER_LINEAR
+	_world_container.add_child(world_view)
 	_backdrop = BackdropPainter.new()
 	_backdrop.name = "Backdrop"
 	_backdrop.game = self
 	_backdrop.process_mode = Node.PROCESS_MODE_PAUSABLE
-	pixel_view.add_child(_backdrop)
+	world_view.add_child(_backdrop)
 	# Additive lights and ambient particles (pausable, like the world they belong to).
 	_light_layer = load("res://scripts/light_layer.gd").new()
 	_light_layer.name = "LightLayer"
 	_light_layer.game = self
 	_light_layer.process_mode = Node.PROCESS_MODE_PAUSABLE
-	pixel_view.add_child(_light_layer)
+	world_view.add_child(_light_layer)
 	_atmosphere = load("res://scripts/atmosphere.gd").new()
 	_atmosphere.name = "Atmosphere"
 	_atmosphere.process_mode = Node.PROCESS_MODE_PAUSABLE
-	pixel_view.add_child(_atmosphere)
+	world_view.add_child(_atmosphere)
 	# World (pausable)
 	world = Node2D.new()
 	world.name = "World"
 	world.process_mode = Node.PROCESS_MODE_PAUSABLE
-	pixel_view.add_child(world)
+	world_view.add_child(world)
 	projectiles = Node2D.new()
 	projectiles.name = "Projectiles"
 	projectiles.z_index = 2
@@ -130,13 +129,13 @@ func _ready() -> void:
 	feedback.name = "Feedback"
 	feedback.z_index = 3
 	feedback.process_mode = Node.PROCESS_MODE_PAUSABLE
-	pixel_view.add_child(feedback)
-	# Real 2D lights over everything in the pixel viewport.
+	world_view.add_child(feedback)
+	# Real 2D lights over everything in the world viewport.
 	_lights = LightRig.new()
 	_lights.name = "Lights"
 	_lights.game = self
 	_lights.process_mode = Node.PROCESS_MODE_PAUSABLE
-	pixel_view.add_child(_lights)
+	world_view.add_child(_lights)
 	_lights.set_ambient(mood.ambient)
 	# Route synthesized audio through named buses so the options screen has
 	# something to mix. Master already exists as bus 0.
@@ -304,7 +303,7 @@ func _step_beat(delta: float) -> void:
 	if not Feedback.motion_reduced:
 		# Close in on the fallen (or the felled) and hold there.
 		var push := 1.32 if _beat_kind == "death" else 1.2
-		var zoom_to := Content.CAM_ZOOM / Content.PIXEL_SCALE * push
+		var zoom_to := Content.CAM_ZOOM * push
 		cam.zoom = cam.zoom.lerp(Vector2.ONE * zoom_to, 1.0 - exp(-3.2 * real_dt))
 		var focus := _beat_focus
 		if _beat_kind == "death" and is_instance_valid(player):
@@ -338,7 +337,7 @@ func _finish_beat() -> void:
 func _reset_camera() -> void:
 	ui.set_hud_faded(false)
 	feedback.end_slow_motion()
-	feedback.camera.zoom = Vector2.ONE * Content.CAM_ZOOM / Content.PIXEL_SCALE
+	feedback.camera.zoom = Vector2.ONE * Content.CAM_ZOOM
 
 ## Contextual first-run teaching. Each lesson fires the first time the situation
 ## that makes it useful actually arises, then never again for that save. The
