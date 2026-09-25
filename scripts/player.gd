@@ -11,6 +11,10 @@ const KnightArt := preload("res://scripts/knight_art.gd")
 const FLIP_TIME := 0.3
 ## One full stride (two steps) per this much ground covered, so feet never skate.
 const STRIDE := 62.0
+## Poise damage (see Enemy.take_damage) of the slam, and of the moves that
+## always break a guard: a parry, a riposte, ignition.
+const SLAM_POISE := 2.0
+const GUARD_BREAK := 99.0
 ## How each blade blow lands. stop: hit-stop seconds, extending the game's base
 ## freeze (0.045, or 0.065 on heavies). slant: the cut sliver's screen angle
 ## when facing right. kick: camera shove in px. poise: guard damage dealt.
@@ -18,14 +22,12 @@ const BLOWS := {
 	"cut": { "stop": 0.045, "slant": 0.55, "kick": 3.0, "poise": 1.0 },
 	"cleave": { "stop": 0.05, "slant": -0.55, "kick": 3.0, "poise": 1.0 },
 	"finish": { "stop": 0.075, "slant": 1.0, "kick": 6.0, "poise": 2.0 },
-	"riposte": { "stop": 0.10, "slant": 0.0, "kick": 6.0, "poise": 99.0 },
+	"riposte": { "stop": 0.10, "slant": 0.0, "kick": 6.0, "poise": GUARD_BREAK },
 }
 ## A killing blow holds the freeze this much longer.
 const KILL_STOP_BONUS := 0.03
 ## Being struck freezes the world longest of all: it is the hit that must read.
 const HURT_STOP := 0.085
-const SLAM_POISE := 2.0
-const PARRY_POISE := 99.0
 ## A finisher or riposte that lands on the ground rocks the knight back (px/s).
 const HEAVY_RECOIL := 90.0
 ## A blow that rings off a shield throws the knight back this fast (px/s).
@@ -698,7 +700,7 @@ func _do_slam_impact() -> void:
 	for prop in get_tree().get_nodes_in_group("breakable_prop"):
 		if is_instance_valid(prop) and prop.global_position.distance_to(center) <= radius:
 			prop.take_damage(base_dmg, Vector2(signf(prop.global_position.x - center.x), -0.7), Content.P_SLAM_KNOCK)
-	var struck := 0
+	var struck: Array = []
 	for area in get_tree().get_nodes_in_group("enemy_hurtbox"):
 		if not is_instance_valid(area): continue
 		if area.global_position.distance_to(center) <= radius + 24.0:
@@ -709,15 +711,18 @@ func _do_slam_impact() -> void:
 				deal(tgt, base_dmg * _damage_mul(tgt), Vector2(kdir.x, -0.7), Content.P_SLAM_KNOCK, SLAM_POISE)
 				if tgt.get("last_hit_blocked") == true:
 					continue
-				struck += 1
+				struck.append(tgt)
 				# Each foe caught gets its own contact burst, thrown away from the crater.
-				VFX.jolt(tgt, 0.05)
 				if feedback != null:
 					feedback.impact(tgt.global_position + Vector2(0.0, 10.0), Content.PAL.attack, true, Vector2(kdir.x, -0.6))
-	if struck > 0:
+	if not struck.is_empty():
 		_gain_special(Content.P_SPECIAL_GAIN * float(build.get("special_mul", 1.0)) * 2.0)
+		# The freeze grows with every foe caught, and each one shivers through it.
+		var stop := minf(0.05 + 0.015 * float(struck.size()), 0.11)
+		for tgt in struck:
+			VFX.jolt(tgt, stop)
 		if feedback != null:
-			feedback.hit_stop(minf(0.05 + 0.015 * float(struck), 0.11))
+			feedback.hit_stop(stop)
 	_draw_slam_impact = 0.3
 	emit_signal("slam_landed", center, radius)
 	if bool(build.get("skyfall", false)):
@@ -753,7 +758,7 @@ func _do_graveflame() -> void:
 	emit_signal("action_feedback", "flame", global_position)
 	# Ignition is a showpiece and a panic button: it throws every foe close by
 	# clear, guard broken and alight, while the world holds and the camera leans in.
-	nova(0.0, IGNITE_RADIUS, IGNITE_KNOCK, PARRY_POISE)
+	nova(0.0, IGNITE_RADIUS, IGNITE_KNOCK, GUARD_BREAK)
 	if feedback != null:
 		feedback.hit_stop(0.18)
 		feedback.punch_zoom(1.08, 0.06, 0.3)
@@ -869,7 +874,7 @@ func _scan_parry() -> void:
 				continue
 			# The deflect drives the attacker away from the knight, so a shield
 			# faces it head-on and a parry that kills leaves the body at rest.
-			deal(attacker, Content.PARRY_DAMAGE + float(build.get("parry_bonus_dmg", 0.0)), Vector2(facing, -0.1), 420.0, PARRY_POISE)
+			deal(attacker, Content.PARRY_DAMAGE + float(build.get("parry_bonus_dmg", 0.0)), Vector2(facing, -0.1), 420.0, GUARD_BREAK)
 			if not attacker.dead:
 				attacker.on_parried(Vector2(facing, -0.2))
 			# The riposte must land while the foe still reels, longest after a perfect parry.
