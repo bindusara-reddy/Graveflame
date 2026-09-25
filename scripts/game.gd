@@ -61,6 +61,7 @@ const VIGNETTE_LOW_HP := Color(0.46, 0.04, 0.07, 0.92)
 const TELEGRAPH_RANGE := 620.0
 const TELEGRAPH_REFRACTORY := 0.07
 var _telegraph_at: Dictionary = {}
+var _enemy_shot_frame := -1
 # Visual layers. Lights and ambience are inserted before World so they draw above
 # the backdrop but beneath platforms, actors and combat VFX.
 const TORCH_Y := Content.FLOOR_Y - 200.0
@@ -350,10 +351,12 @@ func _finish_beat() -> void:
 	var kind := _beat_kind
 	_beat_kind = ""
 	feedback.end_slow_motion()
+	feedback.stop_world_voices()
 	get_tree().paused = true
 	if kind == "death":
 		ui.show_panel("gameover", 0.6)
-		music.play_track("title")
+		# A slow rise, so the toll rings out into silence before the title.
+		music.play_track("title", 3.0)
 	elif kind == "victory":
 		ui.show_panel("victory", 0.6)
 
@@ -416,7 +419,9 @@ func _register_kill() -> void:
 	_stats.best_streak = maxi(int(_stats.best_streak), _streak_kills)
 	var tier := Content.streak_tier(_streak_kills)
 	if tier > _streak_tier:
-		feedback.play("streak", 1.0 + 0.16 * float(tier))
+		# Tiers climb the home triad above the cue's D: F, A, D, F.
+		var semitones: int = [0, 3, 7, 12, 15][mini(tier, 4)]
+		feedback.play("streak", pow(2.0, float(semitones) / 12.0))
 	_streak_tier = tier
 	ui.set_streak(_streak_kills, 1.0, Content.streak_multiplier(_streak_kills))
 
@@ -424,12 +429,14 @@ func _register_kill() -> void:
 func _update_low_hp_vignette(delta: float) -> void:
 	var frac := float(player.build.hp) / maxf(1.0, float(player.build.max_hp))
 	var low := clampf((0.34 - frac) / 0.34, 0.0, 1.0)
+	music.set_muffle(low)
 	if low <= 0.0:
 		_low_hp_t = 0.0
 		_set_vignette(VIGNETTE_EDGE)
 		return
 	if not get_tree().paused and not Feedback.motion_reduced:
 		_low_hp_t += delta * (3.5 + low * 4.0)
+		feedback.heartbeat(_low_hp_t, low)
 	var pulse := 0.5 + 0.5 * sin(_low_hp_t) if not Feedback.motion_reduced else 0.5
 	var strength := low * (0.5 + 0.5 * pulse) * (0.45 if Feedback.flash_reduced else 1.0)
 	_set_vignette(VIGNETTE_EDGE.lerp(VIGNETTE_LOW_HP, strength))
@@ -1023,6 +1030,7 @@ func _on_enemy_telegraphed(kind: String, pos: Vector2, _elite: bool) -> void:
 ## because the first lands under the chamber card that already names the room.
 func _on_wave_started(current: int, total: int) -> void:
 	ui.set_wave(current, total)
+	music.set_intensity(1.0, 0.8)
 	if current > 1:
 		feedback.play("wave")
 
@@ -1054,6 +1062,7 @@ func _on_player_action(kind: String, pos: Vector2) -> void:
 		"dash_trail":
 			feedback.afterimage(pos, player.facing, Content.PAL.player_accent, player._pose)
 		"parry_start": feedback.play("shield")
+		"heal_start": feedback.play("uncork")
 		"heal":
 			feedback.play("heal")
 			feedback.damage_number(pos + Vector2(0.0, -48.0), Content.FLASK_HEAL, "heal", "+%d" % roundi(Content.FLASK_HEAL))
@@ -1097,6 +1106,18 @@ func _spawn_projectile(team: String, pos: Vector2, vel: Vector2, dmg: float, kb:
 	var p := Projectile.new()
 	p.setup(team, pos, vel, dmg, kb, pierce, life, color)
 	projectiles.add_child(p)
+	if team == "enemy":
+		_voice_enemy_shot(pos)
+
+## Enemy shots are heard as they are loosed, softer with distance like the
+## windups, and once per volley: a fan of five in one frame is one spit.
+func _voice_enemy_shot(pos: Vector2) -> void:
+	var frame := Engine.get_physics_frames()
+	if frame == _enemy_shot_frame or not is_instance_valid(player):
+		return
+	_enemy_shot_frame = frame
+	var falloff := clampf(1.0 - player.global_position.distance_to(pos) / TELEGRAPH_RANGE, 0.06, 1.0)
+	feedback.play("spit", 1.0, linear_to_db(falloff))
 
 ## Flask charges a cleared chamber returns (none under the Vow of Thirst).
 func _flask_per_room() -> int:
@@ -1129,7 +1150,7 @@ func _on_enemy_died(sc: int, pos: Vector2, tier: int, color: Color) -> void:
 			feedback.shake(16.0, 0.5)
 			feedback.hit_stop(0.16)
 			feedback.play("die")
-			feedback.play("elite", 0.8)
+			feedback.play("elite", 0.749)  # the gong on A, the dominant
 		1:
 			_stats.elites += 1
 			var cells := _award_cells(Content.ELITE_CELLS)
@@ -1147,12 +1168,14 @@ func _on_enemy_died(sc: int, pos: Vector2, tier: int, color: Color) -> void:
 
 func _on_room_cleared(room_name: String) -> void:
 	feedback.play("clear")
+	# The chamber exhales: the combat layer ebbs away under the clear bells.
+	music.set_intensity(0.0, 3.0)
 	ui.show_room_clear(room_name)
 
 func _on_room_completed() -> void:
 	ui.hide_room_clear()
 	# The rift swallows the chamber: mark the descent before the reward opens.
-	feedback.play("rift")
+	feedback.play_persistent("rift")
 	# A streak belongs to the chamber it was built in.
 	_break_streak()
 	if run.is_boss_room():
@@ -1172,6 +1195,7 @@ func _on_room_completed() -> void:
 			_pending_upgrades = run.roll_upgrades()
 	ui.setup_upgrades(_pending_upgrades)
 	ui.show_panel("reward")
+	feedback.stop_world_voices()
 	get_tree().paused = true
 	state = GState.REWARD
 
@@ -1255,7 +1279,7 @@ func _on_player_died() -> void:
 	feedback.burst(player.global_position + Vector2(0.0, -28.0), 16, Content.PAL.player_accent, 180.0)
 	feedback.shake(12.0, 0.4)
 	# A toll rather than a hit: the run itself has ended, not just the player.
-	feedback.play("defeat")
+	feedback.play_persistent("defeat")
 	_close_run(false)
 	# The score drops out under the toll; the title theme returns with the screen.
 	music.play_track("")
@@ -1268,11 +1292,15 @@ func _on_boss_spawned() -> void:
 		ui.show_boss_intro("The Ember Warden", "Keeper of the Ember Throne")
 		feedback.shake(8.0, 0.3)
 		feedback.play("boss")
-		music.play_track("boss")
+		# The keep goes quiet as the Warden drops; its theme lands on the first move.
+		music.play_track("", 0.8)
 
 func _on_boss_phase(phase: int) -> void:
 	feedback.shake(10.0, 0.35)
-	feedback.play("boss")
+	if phase == 1:
+		music.play_track("boss", 0.0)
+	else:
+		feedback.play("boss")
 	if phase == 2:
 		# Phase-2 callout renders as a compact floating tag above the boss bar,
 		# never as a center-screen card over the fighters.
@@ -1291,7 +1319,7 @@ func _on_boss_shattered(pos: Vector2) -> void:
 	feedback.burst(pos, 40, Content.PAL.player_accent, 520.0)
 	feedback.shake(18.0, 0.6)
 	feedback.play("pyre")
-	feedback.play("elite", 0.7)
+	feedback.play("elite", 0.667)  # the gong on G, in key
 	feedback.rumble(0.8, 1.0, 0.6)
 	ui.show_victory_card()
 
