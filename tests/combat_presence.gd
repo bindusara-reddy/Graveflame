@@ -24,6 +24,7 @@ func run() -> void:
 	await test_parry_aims()
 	test_number_tally()
 	await test_ignition_and_clear_beat()
+	await test_soft_separation()
 	release(["attack", "parry", "move_left"])
 	Feedback.motion_reduced = false
 	await finish("COMBAT_PRESENCE")
@@ -358,6 +359,26 @@ func test_ignition_and_clear_beat() -> void:
 	check(Engine.time_scale < 1.0, "a cleared chamber's last kill eases into slow motion")
 	game.feedback.end_slow_motion()
 	game.feedback.set_reduced_motion(true)
+
+## The knight is eased out of a foe it stands in, and a swing's lunge stops
+## short against a foe already at the blade.
+func test_soft_separation() -> void:
+	var p := game.player
+	p.respawn_at(Vector2(480.0, Content.FLOOR_Y - Content.P_BODY_H * 0.5))
+	p.facing = 1.0
+	await ticks(40)
+	p.iframes = 5.0
+	var foe := dummy_ahead(10.0)
+	foe.cd = 99.0
+	await ticks(20)
+	var gap := (Content.P_BODY_W + float(foe.data.w)) * 0.5
+	check(absf(p.global_position.x - foe.global_position.x) >= gap - 1.0, "the knight is eased out of a foe it stands in")
+	p.facing = signf(foe.global_position.x - p.global_position.x)
+	await hold_action("attack")
+	check(absf(p.velocity.x) <= float(Content.COMBO[0].lunge) * 0.2 + 1.0, "a swing's lunge stops short against a foe already at the blade")
+	foe.queue_free()
+	p.iframes = 0.0
+	await ticks(30)
 
 func test_breakable_crypt() -> void:
 	var props := game.room.props

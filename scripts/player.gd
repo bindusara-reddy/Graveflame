@@ -49,6 +49,10 @@ const PARRY_WHIFF_LAG := 0.10
 const PRESS_BUFFER := { "parry": 0.10, "special": 0.12, "heal": 0.10, "ignite": 0.12 }
 ## The last stretch of a dash (seconds) that can flow straight into a parry or swing.
 const DASH_CANCEL_TAIL := 0.05
+## Soft separation: how fast (px/s) the knight is eased out of a grounded foe
+## it overlaps, and how far around the knight to look for one.
+const SEPARATION_SPEED := 240.0
+const SEPARATION_REACH := 120.0
 
 signal hp_changed(hp: float, max_hp: float)
 signal special_changed(value: float, maximum: float)
@@ -343,6 +347,28 @@ func _step_locomotion(delta: float, controls_locked: bool = false) -> void:
 		return
 	move_and_slide()
 	_floor_and_wall_tracking(delta)
+	_separate_from_foes(delta)
+
+## Soft separation: the knight is eased out of any grounded foe it stands in
+## (the foe never moves), so walking and lunges stop at the body instead of
+## burying the blade in it, and only a dash passes through.
+func _separate_from_foes(delta: float) -> void:
+	for foe in Enemy.living_near(get_tree(), global_position, SEPARATION_REACH):
+		var dx: float = global_position.x - foe.global_position.x
+		var overlap := (Content.P_BODY_W + float(foe.data.w)) * 0.5 - absf(dx)
+		if overlap <= 0.0 or not foe.is_on_floor() or absf(global_position.y - foe.global_position.y) >= 40.0:
+			continue
+		var away := signf(dx) if dx != 0.0 else -facing
+		move_and_collide(Vector2(away * minf(overlap, SEPARATION_SPEED * delta), 0.0))
+
+## True when a foe's near edge is within `reach` px ahead of the knight.
+func _foe_ahead_within(reach: float) -> bool:
+	for foe in Enemy.living_near(get_tree(), global_position, reach + SEPARATION_REACH):
+		var ahead: float = (foe.global_position.x - global_position.x) * facing
+		var near_edge := ahead - float(foe.data.w) * 0.5
+		if ahead > 0.0 and near_edge <= reach and absf(foe.global_position.y - global_position.y) < 40.0:
+			return true
+	return false
 
 ## True (and spent) when `action` was pressed within its PRESS_BUFFER time.
 func _take_press(action: String) -> bool:
@@ -491,7 +517,11 @@ func _begin_attack(force_chain: bool = false) -> void:
 	state = State.ATTACK
 	atk_phase = "startup"
 	atk_time = def.startup
-	velocity.x = facing * float(def.get("lunge", 150.0))
+	# A foe already inside half the swing's reach stops the lunge at contact.
+	var lunge := float(def.get("lunge", 150.0))
+	if _foe_ahead_within(float(def.range) * 0.5):
+		lunge *= 0.2
+	velocity.x = facing * lunge
 	set_meta("atk_def", def)
 	emit_signal("action_feedback", "swing", global_position)
 
@@ -541,6 +571,7 @@ func _step_attack(delta: float) -> void:
 		attack_index = -1 if def.window <= 0.0 else attack_index
 	move_and_slide()
 	_floor_and_wall_tracking(delta)
+	_separate_from_foes(delta)
 
 ## Leave the combo for a recovery cancel: the next swing starts from the cut.
 func _drop_combo() -> void:
@@ -1045,6 +1076,7 @@ func _step_hurt(delta: float) -> void:
 	velocity.x = move_toward(velocity.x, 0.0, Content.P_FRICTION * 3.0 * delta)
 	move_and_slide()
 	_floor_and_wall_tracking(delta)
+	_separate_from_foes(delta)
 	# Keep grounded knockback committed to landing. Airborne hits release only
 	# after the impulse settles and ascent ends, with contact bookkeeping current.
 	if absf(velocity.x) < 30.0 and (is_on_floor() or (_hurt_started_airborne and velocity.y >= 0.0)):
