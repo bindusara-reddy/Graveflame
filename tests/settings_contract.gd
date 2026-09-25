@@ -55,6 +55,9 @@ func run() -> void:
 	if DisplayServer.get_name() == "headless":
 		print("NOTE: no render device; skipped the toggle-rendering checks")
 	else:
+		# The switch lives on the SIGHT page of SENSES: turn to it first.
+		((game.ui._panels["options"] as Control).find_child("Tab1", true, false) as Button).pressed.emit()
+		await ticks(4)
 		var rect: Rect2 = box.get_global_rect()
 		var dialog: Rect2 = (game.ui._panels["options"] as Control).get_meta("dialog").get_global_rect()
 		var cy := int(rect.position.y + rect.size.y * 0.5)
