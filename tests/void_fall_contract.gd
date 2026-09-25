@@ -1,9 +1,14 @@
 extends "res://tests/harness.gd"
 ## Staged gap + normal Dashmaster boon; NOT a full-run victory test.
 ## Walk/dash into the pit; never edit position, velocity, health, or i-frames.
+## The pit section pins the whole spike contact: the first dash leaves from the
+## causeway floor, the spikes land one 18-damage hit that closes the blade
+## hitbox, and the knight is returned to solid ground rather than the void.
 var below_ticks := 0
 var deepest_y := 0.0
 var saw_dash := false
+var launched_from_floor := false
+var blade_closed_on_hit := false
 var damage_events := 0
 var hp_events := 0
 var death_events := 0
@@ -46,16 +51,24 @@ func run() -> void:
 			Input.action_release("move_left")
 			Input.action_release("move_right")
 			Input.action_press("move_left" if game.player.position.x > 620.0 else "move_right")
+			if not saw_dash:
+				launched_from_floor = game.player.is_on_floor()
 			Input.action_press("dash")
 			saw_dash = true
 		await ticks(1)
 		deepest_y = maxf(deepest_y, game.player.position.y)
 		if game.player.position.y > Content.FLOOR_Y + 240.0: below_ticks += 1
-		if damage_events > 0 or game.state == Game.GState.GAME_OVER or below_ticks >= 180: break
+		if damage_events > 0:
+			# Read on the tick the spikes hit, before the knight is set back down.
+			blade_closed_on_hit = game.player._atk_shape.disabled
+			break
+		if game.state == Game.GState.GAME_OVER or below_ticks >= 180: break
 	release(["dash", "move_left", "move_right"])
 	await ticks(20)
 	# Spike pits cost health, not the run; only the world boundary is terminal.
+	check(launched_from_floor, "dash launch begins on the real causeway floor")
 	check(saw_dash and damage_events == 1, "real dash inputs carry the knight onto the pit spikes")
+	check(blade_closed_on_hit, "hazard interruption leaves no active blade hitbox")
 	check(below_ticks == 0 and game.state == Game.GState.PLAYING and not game.player.dead, "dash immunity cannot carry the knight past the spikes into the void")
 	check(rescued[0] and game.player.position.y < Content.FLOOR_Y and game.player.is_on_floor(), "the spikes return the knight to solid ground")
 	check(is_equal_approx(float(game.player.build.hp), 82.0) and is_equal_approx(float(game.run.build.hp), 82.0) and is_equal_approx(float(game._stats.damage_taken), 18.0), "a spike pit costs 18 health and the run synchronizes it")
