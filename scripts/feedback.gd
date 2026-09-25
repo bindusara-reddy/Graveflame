@@ -340,7 +340,8 @@ func damage_number(pos: Vector2, amount: float, kind: String = "hit", text: Stri
 		vel = Vector2(0.0, -40.0)
 	var number := {
 		"kind": "number", "pos": pos + Vector2(randf_range(-8.0, 8.0), 0.0), "vel": vel,
-		"life": 0.85, "max": 0.85, "color": _accessible_color(color), "size": size, "text": label
+		"life": 0.85, "max": 0.85, "color": _accessible_color(color), "size": size, "text": label,
+		"word": text != "",
 	}
 	if tally:
 		number.merge({ "total": amount, "anchor": pos })
@@ -786,6 +787,8 @@ func _draw() -> void:
 					draw_set_transform(Vector2.ZERO, 0.0, Vector2.ONE)
 			"afterimage":
 				KnightArt.paint(self, pos, p.pose, float(p.facing), {"flat": c})
+			"number" when p.get("word", false):
+				_draw_word(p, a)
 			"number":
 				var font := ThemeDB.fallback_font
 				var txt := str(p.get("text", ""))
@@ -801,6 +804,20 @@ func _draw() -> void:
 				draw_string(font, at, txt, HORIZONTAL_ALIGNMENT_LEFT, -1, fs, Color(base.r, base.g, base.b, alpha))
 			_:
 				draw_circle(pos, maxf(0.8, size * a), c)
+
+## A worded pop-up (BLOCKED, SECOND WIND, +30 HEALTH...) is a paper tag in
+## its colour, the HUD's paper carried into the world: it pops in as it
+## rises and folds away over its last beat. Reduced motion keeps the paper
+## still and simply cuts it at the end.
+func _draw_word(p: Dictionary, a: float) -> void:
+	var pop := 1.0
+	var fold := 1.0 if a > 0.05 else 0.0
+	if not motion_reduced:
+		pop += 0.3 * clampf(1.0 - (1.0 - a) / 0.15, 0.0, 1.0)
+		fold = clampf(a / 0.3, 0.0, 1.0)
+	draw_set_transform(p.pos, 0.0, Vector2(pop, pop * fold))
+	UiPaint.tag(get_canvas_item(), Vector2.ZERO, str(p.text), p.color, UiTheme.INK, UiTheme.BUTTON)
+	draw_set_transform(Vector2.ZERO)
 
 ## Additive pass: rings, the parry halo, slash afterglow and death/blast flashes.
 func _draw_glow() -> void:

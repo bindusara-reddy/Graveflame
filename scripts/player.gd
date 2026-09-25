@@ -734,6 +734,19 @@ func _flourish(kind: String) -> void:
 	_flourish_t = FLOURISH_TIME
 	emit_signal("action_feedback", kind, global_position)
 
+## The flourish's name on a small ember tag above any riposte cue: it pops in
+## and folds away over its last beat. Reduced motion keeps the paper still
+## and simply cuts it.
+func _draw_flourish() -> void:
+	var pop := 1.0
+	var fold := 1.0
+	if not Feedback.motion_reduced:
+		pop += 0.35 * clampf(1.0 - (FLOURISH_TIME - _flourish_t) / 0.12, 0.0, 1.0)
+		fold = clampf(_flourish_t / 0.15, 0.0, 1.0)
+	draw_set_transform(Vector2(0.0, -104.0), 0.0, Vector2(pop, pop * fold))
+	UiPaint.tag(get_canvas_item(), Vector2.ZERO, _flourish_name, UiTheme.EMBER, UiTheme.INK)
+	draw_set_transform(Vector2.ZERO)
+
 ## The knight's body answers a swing's first contact: a heavy blow on the
 ## ground rocks it back, and in the air the first AIR_HOVER_HITS connecting
 ## swings hold it up so a hovering foe can be juggled.
@@ -1354,21 +1367,15 @@ func _draw() -> void:
 		draw_line(Vector2(facing * 16.0, -4.0), tip, Color(VFX.TEAL if _riposte_attack else Content.PAL.attack, 0.7), 5.0, true)
 		draw_line(Vector2(facing * 22.0, -4.0), tip, Color(VFX.HOT, 0.9), 1.5, true)
 	if riposte_time > 0.0:
-		# Diegetic cue stays with the fighter instead of adding another HUD panel;
-		# a perfect parry's harder riposte reads in gold.
+		# The counter window stays with the fighter instead of adding another HUD
+		# panel: a paper tag over the knight with the window burning down under
+		# it. A perfect parry's harder riposte reads in gold.
 		var perfect := _riposte_mul > 1.0
-		var word := "PERFECT" if perfect else "RIPOSTE"
-		var cue := Color(VFX.GOLD if perfect else VFX.TEAL, 0.65 if Feedback.flash_reduced else 0.95)
-		draw_string_outline(ThemeDB.fallback_font, Vector2(-31.0, -72.0), word, HORIZONTAL_ALIGNMENT_LEFT, -1, 12, 3, Color("100c1b"))
-		draw_string(ThemeDB.fallback_font, Vector2(-31.0, -72.0), word, HORIZONTAL_ALIGNMENT_LEFT, -1, 12, cue)
-		draw_line(Vector2(-25.0, -65.0), Vector2(-25.0 + 50.0 * riposte_time / Content.RIPOSTE_WINDOW, -65.0), cue, 2.0, true)
+		var cue := UiTheme.GOLD if perfect else UiTheme.VERDIGRIS
+		UiPaint.tag(get_canvas_item(), Vector2(0.0, -78.0), "PERFECT" if perfect else "RIPOSTE", cue, UiTheme.INK)
+		draw_line(Vector2(-25.0, -62.0), Vector2(-25.0 + 50.0 * riposte_time / Content.RIPOSTE_WINDOW, -62.0), cue, 2.0, true)
 	if _flourish_t > 0.0:
-		# A flourish names itself above any riposte cue, fading in its last 0.2 s.
-		var fade := clampf(_flourish_t / 0.2, 0.0, 1.0)
-		var font := ThemeDB.fallback_font
-		var at := Vector2(-font.get_string_size(_flourish_name, HORIZONTAL_ALIGNMENT_LEFT, -1, 12).x * 0.5, -86.0)
-		draw_string_outline(font, at, _flourish_name, HORIZONTAL_ALIGNMENT_LEFT, -1, 12, 3, Color(Color("100c1b"), fade))
-		draw_string(font, at, _flourish_name, HORIZONTAL_ALIGNMENT_LEFT, -1, 12, Color(VFX.GOLD, fade * (0.65 if Feedback.flash_reduced else 0.95)))
+		_draw_flourish()
 	# slam impact ring
 	if _draw_slam_impact > 0.0:
 		var rad: float = Content.P_SLAM_RADIUS + float(build.get("slam_radius_bonus", 0.0))

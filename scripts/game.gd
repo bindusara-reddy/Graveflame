@@ -1934,7 +1934,7 @@ func _on_enemy_died(sc: int, pos: Vector2, tier: int, color: Color, kind: String
 			feedback.hit_stop(0.09)
 			feedback.play("tear", 0.85)
 			feedback.play("elite")
-			feedback.damage_number(pos + Vector2(0.0, -66.0), 0.0, "elite", "ELITE SLAIN  +%d CELLS" % cells)
+			feedback.damage_number(pos + Vector2(0.0, -66.0), 0.0, "elite", "CHAMPION FELLED  +%d CELLS" % cells)
 		_:
 			_award_cells(1)
 			feedback.flash_death(pos, color)
@@ -1991,7 +1991,7 @@ func _take_rift_gift(kind: String) -> void:
 		run.build.max_hp = float(run.build.max_hp) + 5.0
 		var healed := float(run.build.max_hp) - float(run.build.hp)
 		run.build.hp = run.build.max_hp
-		text = "+%d HEALTH" % roundi(healed)
+		text = "+%d VITALITY" % roundi(healed)
 	else:
 		var cells := _award_cells(10 + 3 * maxi(0, run.room_index))
 		text = "+%d CELLS" % cells

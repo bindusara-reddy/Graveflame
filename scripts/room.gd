@@ -815,11 +815,7 @@ func _draw_rift(c: Vector2, kind: String, m: Dictionary, near: bool, salt: int) 
 		draw_arc(mc, 19.0, 0.0, TAU, 32, Color(ec, 0.9), 2.0, true)
 		BoonArt.draw(self, str(style.sigil), mc, 12.0, ec)
 		if near:
-			var font := ThemeDB.fallback_font
-			var label := UI.prompt("interact") + "  " + str(style.label)
-			var w := font.get_string_size(label, HORIZONTAL_ALIGNMENT_LEFT, -1, 22).x
-			draw_string_outline(font, mc + Vector2(-w * 0.5, -30.0), label, HORIZONTAL_ALIGNMENT_LEFT, -1, 22, 5, Color("100c1b"))
-			draw_string(font, mc + Vector2(-w * 0.5, -30.0), label, HORIZONTAL_ALIGNMENT_LEFT, -1, 22, ec)
+			_draw_rift_prompt(mc + Vector2(0.0, -40.0), str(style.label), ec)
 	else:
 		# Sealed: iron bar across the gate and a dim lock glyph.
 		draw_line(Vector2(c.x - 34.0, c.y - 6.0), Vector2(c.x + 34.0, c.y - 6.0), Color("2a2430"), 5.0)
@@ -827,6 +823,18 @@ func _draw_rift(c: Vector2, kind: String, m: Dictionary, near: bool, salt: int) 
 		draw_arc(c, 18.0, 0.0, TAU, 20, ec, 2.5)
 		draw_line(c - Vector2(10.0, 10.0), c + Vector2(10.0, 10.0), ec, 2.5)
 		draw_line(c - Vector2(-10.0, 10.0), c + Vector2(-10.0, -10.0), ec, 2.5)
+
+## The rift's promise, cut from the HUD's paper and centred on `c`: the live
+## key cap that enters it, then a tag in the rift's colour naming what lies
+## beyond, so the world prompt is the same cap the HUD shows.
+func _draw_rift_prompt(c: Vector2, words: String, color: Color) -> void:
+	const CAP := 26.0
+	const GAP := 6.0
+	var cap_w := UiPaint.prompt_width("interact", CAP)
+	var tag_w := UiPaint.text_width(words, UiTheme.BUTTON) + 18.0
+	var x := c.x - (cap_w + GAP + tag_w) * 0.5
+	UiPaint.prompt(get_canvas_item(), Vector2(x, c.y - CAP * 0.5), "interact", CAP)
+	UiPaint.tag(get_canvas_item(), Vector2(x + cap_w + GAP + tag_w * 0.5, c.y), words, color, UiTheme.INK, UiTheme.BUTTON)
 
 # --- Props --------------------------------------------------------------------
 
