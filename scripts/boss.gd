@@ -2,6 +2,8 @@ class_name Boss
 extends Enemy
 ## Phased boss: lunge, projectile fan, ground slam, arena charge. Phase 2 below
 ## 50% HP: faster, relentless, and it calls two wisps to the throne room.
+## Hits never cancel a committed move; they wear down its poise, and a broken
+## guard (or any parry) drops it to one knee for a real punish window.
 
 const WardenArt := preload("res://scripts/warden_art.gd")
 
@@ -26,6 +28,17 @@ var _summoned := false
 const SHATTER_T := 0.62
 var _death_t := 0.0
 var _shattered := false
+## Hits each phase's guard absorbs before it breaks, indexed by BPhase. A heavier
+## blow spends more (poise_dmg); a parry breaks it outright.
+const POISE := [8.0, 8.0, 12.0]
+## Seconds without a hit before the guard is whole again.
+const POISE_REGEN_DELAY := 1.2
+## How long a broken guard keeps the Warden on one knee, and the extra damage
+## it takes meanwhile: the punish window.
+const BREAK_TIME := 1.2
+const BREAK_DAMAGE_MUL := 1.3
+var _poise: float = POISE[BPhase.ONE]
+var _poise_regen_t := 0.0
 
 func _ready() -> void:
 	hp_max = Content.BOSS_HP
@@ -73,6 +86,7 @@ func _physics_process(delta: float) -> void:
 			if Enemy.vows.has("v_pyre"):
 				_ignite()
 		return
+	_regen_poise(delta)
 	_check_phase2()
 	match state:
 		EState.SEEK: _boss_seek(delta)
@@ -269,28 +283,52 @@ func _boss_recover(delta: float) -> void:
 		state = EState.SEEK
 		action_t = 0.3 if phase == BPhase.TWO else 0.55
 
-func take_damage(amount: float, from_dir: Vector2, kb: float, _poise_dmg := 1.0) -> void:
+func take_damage(amount: float, from_dir: Vector2, _kb: float, poise_dmg := 1.0) -> void:
 	if dead: return
+	if is_broken():
+		amount *= BREAK_DAMAGE_MUL
 	var dealt := minf(amount, maxf(hp, 0.0))
 	hp -= amount
 	_hurt_flash = 0.08
 	emit_signal("damaged", dealt, global_position + Vector2(0.0, -Content.BOSS_H * 0.5), false)
-	# Boss resists knockback heavily
 	if hp <= 0.0:
 		_die()
 		return
-	# A committed charge or phase-2 attack cannot be interrupted.
-	if state == EState.ATTACK and action_idx == Action.CHARGE:
+	if phase == BPhase.INTRO or is_broken():
 		return
-	if phase == BPhase.TWO:
-		if state == EState.STAGGER:
-			state = EState.SEEK  # no stagger in phase 2, relentless
-	else:
-		if state == EState.ATTACK:
-			_disarm()
-		state = EState.STAGGER
-		stagger_t = 0.12
-		velocity = from_dir.normalized() * kb * 0.3
+	# Hyper-armour: the blow lands and flashes but never cancels what the
+	# Warden is doing; it only spends poise.
+	_poise_regen_t = POISE_REGEN_DELAY
+	_poise -= poise_dmg
+	if _poise <= 0.0:
+		_break_guard(from_dir)
+
+## A parried blow always breaks the guard, however much poise is left.
+func on_parried(knock_dir: Vector2) -> void:
+	if not dead and not is_broken():
+		_break_guard(knock_dir)
+
+## True while the guard is broken and the Warden kneels open to punishment.
+func is_broken() -> bool:
+	return state == EState.STAGGER and not dead
+
+## The guard gives: whatever was in hand is dropped and the Warden falls to one
+## knee for BREAK_TIME. The knee strikes the floor with the slam's dust and thud.
+func _break_guard(from_dir: Vector2) -> void:
+	_disarm()
+	state = EState.STAGGER
+	stagger_t = BREAK_TIME
+	action_t = 0.3
+	velocity = Vector2(signf(from_dir.x) * 160.0, 0.0)
+	_poise = POISE[phase]
+	emit_signal("exploded", global_position + Vector2(0.0, Content.BOSS_H * 0.5), 90.0, 0.0)
+
+## Poise refills all at once after POISE_REGEN_DELAY seconds untouched, so only
+## a sustained assault (or a parry) breaks the guard.
+func _regen_poise(delta: float) -> void:
+	_poise_regen_t -= delta
+	if _poise_regen_t <= 0.0:
+		_poise = POISE[phase]
 
 func _die(_award_reward: bool = true) -> void:
 	if dead: return
