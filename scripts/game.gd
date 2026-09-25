@@ -488,16 +488,6 @@ func torch_positions() -> PackedVector2Array:
 	_torch_frame = frame
 	return out
 
-## Animated flames over the buttress sconces.
-func _draw_sconce_flames(ci: CanvasItem) -> void:
-	var moving := not Feedback.motion_reduced
-	var t := _atmo_t if moving else 0.0
-	var torch: Color = mood.torch
-	var idx := 0
-	for p in torch_positions():
-		VFX.draw_flame(ci, p + Vector2(0.0, 10.0), 26.0, 12.0, t, float(idx) * 2.1, torch, VFX.GOLD)
-		idx += 1
-
 func _draw_stars(ci: CanvasItem, top: float, horizon: float) -> void:
 	var vis := float(mood.stars)
 	if vis <= 0.01:
