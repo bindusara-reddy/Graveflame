@@ -438,8 +438,8 @@ func _accent_for(tag: String) -> Color:
 		"boss": return Color("cf493f")
 	return Color("9d6bff")
 
-## The decor's clock. Reduced motion holds every decoration at its rest pose;
-## hazards keep the raw clock.
+## The decor's clock. Reduced motion holds every decoration, hazards included,
+## at its rest pose.
 func _decor_t() -> float:
 	return 0.0 if Feedback.motion_reduced else _ambient_t
 
@@ -676,31 +676,79 @@ func _draw_platform_dressing(pr: Rect2, m: Dictionary, salt: int) -> void:
 			var by := pr.end.y - 2.0
 			draw_colored_polygon(PackedVector2Array([Vector2(x - 4.0, by), Vector2(x + 4.0, by), Vector2(x + 1.0, by + len), Vector2(x - 1.0, by + len * 0.7)]), Color("2f6b4a", 0.55 * moss))
 
+## A pit drawn in what fills it (see _pit_material); the hitbox never changes.
+## Reduced motion holds the surface still and drops the drifting embers.
 func _draw_hazard(r: Rect2, m: Dictionary) -> void:
-	var t := _ambient_t
+	var t := _decor_t()
 	var seep := float(m.ember_seep)
-	draw_rect(r, Color("35121c").lerp(Color("4a1408"), seep))
-	if seep > 0.05:
-		# Magma skin: glowing gradient and slow bubbles.
-		VFX.draw_vgradient(self, Rect2(r.position.x, r.position.y + 12.0, r.size.x, 48.0), Color(m.glow, 0.42 * seep), Color(m.glow, 0.0))
-		var n := int(r.size.x / 54.0)
-		for i in range(n):
-			var ph := fmod(t * 0.7 + VFX.hash01(i, 97) * 3.0, 3.0)
-			var bx := r.position.x + 27.0 + float(i) * 54.0 + VFX.hash01(i, 98) * 20.0
-			var br := 3.0 + ph * 4.0
-			draw_arc(Vector2(bx, r.position.y + 26.0), br, 0.0, TAU, 12, Color(m.glow, (1.0 - ph / 3.0) * 0.6 * seep), 1.5)
-	draw_rect(Rect2(r.position, Vector2(r.size.x, 22.0)), Color(0.75, 0.16, 0.12, 0.18 + sin(t * 4.0) * 0.04))
-	var spike_count := int(r.size.x / 28.0)
-	var spike := Color("8e3340").lerp(Color("3a2a2e"), seep * 0.6)
-	for i in range(spike_count):
-		var x: float = r.position.x + float(i) * 28.0
-		var tip := Vector2(x + 14.0, r.position.y - 10.0 - float(i % 3) * 3.0)
-		draw_colored_polygon(PackedVector2Array([Vector2(x, r.position.y + 18.0), tip, Vector2(x + 28.0, r.position.y + 18.0)]), spike)
-		draw_line(Vector2(x + 14.0, r.position.y + 18.0), tip, Color(VFX.HOT, 0.12 + seep * 0.25), 1.0)
+	var fill := _pit_material()
+	match fill:
+		"water":
+			# Black water under a moonlit skin, rings spreading where the drips land.
+			draw_rect(r, Color("070b14"))
+			for i in range(3):
+				var k := fmod(t / 3.0 + float(i) / 3.0, 1.0)
+				var ring := Vector2(r.position.x + r.size.x * (0.2 + 0.3 * float(i)), r.position.y + 12.0)
+				VFX.draw_ellipse_ring(self, ring, 4.0 + k * 22.0, 1.0 + k * 5.5, Color(m.moon, 0.3 * (1.0 - k)), 1.2)
+			draw_line(Vector2(r.position.x, r.position.y + 12.0), Vector2(r.end.x, r.position.y + 12.0), Color(m.moon, 0.35), 2.0)
+		"crust":
+			# Grey ash plates floating on embers that glow through every crack.
+			draw_rect(r, Color("140e10"))
+			draw_rect(Rect2(r.position.x, r.position.y + 8.0, r.size.x, 30.0), Color(m.glow, 0.65 + 0.15 * sin(t * 2.0)))
+			var n := maxi(1, roundi(r.size.x / 44.0))
+			var span := r.size.x / float(n)
+			for i in range(n):
+				var c := Vector2(r.position.x + (float(i) + 0.5) * span, r.position.y + 22.0)
+				var sides := 5 + int(VFX.hash01(i, 99) * 3.0)
+				var plate := PackedVector2Array()
+				for j in range(sides):
+					var a := TAU * float(j) / float(sides) + VFX.hash01(i, 100)
+					plate.append(c + Vector2(cos(a) * span * 0.55, sin(a) * 15.0) * (0.8 + 0.2 * VFX.hash01(i * 7 + j, 101)))
+				draw_colored_polygon(plate, Color("2e2628"))
+		_:
+			draw_rect(r, Color("35121c").lerp(Color("4a1408"), seep))
+			if seep > 0.05:
+				# Magma skin: glowing gradient and slow bubbles.
+				VFX.draw_vgradient(self, Rect2(r.position.x, r.position.y + 12.0, r.size.x, 48.0), Color(m.glow, 0.42 * seep), Color(m.glow, 0.0))
+				for i in range(int(r.size.x / 54.0)):
+					var ph := fmod(t * 0.7 + VFX.hash01(i, 97) * 3.0, 3.0)
+					var bx := r.position.x + 27.0 + float(i) * 54.0 + VFX.hash01(i, 98) * 20.0
+					draw_arc(Vector2(bx, r.position.y + 26.0), 3.0 + ph * 4.0, 0.0, TAU, 12, Color(m.glow, (1.0 - ph / 3.0) * 0.6 * seep), 1.5)
+			draw_rect(Rect2(r.position, Vector2(r.size.x, 22.0)), Color(0.75, 0.16, 0.12, 0.18 + sin(t * 4.0) * 0.04))
+	_draw_stakes(r, fill, m)
+	if fill == "water" or Feedback.motion_reduced:
+		return
 	for i in range(7):
 		var ember_x := r.position.x + fmod(float(i * 79) + t * (18.0 + float(i)), maxf(1.0, r.size.x))
 		var ember_y := r.position.y + 10.0 - fmod(t * (12.0 + float(i) * 2.0) + float(i * 9), 34.0)
 		draw_circle(Vector2(ember_x, ember_y), 1.5 + float(i % 2), Color(1.0, 0.35, 0.12, 0.55))
+
+## What fills this chamber's pits: black water under the dripping Hollow Shaft
+## (and in any crypt pit), magma in the works, an ash crust over the ashpit's.
+func _pit_material() -> String:
+	if str(template.get("tag", "")) == "chamber":
+		return "water"
+	return { "works": "magma", "ashpit": "crust" }.get(zone, "water")
+
+## The pit's teeth: the old red spikes in magma, pale bone stakes in water and
+## charred iron through the crust, the stakes leaning a little off true.
+func _draw_stakes(r: Rect2, fill: String, m: Dictionary) -> void:
+	var seep := float(m.ember_seep)
+	var body := Color("8e3340").lerp(Color("3a2a2e"), seep * 0.6)
+	var edge := Color(VFX.HOT, 0.12 + seep * 0.25)
+	if fill == "water":
+		body = Color("bdb3a3").darkened(0.45)
+		edge = Color("bdb3a3").darkened(0.1)
+	elif fill == "crust":
+		body = Color("2a2226")
+		edge = Color(m.glow, 0.5)
+	var half := 14.0 if fill == "magma" else 7.0
+	for i in range(int(r.size.x / 28.0)):
+		var foot := Vector2(r.position.x + 14.0 + float(i) * 28.0, r.position.y + 18.0)
+		var lean := 0.0 if fill == "magma" else (VFX.hash01(i, 102) - 0.5) * 8.0
+		var tip := Vector2(foot.x + lean, r.position.y - 10.0 - float(i % 3) * 3.0)
+		draw_colored_polygon(PackedVector2Array([foot - Vector2(half, 0.0), tip, foot + Vector2(half, 0.0)]), body)
+		draw_line(foot, tip, edge, 1.0)
 
 ## Rift gates: runed pillars, a keystone arch and, once unsealed, a turning
 ## vortex in the colour of what lies beyond, with its sigil hung over the arch.

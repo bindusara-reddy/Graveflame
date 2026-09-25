@@ -48,4 +48,22 @@ func run() -> void:
 		check(paint_count == 1, "%s painted %d times in a single frame; expected 1" % [key, paint_count])
 	var img := vp.get_texture().get_image()
 	check(img != null and img.get_size() == Vector2i(1280, 720) and not img.is_empty(), "the capture viewport renders a full 1280x720 frame")
+	await check_still_pit()
 	await finish("RENDER_PRESENCE")
+
+## Reduced motion holds a pit's surface still, as it does every other decoration:
+## two frames of the Broken Causeway's magma, half a second apart, must match.
+func check_still_pit() -> void:
+	game._apply_toggle("reduced_motion", true)
+	if await enter_empty_room("gap"):
+		game.player.respawn_at(Vector2(560.0, Content.FLOOR_Y - 27.0))
+		await create_timer(1.2).timeout
+		var cam := game.feedback.camera
+		var pit: Rect2 = game.room.template.hazards[0]
+		var corner := (pit.position + Vector2(8.0, 0.0) - cam.get_screen_center_position()) * cam.zoom + Vector2(640.0, 360.0)
+		var region := Rect2i(Rect2(corner, (pit.size - Vector2(16.0, 8.0)) * cam.zoom)).intersection(Rect2i(0, 0, 1280, 720))
+		var before := game.world_view.get_texture().get_image().get_region(region)
+		await create_timer(0.5).timeout
+		var after := game.world_view.get_texture().get_image().get_region(region)
+		check(region.get_area() > 5000 and before.get_data() == after.get_data(), "reduced motion holds a pit's surface still (%s)" % region)
+	game._apply_toggle("reduced_motion", false)
