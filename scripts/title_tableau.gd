@@ -634,7 +634,7 @@ func _draw_dawn(ci: Control, s: Vector2, e: float) -> void:
 	VFX.draw_radial(ci, Vector2(s.x * 0.62, s.y * 0.02), s.y * 0.5, Color(DAWN, 0.45 * e))
 	# The radial shader fades across U, so the shaft is soft at both edges.
 	ci.draw_polygon(PackedVector2Array([
-		Vector2(s.x * 0.59, s.y * 0.02), Vector2(s.x * 0.65, s.y * 0.02),
+		Vector2(s.x * 0.59, 0.0), Vector2(s.x * 0.65, 0.0),
 		Vector2(s.x * 0.66, s.y * 0.95), Vector2(s.x * 0.54, s.y * 0.95),
 	]), PackedColorArray([Color(DAWN, 0.16 * e), Color(DAWN, 0.16 * e), Color(DAWN, 0.05 * e), Color(DAWN, 0.05 * e)]),
 		PackedVector2Array([Vector2(0.0, 0.5), Vector2(1.0, 0.5), Vector2(1.0, 0.5), Vector2(0.0, 0.5)]))
