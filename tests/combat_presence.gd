@@ -162,6 +162,11 @@ func test_impact_grammar() -> void:
 	check(game.feedback._particles.any(func(v): return v.kind == "cut"), "a blade hit leaves a cut sliver along the swing")
 	check(foe.has_meta("jolt_until_usec"), "the struck foe shivers through the freeze")
 	foe.queue_free()
+	var warden := Boss.new()
+	game.world.add_child(warden)
+	Player.VFX.jolt(warden, 0.5)
+	check(warden.visual_pose().jitter != Vector2.ZERO, "a struck Warden shivers too")
+	warden.queue_free()
 	await ticks(30)
 	p.iframes = 0.0
 	p.take_damage(1.0, Vector2.LEFT, 100.0)

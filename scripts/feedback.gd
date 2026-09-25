@@ -645,7 +645,8 @@ func impact(pos: Vector2, color: Color = Color("ffa827"), heavy: bool = false, d
 
 ## A shot meeting something (see Projectile.struck). A landed player shot
 ## sparks along its flight with a tick of freeze and a light rumble, and a
-## returned one lands harder; a guard or the stonework throws sparks back.
+## returned one lands harder and names itself; a guard or the stonework throws
+## sparks back.
 func projectile_struck(pos: Vector2, dir: Vector2, color: Color, what: String) -> void:
 	if what == "stone" or what == "guard":
 		burst_sparks(pos, 6, 200.0, color, -dir)
@@ -657,6 +658,7 @@ func projectile_struck(pos: Vector2, dir: Vector2, color: Color, what: String) -
 	rumble(0.15, 0.0, 0.05)
 	if what == "returned":
 		play("parry", 1.4, -6.0)
+		damage_number(pos + Vector2(0.0, -34.0), 0.0, "elite", "RETURNED")
 
 ## Floor-hugging slam dust: a flattened expanding ring plus squashed puffs.
 func land_dust(pos: Vector2, strength: float = 1.0) -> void:

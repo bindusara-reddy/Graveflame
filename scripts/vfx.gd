@@ -236,7 +236,7 @@ static func draw_chain(ci: CanvasItem, from: Vector2, length: float, sway: float
 ## A jolted creature (see jolt) also shivers side to side about the pivot.
 static func set_pose(ci: CanvasItem, pivot: Vector2, facing: float, scale: Vector2, lean: float) -> void:
 	var xf := Transform2D(lean * signf(facing), Vector2(scale.x * signf(facing), scale.y), 0.0, Vector2.ZERO)
-	xf.origin = pivot - xf * pivot + _jolt_offset(ci)
+	xf.origin = pivot - xf * pivot + jolt_offset(ci)
 	ci.draw_set_transform_matrix(xf)
 
 ## Hit shiver: a creature the knight strikes vibrates in place for `seconds`
@@ -248,7 +248,8 @@ static func jolt(ci: CanvasItem, seconds: float) -> void:
 	if not Feedback.motion_reduced:
 		ci.set_meta("jolt_until_usec", Time.get_ticks_usec() + int(seconds * 1000000.0))
 
-static func _jolt_offset(ci: CanvasItem) -> Vector2:
+## The shiver's draw offset for `ci` this instant (zero once it has passed).
+static func jolt_offset(ci: CanvasItem) -> Vector2:
 	var now := Time.get_ticks_usec()
 	if now >= int(ci.get_meta("jolt_until_usec", 0)):
 		return Vector2.ZERO

@@ -676,6 +676,7 @@ func _step_death(delta: float) -> void:
 ## on here, because the art may also be driven by a stand-in without them.
 func visual_pose() -> Dictionary:
 	var p := WardenArt.pose(self)
+	p["jitter"] = VFX.jolt_offset(self)
 	if phase >= BPhase.TWO:
 		# Ignited for good: the mantle burns; the Last Ember burns white-hot.
 		p["mantle_fire"] = 1.0 if phase == BPhase.TWO else 1.4
