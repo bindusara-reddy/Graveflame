@@ -1741,7 +1741,7 @@ func _on_forge_requested() -> void:
 ## Remember where OPTIONS was opened from so BACK returns there, and restore
 ## the pause state on the way out instead of dropping the player into a run.
 func _on_options_requested() -> void:
-	_options_return = "pause" if _panel_shown("pause") else "title"
+	_options_return = "pause" if ui.is_panel_visible("pause") else "title"
 	ui.hide_all_panels()
 	ui.sync_options(Save.get_options())
 	ui.show_panel("options")
