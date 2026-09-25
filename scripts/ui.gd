@@ -38,6 +38,8 @@ const C_GOLD := Color("ffd166")
 const C_MINT := Color("2be4c8")
 const C_BLUE := Color("7fd4ff")
 const C_RED := Color("dc5962")
+## Streak multiplier colour by tier, dull to blazing.
+const STREAK_TIER_COLORS := [C_MUTED, C_TEXT, C_GOLD, C_EMBER_HI, C_RED]
 
 var _root: Control
 var _hud: Control
@@ -1923,8 +1925,7 @@ func set_streak(kills: int, frac: float, mult: float) -> void:
 	_streak_mult_label.text = "x" + String.num(mult, 2)
 	_streak_bar.value = clampf(frac, 0.0, 1.0) * 100.0
 	var tier := Content.streak_tier(kills)
-	var tier_colors := [C_MUTED, C_TEXT, C_GOLD, C_EMBER_HI, C_RED]
-	var col: Color = tier_colors[clampi(tier, 0, tier_colors.size() - 1)]
+	var col: Color = STREAK_TIER_COLORS[clampi(tier, 0, STREAK_TIER_COLORS.size() - 1)]
 	_streak_mult_label.add_theme_color_override("font_color", col)
 	_streak_bar.add_theme_stylebox_override("fill", _bar_box(col))
 	if tier > _streak_tier and not Feedback.motion_reduced:
@@ -1933,6 +1934,11 @@ func set_streak(kills: int, frac: float, mult: float) -> void:
 		_streak_tween = _ui_tween()
 		_streak_tween.tween_property(_streak_panel, "scale", Vector2.ONE, 0.22).set_trans(Tween.TRANS_BACK).set_ease(Tween.EASE_OUT)
 	_streak_tier = tier
+
+
+## The streak timer drains every frame; everything else changes only on a kill.
+func set_streak_fraction(frac: float) -> void:
+	_streak_bar.value = clampf(frac, 0.0, 1.0) * 100.0
 
 
 func hide_streak() -> void:

@@ -408,7 +408,7 @@ func _tick_streak(delta: float) -> void:
 	if _streak_t <= 0.0:
 		_break_streak()
 		return
-	ui.set_streak(_streak_kills, _streak_t / Content.STREAK_WINDOW, Content.streak_multiplier(_streak_kills))
+	ui.set_streak_fraction(_streak_t / Content.STREAK_WINDOW)
 
 func _register_kill() -> void:
 	_streak_kills = _streak_kills + 1 if _streak_t > 0.0 else 1
