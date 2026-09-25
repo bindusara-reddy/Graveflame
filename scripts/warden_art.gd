@@ -19,6 +19,18 @@ const ROAR := {"hand":Vector2(74,-62),"elbow":Vector2(52,-46),"offhand":Vector2(
 const SLUMP := {"hand":Vector2(46,34),"elbow":Vector2(44,-2),"offhand":Vector2(-42,30),"claw_angle":1.3,"off_angle":1.2,"lean":0.16}
 ## How far a kneeling Warden sinks toward the floor.
 const KNEEL_SAG := 16.0
+## The Warden's fault lines: fire splits it along them as it dies, and the
+## finale's mended Warden wears them stitched shut with black thread.
+const FAULTS := [
+	[Vector2(-30,-44),Vector2(-12,-20),Vector2(-20,2),Vector2(-6,24)],
+	[Vector2(18,-60),Vector2(6,-38),Vector2(22,-14),Vector2(12,10)],
+	[Vector2(-40,-8),Vector2(-18,-6),Vector2(4,-16),Vector2(34,-4)],
+	[Vector2(0,-86),Vector2(10,-70),Vector2(2,-58)],
+]
+## The crown's three flames: base, height and width. A spent crown keeps only
+## charred stubs of them.
+const CROWN := [[Vector2(-8,-75),30.0,12.0],[Vector2(8,-85),39.0,12.0],[Vector2(25,-78),26.0,10.0]]
+const CHARRED := Color("5a2a2a")
 
 static func curve(start: Vector2, segments: Array) -> PackedVector2Array:
 	var points := PackedVector2Array([start])
@@ -258,9 +270,17 @@ static func paint(b,p: Dictionary) -> void:
 		ci.draw_arc(puff,r,0.0,TAU,14,Color(INK,0.6*(1.0-pk)),1.5,true)
 	# Flame crown shares the hero's warm identity but has a swept, bestial crest.
 	var crown_scale: float = (1.35 if phase2 else 1.0)*float(p.get("crown",1.0))
-	VFX.draw_flame(ci,Vector2(-8,-75),30.0*crown_scale,12.0,t,1.0,fire,Content.PAL.attack)
-	VFX.draw_flame(ci,Vector2(8,-85),39.0*crown_scale,12.0,t,2.3,fire,Content.PAL.attack)
-	VFX.draw_flame(ci,Vector2(25,-78),26.0*crown_scale,10.0,t,4.0,fire,Content.PAL.attack)
+	for i in range(CROWN.size()):
+		var base: Vector2 = CROWN[i][0]
+		var height: float = CROWN[i][1]
+		var width: float = CROWN[i][2]
+		if p.get("spent",false):
+			# Burnt down to charred stubs, an ember still glowing at each tip.
+			var tip := base+Vector2(0,-height*0.4)
+			ci.draw_colored_polygon(PackedVector2Array([base+Vector2(-width*0.5,0),tip,base+Vector2(width*0.5,0)]),CHARRED)
+			ci.draw_circle(tip,2.0,fire)
+		else:
+			VFX.draw_flame(ci,base,height*crown_scale,width,t,[1.0,2.3,4.0][i],fire,Content.PAL.attack)
 	ci.draw_polyline(STROKES.crest,INK,7.0,true)
 	ci.draw_polyline(STROKES.crest,RIDGE.darkened(0.15),2.2,true)
 	arm(ci,p.shoulder,p.elbow,p.hand,float(p.claw_angle),rust)
@@ -270,21 +290,18 @@ static func paint(b,p: Dictionary) -> void:
 	if p.windup and int(b.action_idx) == Boss.Action.FAN:
 		var palm: Vector2 = p.offhand+Vector2(-6,-18)
 		VFX.draw_flame(ci,palm,20.0+float(p.progress)*14.0,9.0,t,0.4,fire,HORN)
+	if p.get("mended",false):
+		for fault in FAULTS:
+			stitch(ci,PackedVector2Array(fault))
 	if p.has("dying"):
 		# Fire splitting the body along fault lines before it comes apart.
 		var dk: float = p.dying
-		var faults := [
-			[Vector2(-30,-44),Vector2(-12,-20),Vector2(-20,2),Vector2(-6,24)],
-			[Vector2(18,-60),Vector2(6,-38),Vector2(22,-14),Vector2(12,10)],
-			[Vector2(-40,-8),Vector2(-18,-6),Vector2(4,-16),Vector2(34,-4)],
-			[Vector2(0,-86),Vector2(10,-70),Vector2(2,-58)],
-		]
-		for i in range(faults.size()):
+		for i in range(FAULTS.size()):
 			var reveal := clampf(dk * 4.0 - float(i) * 0.7, 0.0, 1.0)
 			if reveal <= 0.0:
 				continue
 			var line := PackedVector2Array()
-			var pts: Array = faults[i]
+			var pts: Array = FAULTS[i]
 			var n := int(ceil(reveal * float(pts.size() - 1))) + 1
 			for j in range(n):
 				line.append(pts[j])
@@ -296,3 +313,15 @@ static func paint(b,p: Dictionary) -> void:
 			var x := 55.0+float(i)*27.0
 			ci.draw_polyline(PackedVector2Array([Vector2(x-7,54),Vector2(x,58),Vector2(x-7,62)]),Color(fire,0.2+float(p.progress)*0.6),2.0,true)
 	ci.draw_set_transform(Vector2.ZERO,0.0,Vector2.ONE)
+
+## A crack sewn shut with black thread: the seam in INK, crossed by a RIDGE
+## stitch every 7 px along it.
+static func stitch(ci: CanvasItem, line: PackedVector2Array) -> void:
+	ci.draw_polyline(line,INK,3.0,true)
+	for i in range(line.size()-1):
+		var a := line[i]
+		var b := line[i+1]
+		var across := (b-a).normalized().orthogonal()*2.0
+		for k in range(1,int((b-a).length()/7.0)+1):
+			var at := a.move_toward(b,7.0*float(k))
+			ci.draw_line(at-across,at+across,RIDGE,1.4,true)
