@@ -106,7 +106,7 @@ func footer(column: Container, entries: Array, back_name := "") -> HBoxContainer
 func confirm_twice(button: Button, ask: String, kind: int, act: Callable) -> void:
 	var rest := button.text
 	button.pressed.connect(func() -> void:
-		var asking: Tween = button.get_meta("asking", null)
+		var asking: Tween = button.get_meta("asking") if button.has_meta("asking") else null
 		if asking != null and asking.is_valid():
 			_stop_asking(button, rest, kind)
 			act.call()
@@ -121,8 +121,9 @@ func confirm_twice(button: Button, ask: String, kind: int, act: Callable) -> voi
 
 
 func _stop_asking(button: Button, rest: String, kind: int) -> void:
-	Kit.kill_tween(button.get_meta("asking", null))
-	button.remove_meta("asking")
+	if button.has_meta("asking"):
+		Kit.kill_tween(button.get_meta("asking"))
+		button.remove_meta("asking")
 	button.text = rest
 	Kit.style_button(button, kind)
 

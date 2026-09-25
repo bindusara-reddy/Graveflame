@@ -36,7 +36,7 @@ func build() -> void:
 	var accent := T.GOLD if _crown else T.BLOOD
 	# Over the grave the veil stays thin: the fallen knight is part of the page.
 	veil(0.72 if _crown else 0.4, 0.88 if _crown else 0.5, accent)
-	var column := sheet(Vector2(600, 0) if _crown else Vector2(520, 650), accent, T.S7 - 4, T.S6)
+	var column := sheet(Vector2(600, 0) if _crown else Vector2(520, 624), accent, T.S7 - 4, T.S6)
 	var paper := get_meta("dialog") as PanelContainer
 	if _crown:
 		_press_crest(paper)
@@ -44,6 +44,7 @@ func build() -> void:
 		_cut_grave(paper)
 		# To the right of the fallen knight, who lies near the frame's centre.
 		frame.anchor_left = 0.5
+		frame.offset_left = T.S5
 
 	var kicker := Kit.label(ENDINGS[""][0] if _crown else "THE KNIGHT FALLS", T.CAPS, ENDINGS[""][1] if _crown else T.BLOOD)
 	column.add_child(kicker)
@@ -51,6 +52,8 @@ func build() -> void:
 	column.add_child(Kit.label("The Graveflame Endures" if _crown else "The Flame Fades", T.TITLE, T.BONE))
 	var line := Kit.label("", T.VOICE, T.ASH)
 	line.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	# A wrapping label with no width yet would ask for a tower of one-word lines.
+	line.custom_minimum_size.x = 520.0 if _crown else 420.0
 	column.add_child(line)
 	set_meta("line_label", line)
 	if not _crown:

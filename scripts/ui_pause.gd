@@ -27,7 +27,9 @@ func build() -> void:
 	var column := sheet(Vector2(740, 0), T.SPIRIT, T.S7, T.S6)
 	# The sheet lies on the left of the frame; the held chamber stays in
 	# view on the right.
-	frame.anchor_right = 0.62
+	frame.anchor_right = 0.66
+	frame.offset_left = T.S7
+	frame.offset_right = -T.S5
 	_kicker = heading(column, "", "The Keep Waits", T.SPIRIT)
 	column.add_child(Kit.label(LINE, T.VOICE, T.ASH, HORIZONTAL_ALIGNMENT_LEFT))
 	gap(column, T.S1)

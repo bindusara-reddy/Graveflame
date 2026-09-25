@@ -159,6 +159,8 @@ func _begin_rebind(action: String) -> void:
 	var cap := Kit.glyph_for("?", "key")
 	cap.lit = true
 	holder.add_child(cap)
+	_note.text = "Press the key for %s.  Escape keeps the old one." % _form_name(action).to_lower()
+	_note.add_theme_color_override("font_color", T.EMBER_HI)
 	# The waiting cap breathes, like a coal blown on; still under reduced motion.
 	if not T.still():
 		_pulse = Kit.tween(self).set_loops()
@@ -172,6 +174,15 @@ func cancel_rebind() -> void:
 		(_cells[listening_action]["key"] as Control).modulate.a = 1.0
 		listening_action = ""
 		repaint()
+		_set_note("")
+
+
+## A form's name as CONTROLS_ROWS gives it.
+static func _form_name(action: String) -> String:
+	for form: Dictionary in Content.CONTROLS_ROWS:
+		if str(form.action) == action:
+			return str(form.label)
+	return action
 
 
 ## A press while listening (the stage hands it over before menu navigation):

@@ -112,7 +112,7 @@ func show_panel(panel_name: String, fade: float = 0.0) -> bool:
 ## nothing under the veil can take focus; or give the title its menu back.
 func _underlay_title(under: bool) -> void:
 	_title_under = under
-	title.holder.visible = not under
+	title.show_menu(not under)
 	if under:
 		title.visible = true
 

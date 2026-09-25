@@ -52,6 +52,8 @@ func build() -> void:
 	column.add_child(Kit.ornament(T.GOLD))
 	_roll = Kit.label("", T.VOICE, T.ASH)
 	_roll.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	# A wrapping label with no width yet would ask for a tower of one-word lines.
+	_roll.custom_minimum_size.x = 760.0
 	column.add_child(_roll)
 	var bar := footer(column, [
 		["ui_accept", "Temper"],
@@ -140,7 +142,7 @@ func _fill_vows() -> void:
 	head.custom_minimum_size.y = 34.0
 	_vows.add_child(head)
 	head.add_child(Kit.label("A vow makes the keep harsher, and pays for it.", T.SMALL, T.ASH, HORIZONTAL_ALIGNMENT_LEFT))
-	var worth := Kit.label("RENOWN ×%s" % String.num(Content.vow_score_multiplier(sworn), 2), T.CAPS, T.GOLD, HORIZONTAL_ALIGNMENT_RIGHT)
+	var worth := Kit.label("RENOWN ×%.2f" % Content.vow_score_multiplier(sworn), T.CAPS, T.GOLD, HORIZONTAL_ALIGNMENT_RIGHT)
 	worth.size_flags_horizontal = Control.SIZE_SHRINK_END
 	head.add_child(worth)
 	for i in range(Content.VOWS.size()):

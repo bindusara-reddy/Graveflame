@@ -17,6 +17,7 @@ var face: Label
 ## THE FORMS entry, which the Forms hand focus back to.
 var forms_entry: Button
 var _entries: Array = []
+var _prompt: Control
 var _roll: Label
 var _t := 0.0
 
@@ -82,10 +83,10 @@ func _entry(nav: VBoxContainer, text: String, node_name: String, on_press: Calla
 ## The prompt at the lower left and the roll at the lower right, small and in
 ## ink-haloed words, so the tableau stays the hero.
 func _corner_notes() -> void:
-	var prompt := Kit.prompt_link("ui_accept", "Choose")
-	add_child(prompt)
-	prompt.set_anchors_and_offsets_preset(Control.PRESET_BOTTOM_LEFT, Control.PRESET_MODE_MINSIZE, T.S5)
-	prompt.grow_vertical = Control.GROW_DIRECTION_BEGIN
+	_prompt = Kit.prompt_link("ui_accept", "Choose")
+	add_child(_prompt)
+	_prompt.set_anchors_and_offsets_preset(Control.PRESET_BOTTOM_LEFT, Control.PRESET_MODE_MINSIZE, T.S5)
+	_prompt.grow_vertical = Control.GROW_DIRECTION_BEGIN
 	_roll = Kit.outlined(Kit.label("", T.VOICE, T.ASH, HORIZONTAL_ALIGNMENT_RIGHT), 4)
 	_roll.name = "Roll"
 	_roll.size_flags_horizontal = Control.SIZE_SHRINK_END
@@ -93,6 +94,13 @@ func _corner_notes() -> void:
 	_roll.set_anchors_and_offsets_preset(Control.PRESET_BOTTOM_RIGHT, Control.PRESET_MODE_MINSIZE, T.S5)
 	_roll.grow_horizontal = Control.GROW_DIRECTION_BEGIN
 	_roll.grow_vertical = Control.GROW_DIRECTION_BEGIN
+
+
+## Show the menu and its corner notes, or put them away while a sub-screen
+## lies on the tableau (nothing under the veil may take focus or talk).
+func show_menu(shown: bool) -> void:
+	for part: Control in [holder, _prompt, _roll]:
+		part.visible = shown
 
 
 ## Arrival: only a real arrival replays the tableau's reveal; stepping back

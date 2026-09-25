@@ -1352,26 +1352,31 @@ class BarNotches extends Control:
 
 ## Lay a page down: it rises `rise` px into place and turns flat from a slight
 ## angle, the way paper settles on paper. Only for controls no container
-## positions (a screen's centring box): a container would re-sort it
-## mid-flight. Reduced motion keeps a short fade.
+## positions (a screen's centring box). It moves the anchored offsets, never
+## `position`, which would bake the size of the moment into the layout.
+## Reduced motion keeps a short fade.
 static func settle_in(node: Control, rise := 18.0, turn := 0.018) -> Tween:
-	var rest: Vector2 = node.get_meta("rest", node.position)
+	var rest: Vector2 = node.get_meta("rest", Vector2(node.offset_top, node.offset_bottom))
 	node.set_meta("rest", rest)
-	kill_tween(node.get_meta("settling", null))
+	if node.has_meta("settling"):
+		kill_tween(node.get_meta("settling"))
 	var t := tween(node)
 	node.set_meta("settling", t)
-	node.position = rest
 	node.rotation = 0.0
 	node.modulate.a = 0.0
 	if T.still():
+		node.offset_top = rest.x
+		node.offset_bottom = rest.y
 		t.tween_property(node, "modulate:a", 1.0, 0.15)
 		return t
 	node.pivot_offset = node.size * 0.5
-	node.position = rest + Vector2(0.0, rise)
+	node.offset_top = rest.x + rise
+	node.offset_bottom = rest.y + rise
 	node.rotation = turn
 	t.set_parallel(true)
 	t.tween_property(node, "modulate:a", 1.0, T.MED)
-	t.tween_property(node, "position", rest, T.SLOW).set_trans(Tween.TRANS_BACK).set_ease(Tween.EASE_OUT)
+	for side in [["offset_top", rest.x], ["offset_bottom", rest.y]]:
+		t.tween_property(node, side[0], side[1], T.SLOW).set_trans(Tween.TRANS_BACK).set_ease(Tween.EASE_OUT)
 	t.tween_property(node, "rotation", 0.0, T.SLOW).set_trans(Tween.TRANS_SINE).set_ease(Tween.EASE_OUT)
 	return t
 
@@ -1422,7 +1427,8 @@ static func caps(names: Array, device: String, height := 22.0) -> HBoxContainer:
 ## number to its text), so a result arrives like a tally read aloud. Reduced
 ## motion writes the final figure at once (and returns null).
 static func roll_number(l: Label, to: float, shown: Callable, delay := 0.0, duration := 0.9) -> Tween:
-	kill_tween(l.get_meta("rolling", null))
+	if l.has_meta("rolling"):
+		kill_tween(l.get_meta("rolling"))
 	if T.still() or to <= 0.0:
 		l.text = shown.call(to)
 		return null
