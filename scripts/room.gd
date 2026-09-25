@@ -66,9 +66,6 @@ func _ready() -> void:
 	_difficulty = Content.difficulty_for_room(room_index)
 	_difficulty.dmg_mul = float(_difficulty.dmg_mul) * Enemy.vow_damage()
 	_build_geometry()
-	_build_walls()
-	_build_boundaries()
-	_build_hazards()
 	_setup_exit()
 	_build_props()
 	_spawn_encounter()
@@ -96,23 +93,41 @@ func _process(delta: float) -> void:
 			emit_signal("completed")
 	queue_redraw()
 
+## The chamber's physics, in this child order: platforms, walls and arena rails
+## as solid bodies, then the hazard triggers.
 func _build_geometry() -> void:
-	for plat in template.get("platforms", []):
-		var sb := StaticBody2D.new()
-		sb.collision_layer = Content.L_WORLD
-		sb.collision_mask = 0
-		var cs := CollisionShape2D.new()
-		var rs := RectangleShape2D.new()
-		rs.size = Vector2(plat.size)
-		cs.shape = rs
-		sb.add_child(cs)
-		sb.position = Vector2(plat.position) + Vector2(plat.size) * 0.5
-		add_child(sb)
+	for plat: Rect2 in template.get("platforms", []):
+		_add_solid(plat)
+	# Optional 'walls' array in template — climbable vertical surfaces for wall slide/jump.
+	for wall: Rect2 in template.get("walls", []):
+		_add_solid(wall)
+	# Invisible arena rails keep high-speed attacks and the boss inside the room
+	# while leaving the authored pit hazards open underneath the platforms.
+	for x in [Content.ROOM_LEFT - 24.0, Content.ROOM_RIGHT + 24.0]:
+		_add_solid(Rect2(x - 24.0, -550.0, 48.0, 1400.0))
+	for hazard: Rect2 in template.get("hazards", []):
+		var area := Area2D.new()
+		area.collision_layer = Content.L_TRIGGER
+		area.collision_mask = Content.L_PLAYER_BODY
+		area.add_child(Content.rect_shape(hazard.size))
+		area.position = hazard.get_center()
+		area.body_entered.connect(_on_hazard_body)
+		add_child(area)
+
+## A static world body filling `r`.
+func _add_solid(r: Rect2) -> void:
+	var body := StaticBody2D.new()
+	body.collision_layer = Content.L_WORLD
+	body.collision_mask = 0
+	body.add_child(Content.rect_shape(r.size))
+	body.position = r.get_center()
+	add_child(body)
 
 ## Geometry-derived, deterministic dressing uses no encounter RNG draws.
 func _build_props() -> void:
 	var entry: Vector2 = template.get("entry", Vector2.ZERO)
 	var exit: Vector2 = template.get("exit", Vector2.ZERO)
+	var walls: Array = template.get("walls", [])
 	for platform: Rect2 in template.get("platforms", []):
 		if platform.size.x < 180.0 or platform.position.y > Content.FLOOR_Y:
 			continue
@@ -123,17 +138,10 @@ func _build_props() -> void:
 			if absf(point.x - entry.x) < 85.0 or absf(point.x - exit.x) < 65.0:
 				continue
 			# Keep every rift's arch clear, not just the primary one.
-			var at_rift := false
-			for e in exits:
-				if absf(point.x - (e.rect as Rect2).get_center().x) < 65.0:
-					at_rift = true
-			if at_rift:
+			var at_rift := exits.any(func(e): return absf(point.x - (e.rect as Rect2).get_center().x) < 65.0)
+			var against_wall := walls.any(func(wall: Rect2): return wall.grow(24.0).has_point(point + Vector2(0.0, -24.0)))
+			if at_rift or against_wall:
 				continue
-			var blocked := false
-			for wall: Rect2 in template.get("walls", []):
-				if wall.grow(24.0).has_point(point + Vector2(0.0, -24.0)):
-					blocked = true
-			if blocked: continue
 			var prop := CryptProp.new()
 			prop.position = point
 			prop.kind = props.size() % 2
@@ -141,51 +149,6 @@ func _build_props() -> void:
 			prop.shattered.connect(prop_shattered.emit)
 			add_child(prop)
 			props.append(prop)
-
-func _build_walls() -> void:
-	# Optional 'walls' array in template — climbable vertical surfaces for wall slide/jump.
-	for wl in template.get("walls", []):
-		var sb := StaticBody2D.new()
-		sb.collision_layer = Content.L_WORLD
-		sb.collision_mask = 0
-		var cs := CollisionShape2D.new()
-		var rs := RectangleShape2D.new()
-		rs.size = Vector2(wl.size)
-		cs.shape = rs
-		sb.add_child(cs)
-		sb.position = Vector2(wl.position) + Vector2(wl.size) * 0.5
-		sb.set_meta("wall", true)
-		add_child(sb)
-
-func _build_boundaries() -> void:
-	# Invisible arena rails keep high-speed attacks and the boss inside the room
-	# while leaving the authored pit hazards open underneath the platforms.
-	for x in [Content.ROOM_LEFT - 24.0, Content.ROOM_RIGHT + 24.0]:
-		var body := StaticBody2D.new()
-		body.collision_layer = Content.L_WORLD
-		body.collision_mask = 0
-		var shape := CollisionShape2D.new()
-		var rect := RectangleShape2D.new()
-		rect.size = Vector2(48.0, 1400.0)
-		shape.shape = rect
-		body.add_child(shape)
-		body.position = Vector2(x, 150.0)
-		add_child(body)
-
-func _build_hazards() -> void:
-	for hz in template.get("hazards", []):
-		var area := Area2D.new()
-		area.collision_layer = Content.L_TRIGGER
-		area.collision_mask = Content.L_PLAYER_BODY
-		var cs := CollisionShape2D.new()
-		var rs := RectangleShape2D.new()
-		rs.size = Vector2(hz.size)
-		cs.shape = rs
-		area.add_child(cs)
-		area.position = Vector2(hz.position) + Vector2(hz.size) * 0.5
-		area.set_meta("hazard", true)
-		area.body_entered.connect(_on_hazard_body)
-		add_child(area)
 
 func _on_hazard_body(body: Node) -> void:
 	if body is Player:
@@ -282,25 +245,23 @@ func _on_enemy_died(score: int, who: Node) -> void:
 	var color: Color = Content.PAL.attack
 	if is_instance_valid(who):
 		pos = who.global_position
-		var d = who.get("data")
-		if d is Dictionary and d.has("color"):
-			color = d.color
+		color = who.data.color
 		if who is Boss:
 			tier = 2
-		elif bool(who.get("elite")):
+		elif who.elite:
 			tier = 1
 		# A creature cut down by the knight comes apart along the blow; one that
 		# fell into the pit or blew itself up leaves nothing to split.
-		if score > 0 and tier < 2 and not bool(who.get("exploded_out")):
+		if score > 0 and tier < 2 and not who.exploded_out:
 			Severed.spawn(self, who, who._last_hit_dir, int(who.get_instance_id()))
 	emit_signal("enemy_died", score, pos, tier, color)
 	_clean_dead()
 	if is_boss:
 		# Adds dying mid-fight must never unseal or "clear" the throne room.
-		if boss == null or not is_instance_valid(boss) or boss.dead:
+		if not is_instance_valid(boss) or boss.dead:
 			emit_signal("completed")
 		return
-	if _all_enemies_dead():
+	if enemies.is_empty():
 		if _wave_index + 1 < _waves.size():
 			_wave_delay = 0.85
 		else:
@@ -319,12 +280,6 @@ func _clean_dead() -> void:
 		if is_instance_valid(e) and e.dead:
 			e.queue_free()
 	enemies = enemies.filter(func(e): return is_instance_valid(e) and not e.dead)
-
-func _all_enemies_dead() -> bool:
-	for e in enemies:
-		if is_instance_valid(e) and not e.dead:
-			return false
-	return true
 
 func get_entry_point() -> Vector2:
 	return Vector2(template.get("entry", Vector2(180, Content.FLOOR_Y - 80)))
@@ -347,6 +302,11 @@ func _accent_for(tag: String) -> Color:
 		"crossfire": return Color("9d425f")
 		"boss": return Color("cf493f")
 	return Color("9d6bff")
+
+## The decor's clock. Reduced motion holds every decoration at its rest pose;
+## hazards keep the raw clock.
+func _decor_t() -> float:
+	return 0.0 if Feedback.motion_reduced else _ambient_t
 
 func _mood() -> Dictionary:
 	return mood if not mood.is_empty() else Content.mood_for(0.0)
@@ -490,7 +450,7 @@ func _draw_masonry(pr: Rect2, accent: Color, salt: int, m: Dictionary, walkable:
 
 ## Broken ends, ash tufts, moss drips in the crypt, ember veins nearer the forge.
 func _draw_platform_dressing(pr: Rect2, m: Dictionary, salt: int) -> void:
-	var t := _ambient_t if not Feedback.motion_reduced else 0.0
+	var t := _decor_t()
 	var seep := float(m.ember_seep)
 	var moss := float(m.moss)
 	var stone: Color = m.stone
@@ -579,7 +539,7 @@ func _draw_exit(m: Dictionary) -> void:
 		_draw_rift((exits[i].rect as Rect2).get_center(), str(exits[i].kind), m, i == _near_idx, i)
 
 func _draw_rift(c: Vector2, kind: String, m: Dictionary, near: bool, salt: int) -> void:
-	var t := _ambient_t if not Feedback.motion_reduced else 0.0
+	var t := _decor_t()
 	var style := exit_style(kind)
 	var ec: Color = style.color if exit_open else Color("555560")
 	var stone: Color = (m.stone as Color).lightened(0.1)
@@ -701,7 +661,7 @@ func _throne(base: Vector2, m: Dictionary) -> void:
 	draw_rect(Rect2(seat.x - 60.0, seat.y - 30.0, 120.0, 30.0), stone.lightened(0.06))
 	# Ember sigil burning in the backrest.
 	draw_circle(seat + Vector2(0.0, -120.0), 22.0, Color(m.glow, 0.25))
-	VFX.draw_flame(self, seat + Vector2(0.0, -104.0), 34.0, 18.0, _ambient_t if not Feedback.motion_reduced else 0.0, 0.0, Color(m.torch, 0.85), VFX.GOLD)
+	VFX.draw_flame(self, seat + Vector2(0.0, -104.0), 34.0, 18.0, _decor_t(), 0.0, Color(m.torch, 0.85), VFX.GOLD)
 	draw_arc(seat + Vector2(0.0, -120.0), 30.0, 0.0, TAU, 28, Color(m.torch, 0.35), 2.0)
 
 func _gear(c: Vector2, r: float, angle: float, m: Dictionary) -> void:
@@ -777,7 +737,7 @@ func _fallen_blade(base: Vector2) -> void:
 	draw_line(base + Vector2(-13.0, -8.0), base + Vector2(-9.0, 0.0), Color("8a6a3a"), 3.0, true)
 
 func _draw_decor_back(tag: String, m: Dictionary) -> void:
-	var t := _ambient_t if not Feedback.motion_reduced else 0.0
+	var t := _decor_t()
 	var fy := Content.FLOOR_Y
 	match tag:
 		"tiers":
@@ -802,7 +762,7 @@ func _draw_decor_back(tag: String, m: Dictionary) -> void:
 			_banner_prop(Vector2(1160.0, 120.0), 230.0, t, m, 4)
 
 func _draw_decor_front(tag: String, m: Dictionary) -> void:
-	var t := _ambient_t if not Feedback.motion_reduced else 0.0
+	var t := _decor_t()
 	var fy := Content.FLOOR_Y
 	match tag:
 		"intro":
@@ -839,8 +799,6 @@ func _draw_decor_front(tag: String, m: Dictionary) -> void:
 			_bone_pile(Vector2(1330.0, fy), m)
 
 func despawn() -> void:
-	for e in enemies:
-		if is_instance_valid(e): e.queue_free()
-	if boss != null and is_instance_valid(boss): boss.queue_free()
+	# Every creature, the Warden included, is a child and goes with the room.
 	enemies.clear()
 	queue_free()
