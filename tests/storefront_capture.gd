@@ -1,12 +1,26 @@
 extends "res://tests/harness.gd"
-## Storefront capture: stages the three README beats at native 1280x720 and
-## writes them into docs/screenshots/. Uses a scratch save so it never touches
-## real progress.
-##   DISPLAY=:1 godot4 --path . --script res://tests/storefront_capture.gd \
-##       --resolution 320x180 --position 0,0 --audio-driver Dummy --fixed-fps 60 -- OUT_DIR
-## (--fixed-fps keeps the staged beats deterministic on a slow renderer.)
+## Storefront capture: stages the README's five shots at native 1280x720 and
+## writes them into docs/screenshots/: the title, a fight in the crypt yard,
+## the Warden waiting on its throne, a boon offer and the Forge. The ending is
+## never shown: it stays a surprise. Uses a scratch save so it never touches
+## real progress. Run it on the private X server, never the desktop's:
+##   DISPLAY=:97 godot4 --display-driver x11 --rendering-driver opengl3 --path . \
+##       --script res://tests/storefront_capture.gd --resolution 1280x720 \
+##       --audio-driver Dummy --fixed-fps 60 -- OUT_DIR
+## (--fixed-fps and the seeded RNG keep the staged beats deterministic.)
 var out_dir := "docs/screenshots"
 var _vp: SubViewport
+
+## The returning knight the shots are staged for: nine falls, no win yet (a win
+## would relight the title and wake the Warden sooner), a few relics tempered.
+const SAVE := {
+	"falls": 9, "falls_legacy": false, "cells": 146,
+	"meta": ["m_max_hp", "m_max_hp", "m_dmg", "m_flask", "m_special"],
+}
+## Global RNG seed for the descent, so its route, sparks and severing repeat.
+const STAGE_SEED := 20260926
+## The boon offer: one card of each rarity.
+const OFFER := ["phoenix", "skyfall", "brand"]
 
 func _shot(name: String) -> void:
 	await process_frame
@@ -19,22 +33,25 @@ func _shot(name: String) -> void:
 	if written:
 		print("SHOT ", name, " ", img.get_size())
 
-## Freeze the room's actors so the frame is a stable portrait, not a mid-tick.
-func _still() -> void:
-	for enemy in game.room.enemies:
-		if is_instance_valid(enemy):
-			enemy.set_physics_process(false)
-
-## Press shots read as "nothing has happened yet" if the HUD is zeroed, because
-## a freshly staged room has no kills behind it. These are ordinary mid-run
-## values a real descent produces; the capture is staged, and this says so.
-func _stage_run_state(score: int, cells: int, hp: float) -> void:
+## A freshly staged room has no kills behind it, and a zeroed HUD reads as
+## "nothing has happened yet". These are ordinary mid-descent values; the
+## capture is staged, and this says so.
+func _stage_hud(score: int, cells: int, hp: float, graveflame: float) -> void:
 	game.score = score
 	game._run_cells = cells
+	game._unbanked_cells = 0
 	game.player.build.hp = hp
+	game.player.special = graveflame
 	game.ui.set_score(score)
 	game.ui.set_cells(cells)
 	game.ui.set_hp(hp, float(game.player.build.max_hp))
+	game.ui.set_special(graveflame, Content.P_SPECIAL_MAX)
+
+## One blade press, held for two frames like a tap.
+func _swing() -> void:
+	Input.action_press("attack")
+	await ticks(2)
+	Input.action_release("attack")
 
 func run() -> void:
 	var args := OS.get_cmdline_user_args()
@@ -44,94 +61,112 @@ func run() -> void:
 	auto_accept_quit = false
 	DisplayServer.window_set_flag(DisplayServer.WINDOW_FLAG_NO_FOCUS, true)
 	use_scratch_save("graveflame_storefront")
+	Save.save_save(Save.load_save().merged(SAVE, true))
 	# A returning player's save: no first-run lessons popping into the frame.
 	for lesson in Content.HINTS:
 		Save.mark_learned(lesson)
 	_vp = make_capture_viewport()
 	await load_main_scene(60, _vp)
 
-	# --- Title: the full tableau with the menu over it ---
+	# --- Title: the full tableau with the menu over it, once the reveal has lit ---
+	await ticks(120)
 	await _shot("title-screen")
 
-	# --- Magma slam: airborne down-slam over the Cinderworks spike pit ---
+	# --- The crypt yard: an ignited combo cuts a stalker in two under the moon ---
+	seed(STAGE_SEED)
 	game.ui.start_requested.emit()
 	await ticks(40)
-	var route: Array = game.run.route
-	for i in range(route.size()):
-		if str(route[i].get("tag", "")) == "gap":
-			game.run.room_index = i - 1
-			break
+	var yard: Dictionary = Content.ROOM_TEMPLATES.filter(func(t): return t.tag == "arena")[0]
+	game.run.route[3] = yard
+	game.run.room_index = 2
 	game._advance_room()
-	await ticks(60)
+	# Cast the fight by hand instead of the chamber's own wave.
+	for foe in game.room.enemies:
+		foe.queue_free()
+	game.room.enemies.clear()
+	var knight_x := 560.0
+	var stalker: Enemy = game.room._spawn_enemy(Content.EnemyKind.STALKER, Vector2(knight_x + 150.0, Content.FLOOR_Y - 40.0))
+	var hopper: Enemy = game.room._spawn_enemy(Content.EnemyKind.HOPPER, Vector2(knight_x + 330.0, Content.FLOOR_Y - 40.0))
+	var crow: Enemy = game.room._spawn_enemy(Content.EnemyKind.CROW, Vector2(960.0, Content.FLOOR_Y - 250.0))
+	var wisp: Enemy = game.room._spawn_enemy(Content.EnemyKind.WISP, Vector2(knight_x - 200.0, Content.FLOOR_Y - 250.0))
+	await ticks(90)
 	game.ui.hide_banners()
-	_still()
-	_stage_run_state(1480, 96, 82.0)
-	# Clear the pit: a stalker beside the knight reads as the subject, and the
-	# room's floating causeway sits at the same height, so the slam looked like
-	# standing on it. Park the enemies and hold the pose in open air.
-	for enemy in game.room.enemies:
-		if is_instance_valid(enemy):
-			enemy.global_position = Vector2(1420.0, Content.FLOOR_Y - 40.0)
-	var pit := Vector2(560.0, Content.FLOOR_Y - 270.0)
-	game.player.respawn_at(pit)
+	# The watchers hold their marks (the crow on its ledge, the wisp over the
+	# graves); only the stalker takes the combo.
+	for foe in [hopper, crow, wisp]:
+		foe.set_physics_process(false)
+	crow.global_position = Vector2(960.0, Content.FLOOR_Y - 236.0)
+	wisp.global_position = Vector2(knight_x - 190.0, Content.FLOOR_Y - 250.0)
+	hopper.global_position = Vector2(knight_x + 330.0, Content.FLOOR_Y - 23.0)
+	hopper.facing = -1.0
+	stalker.global_position = Vector2(knight_x + 92.0, Content.FLOOR_Y - 23.0)
+	stalker.facing = -1.0
+	game.player.respawn_at(Vector2(knight_x, Content.FLOOR_Y - 27.0))
 	game.player.facing = 1.0
-	game.player.state = Player.State.SLAM
-	game.player._slam_active = true
-	game.player.velocity = Vector2(0.0, Content.P_SLAM_VEL)
-	# Physics is frozen for the portrait, so pose the puppet by hand.
-	game.player._pose = {}
-	game.player._step_animation(0.0)
-	game.player.set_physics_process(false)
-	game.feedback.camera.position = Vector2(640.0, 430.0)
-	# Enemies land a hit or two before they freeze, and the floating damage
-	# number would sit in the frame with nothing left to explain it.
-	game.feedback._particles.clear()
-	await ticks(3)
-	game.feedback.camera.position = Vector2(640.0, 430.0)
-	game.feedback._particles.clear()
-	await _shot("magma-slam")
+	game.player._flame_time = 10.0  # ignited, without the ignition's blast
+	game._streak_kills = 5
+	game._streak_t = 2.8
+	game._streak_tier = Content.streak_tier(5)
+	game.ui.set_streak(5, 0.8, Content.streak_multiplier(5))
+	_stage_hud(1480, 96, 74.0, 45.0)
+	await ticks(2)
+	await _swing()
+	await ticks(20)
+	# The second cut severs it: the frame catches the halves under the smear.
+	await _swing()
+	await ticks(10)
+	_stage_hud(1540, 96, 74.0, 53.0)
+	# A swing's brief invulnerability flickers the coat ember-orange.
+	game.player.iframes = 0.0
+	await _shot("crypt-fight")
 
-	# --- Ember Warden: phase two, facing the knight across the throne ---
+	# --- A boon offer: the yard cleared, one card of each rarity ---
+	var guard := 0
+	while not game.room.exit_open and guard < 600:
+		for foe in live_enemies():
+			foe.take_damage(99999.0, Vector2.RIGHT, 0.0)
+		await ticks(1)
+		guard += 1
+	await ticks(30)
+	game._on_room_completed()
+	var offer: Array = OFFER.map(func(id): return upgrade(id))
+	game._pending_upgrades = offer
+	game.ui.setup_upgrades(offer)
+	await ticks(50)
+	check(game.ui.is_panel_visible("reward"), "the boon offer is open")
+	await _shot("boon-offer")
+	game._on_upgrade_selected(0)
+	await ticks(10)
+
+	# --- The Warden, seated on its throne as the knight walks up the hall ---
 	game.run.room_index = game.run.rooms_total() - 2
 	game._advance_room()
-	await ticks(70)
-	var boss = game.room.boss
-	boss.intro_t = 0.01
-	await ticks(12)
-	game.ui.hide_banners()
-	_still()
-	_stage_run_state(3120, 214, 58.0)
-	if is_instance_valid(boss):
-		boss.global_position = Vector2(880.0, Content.FLOOR_Y - Content.BOSS_H * 0.5)
-		boss.facing = -1.0
-		boss.take_damage(boss.hp_max * 0.58, Vector2.RIGHT, 0.0)
-	game.player.respawn_at(Vector2(620.0, Content.FLOOR_Y - 27.0))
-	game.player.facing = 1.0
-	game.feedback.camera.position = game._camera_target_for(game.player.position)
-	await ticks(150)
-	game.ui.hide_banners()
-	game.feedback._particles.clear()
-	# The Warden wanders while the fight settles; square the pair up again so
-	# the frame is a face-off, not a knight turning his back on the boss.
-	game.player.respawn_at(Vector2(560.0, Content.FLOOR_Y - 27.0))
-	game.player.facing = 1.0
-	game.player.iframes = 30.0
-	_stage_run_state(3120, 214, 58.0)
-	if is_instance_valid(boss):
-		boss.global_position = Vector2(800.0, Content.FLOOR_Y - Content.BOSS_H * 0.5)
-		boss.velocity = Vector2.ZERO
-		boss.facing = -1.0
-		# Cancel whatever move it was in (a charge would carry it through the knight).
-		boss._disarm()
-		boss.state = Enemy.EState.SEEK
-		boss.action_t = 5.0
-	game.feedback.camera.position = game._camera_target_for(Vector2(680.0, game.player.position.y))
-	await ticks(2)
-	if is_instance_valid(boss):
-		boss._begin_lunge()
-	await ticks(6)
-	game.feedback._particles.clear()
-	await _shot("ember-warden")
+	game.ui.hide_streak()
+	game.player._flame_time = 0.0
+	game.player.respawn_at(Vector2(250.0, Content.FLOOR_Y - 27.0))
+	await ticks(30)
+	var boss: Boss = game.room.boss
+	Input.action_press("move_right")
+	while game.player.global_position.x < 300.0:
+		await ticks(1)
+	# The Warden would rise as the knight comes near; hold it on its seat.
+	boss.set_physics_process(false)
+	while game.player.global_position.x < 432.0:
+		await ticks(1)
+	Input.action_release("move_right")
+	_stage_hud(2860, 184, 81.0, 70.0)
+	check(boss.seated, "the Warden still sits on its throne")
+	await _shot("warden-throne")
+	boss.set_physics_process(true)
+
+	# --- The Forge, between lives ---
+	game._on_quit_to_title()
+	await ticks(30)
+	Save.save_save(Save.load_save().merged({ "cells": 154 }, true))
+	game._on_forge_requested()
+	await ticks(40)
+	check(game.ui.is_panel_visible("forge"), "the Forge is open")
+	await _shot("the-forge")
 
 	# Also leaves no scratch save behind in the player's userdata directory.
 	await finish("STOREFRONT")
