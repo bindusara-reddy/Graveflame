@@ -1,12 +1,18 @@
 # Graveflame
 
-![Graveflame title screen: a flame-crowned knight above a vast subterranean fortress and glowing furnace](docs/screenshots/title-screen.png)
+![Graveflame title screen: a flame-crowned knight on a ledge above a vast keep that descends to a glowing furnace](docs/screenshots/title-screen.png)
 
-A gothic 2D action-roguelite. Parry, riposte and burn through seven chambers to the Ember Warden's throne.
+*They light a flame on every knight's grave. Yours got up.*
+
+A gothic 2D action-roguelite cut from paper. Parry, riposte and burn down through seven chambers of the keep, from the blue crypt through the amber works to the ash pit, to the throne where the Ember Warden waits.
 
 <p align="center">
-  <img src="docs/screenshots/magma-slam.png" alt="Airborne combat above the Cinderworks spike pit" width="49%">
-  <img src="docs/screenshots/ember-warden.png" alt="The flame-headed knight confronting the Ember Warden in a firelit hall" width="49%">
+  <img src="docs/screenshots/crypt-fight.png" alt="An ignited knight cuts a stalker in two in a moonlit crypt yard while a wisp and a carrion crow watch from the ledges" width="49%">
+  <img src="docs/screenshots/warden-throne.png" alt="The knight walks up the throne apse toward the Ember Warden, seated on its throne beneath a rose window" width="49%">
+</p>
+<p align="center">
+  <img src="docs/screenshots/boon-offer.png" alt="The Flame Offers: three boon cards, one epic, one rare and one common" width="49%">
+  <img src="docs/screenshots/the-forge.png" alt="The Forge, between lives: relics tempered with cells" width="49%">
 </p>
 
 ## Play
@@ -19,19 +25,19 @@ On Linux, with `godot4` on your PATH, you can also run `./play.sh` from the proj
 
 ## Controls
 
-| Action | Keyboard |
-| :--- | :--- |
-| Move · Jump | `A` / `D` · `Space` |
-| Blade · Air slam | `J` · `Down` + `J` while airborne |
-| Flame lance · Ignite | `K` · `Q` |
-| Dash · Parry | `Shift` · `S` |
-| Flask · Interact | `F` · `E` |
-| Pause | `Esc` |
+| Action | Keyboard | Gamepad |
+| :--- | :--- | :--- |
+| Move · Jump | `A` / `D` · `Space` | Left stick or D-pad · `A` |
+| Blade · Air slam | `J` · `Down` + `J` in the air | `X` · D-pad down + `X` in the air |
+| Flame lance · Ignite | `K` · `Q` | `Y` · `RT` |
+| Dash · Parry | `Shift` · `S` | `B` · `LB` |
+| Flask · Enter rift | `F` · `E` | `LT` · `RB` or D-pad up |
+| Pause | `Esc` | `Start` |
 
-Gamepad supported. Open **Controls** on the title screen for the full keyboard and gamepad bindings.
+The arrow keys move and jump too. **The Forms** on the title screen lists every binding; change keys from **Senses**.
 
 ## Status
 
-Playable development build with original procedural vector art and synthesized audio. Pacing and difficulty are still being playtested.
+Playable from the first chamber to the throne and the ending past it, with original procedural paper-cutout art and synthesized audio. Pacing and difficulty are still being playtested.
 
 [MIT license](LICENSE) · Title typeface: Noto Serif Display, [SIL Open Font License 1.1](fonts/NotoSerifDisplay-OFL.txt).
