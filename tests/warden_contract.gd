@@ -128,6 +128,9 @@ func _test_moveset() -> void:
 	var knight := _knight(700.0)
 	root.add_child(knight)
 	boss = await _fighting_warden(400.0)
+	var released: Array = []
+	var hear := func(_text: String, cue: String, _pos: Vector2): released.append(cue)
+	boss.announced.connect(hear)
 	var x0 := boss.global_position.x
 	boss._begin_slam()
 	check(is_equal_approx(boss.slam_x, x0 + (700.0 - x0) * 0.6), "a phase-one leap-slam covers part of the gap, so a sidestep beats it")
@@ -144,6 +147,7 @@ func _test_moveset() -> void:
 	await _until_not(boss, Enemy.EState.ATTACK)
 	check(boss.state == Enemy.EState.WINDUP and boss.action_idx == Boss.Action.FAN, "an ignited lunge can run straight on into a fan")
 	check(boss.st_timer < 0.5 * Boss.LINK_WINDUP + 0.01, "the linked fan comes on a shorter tell")
+	await _until_not(boss, Enemy.EState.WINDUP)
 	boss.queue_free()
 	var wall := StaticBody2D.new()
 	wall.collision_layer = Content.L_WORLD
@@ -152,11 +156,14 @@ func _test_moveset() -> void:
 	root.add_child(wall)
 	knight.position.x = 1200.0
 	boss = await _fighting_warden(900.0)
+	boss.announced.connect(hear)
 	boss.facing = 1.0
 	boss._begin_charge()
 	boss._do_charge()
 	await _until_not(boss, Enemy.EState.ATTACK)
 	check(boss._dazed and boss.state == Enemy.EState.RECOVER and boss.st_timer > 1.0, "a charge baited into the wall leaves the Warden reeling")
+	var unheard: Array = Boss.Action.keys().filter(func(a: String): return not released.has("release_" + a.to_lower()))
+	check(unheard.is_empty(), "every move is voiced as it is loosed (unheard: %s)" % str(unheard))
 	boss.queue_free()
 	wall.queue_free()
 	knight.queue_free()

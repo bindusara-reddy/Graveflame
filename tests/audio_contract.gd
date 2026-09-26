@@ -66,6 +66,10 @@ func _test_recipes() -> void:
 			"last_ember", "card_deal", "uncork", "grave_light"]:
 		check(SfxSynth.LEVELS.has(cue), "the cue book has %s" % cue)
 		check(_peak(SfxSynth.build_pcm(cue), 0) > 0.2, "%s is a designed sound, not the fallback click" % cue)
+	# Every Warden move is heard as it is loosed, not only wound up (Boss._release).
+	for action: String in Boss.Action.keys():
+		var cue := "release_" + action.to_lower()
+		check(SfxSynth.LEVELS.has(cue) and _peak(SfxSynth.build_pcm(cue), 0) > 0.2, "the Warden's %s has a designed release cue" % action.to_lower())
 
 
 func _test_music_api() -> void:

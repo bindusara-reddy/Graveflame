@@ -425,6 +425,12 @@ func _finish_move(rest: float) -> void:
 func _action_telegraph() -> String:
 	return str(Action.keys()[action_idx]).to_lower()
 
+## The move leaves the Warden's hands: its own release cue ("release_lunge",
+## "release_slam"), voiced through the creature announce hook, so every
+## strike is heard as it is loosed and not only as it is wound up.
+func _release() -> void:
+	announced.emit("", "release_" + _action_telegraph(), global_position)
+
 ## Start winding up `action` for `seconds`. data.windup carries the same length
 ## because WardenArt reads it to pace the tell.
 func _wind_up(action: int, seconds: float) -> void:
@@ -517,6 +523,7 @@ func _do_lunge() -> void:
 	st_timer = 0.22
 	_arm(Content.BOSS_W * 0.5 + 30.0)
 	velocity = Vector2(facing * 620.0, -180.0)
+	_release()
 
 func _do_charge() -> void:
 	state = EState.ATTACK
@@ -530,6 +537,7 @@ func _do_charge() -> void:
 	_trail_x = global_position.x
 	_arm(Content.BOSS_W * 0.5 + 24.0)
 	velocity = Vector2(_charge_dir * Content.BOSS_CHARGE_SPEED, 0.0)
+	_release()
 
 ## A fan of shots centred on the knight, lifted where needed so its lowest
 ## shot skims the floor instead of burying itself short of the knight.
@@ -551,6 +559,7 @@ func _do_fan() -> void:
 		var a := tilt + lerpf(-spread * 0.5, spread * 0.5, float(i) / maxf(1.0, float(n - 1)))
 		var v := Vector2(side * cos(a), sin(a)) * Content.BOSS_SHOT_SPEED
 		projectile_requested.emit("enemy", origin, v, Content.BOSS_SHOT_DAMAGE * Enemy.vow_damage(), 180.0, 0, 2.6, SHOT_COLOR)
+	_release()
 	_finish_move(_timing(0.85, 0.6))
 
 func _do_slam() -> void:
@@ -575,6 +584,7 @@ func _emit_slam_waves() -> void:
 		if phase == BPhase.THREE:
 			_kindle(global_position.x + side * 60.0)
 	emit_signal("exploded", global_position + Vector2(0.0, Content.BOSS_H * 0.45), 120.0, 0.0)
+	_release()
 
 func _boss_recover(delta: float) -> void:
 	velocity.y += Content.GRAVITY * delta

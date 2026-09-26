@@ -138,6 +138,7 @@ const LEVELS := {
 	"victory": 0.6, "defeat": 0.65,
 	"tell_stalker": 0.42, "tell_hopper": 0.36, "tell_wisp": 0.36, "tell_brute": 0.55,
 	"tell_bomber": 0.45, "tell_crow": 0.42, "tell_lunge": 0.55, "tell_fan": 0.5, "tell_slam": 0.58, "tell_charge": 0.6,
+	"release_lunge": 0.55, "release_fan": 0.5, "release_slam": 0.6, "release_charge": 0.6,
 	"tell_sexton": 0.5, "sexton_wave": 0.55, "roar": 0.8, "last_ember": 0.75, "ring_out": 0.45,
 	"clang": 0.55, "whiff": 0.3, "perfect_parry": 0.75, "spit": 0.35, "bolt_hit": 0.45, "uncork": 0.35,
 	"heartbeat": 0.55, "card_deal": 0.26, "grave_light": 0.4,
@@ -424,6 +425,31 @@ static func build_pcm(name: String, take: int = 0) -> PackedByteArray:
 			b = buf(0.65)
 			add_tone(b, 0.0, 0.6, 65.0, 160.0, 0.55, 1.0, 0.3, 0.12, 1.0)
 			add_noise(b, 0.0, 0.6, 180.0, 700.0, 1.2, 0.8, 0.3, 0.12, 0, sd, 14.0)
+		"release_lunge":
+			# The Warden's lunge driven home: mantle and steel rushing forward, a grunt,
+			# a clank of plate.
+			b = buf(0.4)
+			add_noise(b, 0.0, 0.35, 220.0, 1600.0, 1.4, 1.0, 0.02, 0.09, 1, sd, 30.0)
+			add_tone(b, 0.0, 0.25, 150.0, 80.0, 0.2, 0.6, 0.01, 0.07, 0.8)
+			add_metal(b, 0.03, 0.3, 520.0, 0.25, 0.08, [1.0, 2.76], 0.5)
+		"release_fan":
+			# Fire flung from the palm: a bright whoomp breaking into crackle.
+			b = buf(0.45)
+			add_noise(b, 0.0, 0.4, 1200.0, 300.0, 0.9, 1.0, 0.005, 0.1, 0, sd, 70.0)
+			add_noise(b, 0.02, 0.35, 2500.0, 4500.0, 1.2, 0.4, 0.01, 0.08, 1, sd + 1, 200.0)
+			add_tone(b, 0.0, 0.2, 180.0, 90.0, 0.15, 0.5, 0.004, 0.05)
+		"release_slam":
+			# The ridge let loose: a fire front tearing away along the stone.
+			b = buf(0.65)
+			add_noise(b, 0.0, 0.6, 300.0, 2200.0, 1.0, 1.0, 0.01, 0.2, 0, sd, 45.0)
+			add_noise(b, 0.05, 0.5, 1800.0, 900.0, 1.3, 0.4, 0.02, 0.14, 1, sd + 1, 110.0)
+			add_tone(b, 0.0, 0.4, 60.0, 40.0, 0.3, 0.5, 0.003, 0.12)
+		"release_charge":
+			# The charge breaks loose: a bellow over iron feet scraping stone.
+			b = buf(0.5)
+			add_click(b, 0.0, 0.7, sd + 2, 2400.0)
+			add_tone(b, 0.0, 0.45, 120.0, 70.0, 0.35, 0.8, 0.01, 0.12, 1.0)
+			add_noise(b, 0.0, 0.45, 400.0, 1400.0, 1.5, 0.8, 0.005, 0.12, 1, sd, 16.0)
 		"tell_sexton":
 			# The hand-bell raised: two quick strikes on A and a sleeve's rustle.
 			b = buf(1.2)
