@@ -111,7 +111,7 @@ func _test_banking() -> void:
 
 func _test_chamber_stats() -> void:
 	await boot()
-	for key in ["kills_by_kind", "parries", "perfect_parries", "ripostes", "untouched_chambers", "damage_taken"]:
+	for key in ["kills_by_kind", "parries", "perfect_parries", "ripostes", "untouched_chambers", "damage_taken", "flourishes"]:
 		check(game._stats.has(key), "run stats carry %s" % key)
 	await clear_room()
 	var by_kind := 0

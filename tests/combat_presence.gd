@@ -455,15 +455,18 @@ func test_flourishes() -> void:
 	await ticks(8)
 	check("ghost_step" in kinds and p.special >= meter + Player.GHOST_STEP_METER - 0.01, "dashing through a live blow is a ghost step that pays meter")
 	check(p._flourish_t > 0.0 and p._flourish_name == "GHOST STEP", "a flourish names itself over the knight")
+	check(game._streak_kills >= 1 and game._streak_t > Content.STREAK_WINDOW - 0.5, "a flourish feeds the fury and rekindles its window")
 	swinger.queue_free()
 	await ticks(60)
 	p.facing = 1.0
 	await deflect()
 	var doomed := dummy_ahead(78.0)
 	doomed.hp = 1.0
+	var fury: int = game._streak_kills if game._streak_t > 0.0 else 0
 	await hold_action("attack")
 	await ticks_until(func(): return "riposte_kill" in kinds, 20)
 	check("riposte_kill" in kinds, "a kill by riposte announces itself")
+	check(game._streak_kills > fury and int(game._stats.flourishes) >= 2, "each flourish adds to the fury and is counted for the ledger")
 	p.action_feedback.disconnect(probe)
 	await ticks(40)
 

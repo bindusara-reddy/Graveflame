@@ -34,6 +34,9 @@ var _cell_mul := 1.0
 var _vows: Array = []
 var _vow_mult := 1.0
 # Kill streak: chained kills inside STREAK_WINDOW multiply score.
+## Style flourishes (player action_feedback kinds) feed the streak like kills,
+## this many points each, so skill keeps a fury burning between kills.
+const FLOURISH_FURY := { "perfect_parry": 1, "riposte_kill": 1, "ghost_step": 1, "aerial_kill": 1, "multi_slam": 2 }
 var _streak_kills := 0
 var _streak_t := 0.0
 var _streak_tier := 0
@@ -313,7 +316,7 @@ func _reset_stats() -> void:
 	_stats = {
 		"time": 0.0, "kills": 0, "elites": 0, "damage_dealt": 0.0, "damage_taken": 0.0,
 		"best_streak": 0, "rooms": 0, "rooms_total": 0, "kills_by_kind": {},
-		"parries": 0, "perfect_parries": 0, "ripostes": 0, "untouched_chambers": 0,
+		"parries": 0, "perfect_parries": 0, "ripostes": 0, "untouched_chambers": 0, "flourishes": 0,
 	}
 	_break_streak()
 
@@ -493,7 +496,12 @@ func _tick_streak(delta: float) -> void:
 	ui.set_streak_fraction(_streak_t / Content.STREAK_WINDOW)
 
 func _register_kill() -> void:
-	_streak_kills = _streak_kills + 1 if _streak_t > 0.0 else 1
+	_feed_streak(1)
+
+## Add `points` to the streak (a kill is one) and rekindle its window; a
+## streak that had already lapsed starts over from these points.
+func _feed_streak(points: int) -> void:
+	_streak_kills = (_streak_kills if _streak_t > 0.0 else 0) + points
 	_streak_t = Content.STREAK_WINDOW
 	_stats.best_streak = maxi(int(_stats.best_streak), _streak_kills)
 	var tier := Content.streak_tier(_streak_kills)
@@ -1846,12 +1854,18 @@ func _on_player_action(kind: String, pos: Vector2) -> void:
 		_: pass
 
 ## Counts the knight's feats for the run's stats. Kept out of the feedback
-## match above so a feat is counted once, however it is voiced.
+## match above so a feat is counted once, however it is voiced. A flourish
+## also feeds the fury, tagged over the knight with what it added.
 func _tally_action(kind: String) -> void:
 	if kind == "perfect_parry":
 		_stats.perfect_parries += 1
 	elif kind == "swing" and player._riposte_attack:
 		_stats.ripostes += 1
+	if FLOURISH_FURY.has(kind):
+		var points: int = FLOURISH_FURY[kind]
+		_stats.flourishes += 1
+		_feed_streak(points)
+		feedback.damage_number(player.global_position + Vector2(0.0, -132.0), 0.0, "hit", "+%d FURY" % points)
 
 func _on_player_projectile(team: String, pos: Vector2, vel: Vector2, dmg: float, kb: float, pierce: int, life: float, color: Color) -> void:
 	_spawn_projectile(team, pos, vel, dmg, kb, pierce, life, color)
