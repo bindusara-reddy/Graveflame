@@ -18,9 +18,12 @@ var life := 2.0
 var radius := 9.0
 var color := Color("7fd4ff")
 ## "" is a shot. "wave" is the Warden's slam shockwave, a fire ridge running
-## along the floor: it stays upright and leaves no comet trail. Set before
-## the projectile enters the tree.
+## along the floor; "toll" is a sexton's bell toll, paper crests rolling along
+## it. Both stay upright, leave no comet trail and stop where their floor
+## ends. Set before the projectile enters the tree.
 var style := ""
+## The top of the floor a wave rolls along, found under its spawn point.
+var _ground_y := Content.FLOOR_Y
 var _hit: Dictionary = {}
 var _shape: CollisionShape2D
 var _age := 0.0
@@ -73,8 +76,9 @@ func _update_layers() -> void:
 func _ready() -> void:
 	# Build collision shape
 	_shape = CollisionShape2D.new()
-	if style == "wave":
-		radius = 12.0  # as tall as its flames, down to the floor
+	if _hugs_floor():
+		radius = 12.0  # as tall as its crest, down to the floor
+		_ground_y = _ground_below()
 	var circ := CircleShape2D.new()
 	circ.radius = radius
 	_shape.shape = circ
@@ -149,6 +153,9 @@ func _physics_process(delta: float) -> void:
 		return
 	if _in_stone():
 		struck.emit(global_position, vel.normalized(), color, "stone")
+		_die()
+		return
+	if _hugs_floor() and _floor_ends():
 		_die()
 		return
 	# Cull off-screen / below world
@@ -229,6 +236,23 @@ func _in_stone() -> bool:
 	_stone_query.position = global_position
 	return not get_world_2d().direct_space_state.intersect_point(_stone_query, 1).is_empty()
 
+## A wave rolls along the floor rather than flying.
+func _hugs_floor() -> bool:
+	return style == "wave" or style == "toll"
+
+## The top of the stonework just under the spawn point; the chamber floor
+## when nothing lies within reach below.
+func _ground_below() -> float:
+	var ray := PhysicsRayQueryParameters2D.create(global_position, global_position + Vector2(0.0, 80.0), Content.L_WORLD)
+	var hit := get_world_2d().direct_space_state.intersect_ray(ray)
+	return float(hit.position.y) if not hit.is_empty() else Content.FLOOR_Y
+
+## True once no stone lies under the wave's leading edge: its floor has ended
+## at a pit's lip or a ledge's edge, and a wave never rolls on over air.
+func _floor_ends() -> bool:
+	_stone_query.position = Vector2(global_position.x + signf(vel.x) * radius, _ground_y + 4.0)
+	return get_world_2d().direct_space_state.intersect_point(_stone_query, 1).is_empty()
+
 func _die() -> void:
 	set_physics_process(false)
 	queue_free()
@@ -236,6 +260,9 @@ func _die() -> void:
 func _draw() -> void:
 	if style == "wave":
 		_draw_wave()
+		return
+	if style == "toll":
+		_draw_toll()
 		return
 	var pulse := 0.85 + sin(_age * 22.0) * 0.15
 	var glow := Color(color.r, color.g, color.b, 0.16)
@@ -260,4 +287,18 @@ func _draw_wave() -> void:
 	for i in range(3):
 		var side := float(i) - 1.0
 		VFX.draw_flame(self, Vector2(side * 9.0, 0.0), 30.0 - absf(side) * 8.0, 12.0, t, float(i) * 2.1, color, VFX.HOT)
+	draw_set_transform_matrix(Transform2D.IDENTITY)
+
+## The toll: three nested paper crests standing on the floor, each a cut strip
+## over its shadow, the tallest leading the way it rolls, over a dust smudge.
+func _draw_toll() -> void:
+	var t := 0.0 if Feedback.motion_reduced else _age
+	var ground := Vector2(0.0, _ground_y - global_position.y)
+	VFX.draw_ellipse(self, ground, 24.0, 5.0, Color(color, 0.2))
+	draw_set_transform(ground, 0.0, Vector2(signf(vel.x) if vel.x != 0.0 else 1.0, 1.0))
+	for i in range(3):
+		var r := 26.0 - 7.0 * float(i) + sin(t * 18.0 + float(i)) * 1.5
+		var at := Vector2(-12.0 - 6.0 * float(i), 0.0)
+		draw_arc(at + Vector2(1.5, 1.5), r, -PI * 0.5, 0.0, 10, Color(VFX.JOINT, 0.6), 4.0, true)
+		draw_arc(at, r, -PI * 0.5, 0.0, 10, color.lightened(0.15 * float(i)), 3.0, true)
 	draw_set_transform_matrix(Transform2D.IDENTITY)

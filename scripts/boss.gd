@@ -15,9 +15,6 @@ signal phase_changed(phase: int)
 signal summon_requested(kind: int, pos: Vector2)
 ## The felled Warden breaking apart, a beat after the killing blow.
 signal shattered(pos: Vector2)
-## A slam shockwave running along the floor from pos: the game spawns it as a
-## Projectile drawn as a fire ridge (style "wave").
-signal wave_requested(pos: Vector2, vel: Vector2, dmg: float, life: float)
 
 enum BPhase { INTRO, ONE, TWO, THREE }
 enum Action { LUNGE, FAN, SLAM, CHARGE }
@@ -572,7 +569,7 @@ func _emit_slam_waves() -> void:
 	var damage := Content.BOSS_SHOT_DAMAGE * 0.8 * Enemy.vow_damage()
 	for side: float in [-1.0, 1.0]:
 		var x := global_position.x + side * 40.0
-		wave_requested.emit(Vector2(x, Content.FLOOR_Y - WAVE_LOW), Vector2(side * speed, 0.0), damage, 1.4)
+		wave_requested.emit(Vector2(x, Content.FLOOR_Y - WAVE_LOW), Vector2(side * speed, 0.0), damage, 1.4, "wave", SHOT_COLOR)
 		if phase >= BPhase.TWO:
 			projectile_requested.emit("enemy", Vector2(x, Content.FLOOR_Y - WAVE_HIGH), Vector2(side * speed * 0.55, 0.0), damage, 120.0, 0, 1.6, SHOT_COLOR)
 		if phase == BPhase.THREE:

@@ -1,8 +1,9 @@
 class_name Enemy
 extends CharacterBody2D
 ## Compact state-machine enemy: STALKER (melee), HOPPER (leaping), WISP (ranged),
-## BRUTE (shielded heavy), BOMBER (exploding kamikaze), CROW (diving flyer). Any
-## of them may spawn as an elite: larger, tougher, gilded, and worth more cells.
+## BRUTE (shielded heavy), BOMBER (exploding kamikaze), CROW (diving flyer),
+## SEXTON (distant bell-ringer whose toll rolls along the floor). Any of them
+## may spawn as an elite: larger, tougher, gilded, and worth more cells.
 
 const VFX := preload("res://scripts/vfx.gd")
 const GroundFire := preload("res://scripts/ground_fire.gd")
@@ -19,8 +20,12 @@ signal telegraphed(kind: String, pos: Vector2, elite: bool)
 signal announced(text: String, cue: String, pos: Vector2)
 ## A twinned elite at half health: the room sets a plain copy of it at `pos`.
 signal twin_requested(kind: int, pos: Vector2)
+## A shockwave running along the floor from pos: the Warden's slam ridge
+## (style "wave") or a sexton's toll ("toll"). The game spawns it as a
+## floor-hugging Projectile, jumpable and parryable like any shot.
+signal wave_requested(pos: Vector2, vel: Vector2, dmg: float, life: float, style: String, color: Color)
 
-enum Kind { STALKER, HOPPER, WISP, BRUTE, BOMBER, CROW }
+enum Kind { STALKER, HOPPER, WISP, BRUTE, BOMBER, CROW, SEXTON }
 enum EState { SPAWN, SEEK, WINDUP, ATTACK, RECOVER, STAGGER, DEAD }
 
 ## Telegraph id for an archetype's windup: the Kind's own name, lower-cased
@@ -59,6 +64,10 @@ const SAFE_DROP := 420.0
 const KINDLED_EVERY := 0.5
 const KINDLED_BITE := 6.0
 const WARD_RUNES := 2
+## A sexton's toll rolls this high above its floor: under a jump, into a shin.
+const TOLL_LIFT := 14.0
+## Seconds after the toll that the sexton's bell still hangs low, swung through.
+const TOLL_FOLLOW := 0.3
 
 ## Pyre boon damage, mirrored from the player's build by the game so a burning
 ## enemy can detonate against its neighbours without holding a player reference.
@@ -364,6 +373,7 @@ func _step_seek(delta: float) -> void:
 		Kind.BRUTE: _seek_brute(to_p, delta)
 		Kind.BOMBER: _seek_bomber(to_p, delta)
 		Kind.CROW: _seek_crow(to_p, delta, player)
+		Kind.SEXTON: _seek_sexton(to_p, delta)
 
 ## One grounded step at `speed`: gravity, the ledge-aware horizontal move, slide.
 func _walk(speed: float, delta: float) -> void:
@@ -447,6 +457,20 @@ func _seek_crow(to_p: Vector2, delta: float, player) -> void:
 	if _ready_to_strike() and to_p.y > 70.0 and absf(to_p.x) < 300.0:
 		_begin_windup()
 
+## A bell-ringer keeps its distance on its own floor: it backs away from a
+## knight inside SEXTON_NEAR and closes on one beyond SEXTON_FAR, then tolls
+## once the knight stands within reach at about its own height.
+func _seek_sexton(to_p: Vector2, delta: float) -> void:
+	var dx := absf(to_p.x)
+	var speed := 0.0
+	if dx < Content.SEXTON_NEAR:
+		speed = -facing * float(data.speed) * 0.8
+	elif dx > Content.SEXTON_FAR:
+		speed = facing * float(data.speed)
+	_walk(speed, delta)
+	if _ready_to_strike() and dx < Content.SEXTON_FAR + 40.0 and absf(to_p.y) < 140.0:
+		_begin_windup()
+
 func _seek_brute(to_p: Vector2, delta: float) -> void:
 	# Slow heavy melee approach
 	_close_in(to_p.x, 60.0, delta)
@@ -486,13 +510,17 @@ func _step_windup(delta: float) -> void:
 	# An armed bomber only waits: its fuse, burning in _physics_process, sets it off.
 	if st_timer > 0.0 or kind == Kind.BOMBER:
 		return
-	if kind == Kind.WISP:
-		_wisp_shoot()
-		_enter_recover()
-	else:
-		state = EState.ATTACK
-		st_timer = float(data.active) if data.has("active") else 0.18
-		_arm(float(data.w) * 0.5 + 20.0)
+	match kind:
+		Kind.WISP:
+			_wisp_shoot()
+			_enter_recover()
+		Kind.SEXTON:
+			_toll()
+			_enter_recover()
+		_:
+			state = EState.ATTACK
+			st_timer = float(data.active) if data.has("active") else 0.18
+			_arm(float(data.w) * 0.5 + 20.0)
 
 ## The dive: a straight line at where the knight stood when the shriek ended.
 func _begin_dive() -> void:
@@ -539,6 +567,16 @@ func _wisp_shoot() -> void:
 		# Elite wisps fire a tight twin volley.
 		var side := Vector2(-dir.y, dir.x) * 14.0
 		emit_signal("projectile_requested", "enemy", global_position + side, dir.rotated(0.16) * Content.WISP_SHOT_SPEED, Content.WISP_SHOT_DAMAGE * damage_mul, 160.0, 0, Content.WISP_SHOT_LIFE, color)
+
+## The bell comes down: a toll rolls out both ways along the sexton's own floor,
+## low enough to jump, and the game hears the bell ring.
+func _toll() -> void:
+	var feet := global_position.y + float(data.h) * 0.5
+	var color: Color = Content.ELITE_COLOR if elite else Content.TOLL_COLOR
+	for side: float in [-1.0, 1.0]:
+		var at := Vector2(global_position.x + side * float(data.w) * 0.5, feet - TOLL_LIFT)
+		wave_requested.emit(at, Vector2(side * float(data.toll_speed), 0.0), attack_damage(), float(data.toll_life), "toll", color)
+	announced.emit("", "sexton_wave", global_position)
 
 ## The bomber bursts. Cut down while armed (`reduced`), it pops in a smaller
 ## blast that is practical to dash away from, and counts as the knight's kill;
@@ -749,10 +787,11 @@ func _move_x(speed: float, delta: float) -> void:
 	velocity.x = move_toward(velocity.x, speed, 2000.0 * delta)
 
 ## A walker at a ledge's lip steps off only toward a knight waiting below, and
-## only where solid floor catches it: a spike pit is never a way down.
+## only where solid floor catches it: a spike pit is never a way down. A
+## sexton never steps off: it keeps to its own floor and tolls along it.
 func _drops_toward_knight(dir: float) -> bool:
 	var player = _get_player()
-	if player == null:
+	if player == null or kind == Kind.SEXTON:
 		return false
 	var to_p: Vector2 = player.global_position - global_position
 	return to_p.y > 40.0 and signf(to_p.x) == dir and _floor_below(dir * (float(data.w) * 0.5 + 12.0))
@@ -848,6 +887,7 @@ func _draw() -> void:
 		Kind.BRUTE: _draw_brute(w, h, base, mid, t, tw, ta, flash)
 		Kind.BOMBER: _draw_bomber(w, h, base, mid, t, flash)
 		Kind.CROW: _draw_crow(w, h, base, mid, t, tw, flash)
+		Kind.SEXTON: _draw_sexton(w, h, base, mid, t, tw, flash)
 	draw_set_transform_matrix(Transform2D.IDENTITY)
 	_draw_guard(w, h, t)
 	# The committed line: in the last beat of the shriek, a faint dashed track
@@ -1184,3 +1224,94 @@ func _crow_wing(shoulder: Vector2, angle: float, span: float, col: Color) -> voi
 	var wing := xf * pts
 	draw_colored_polygon(wing, col)
 	draw_polyline(PackedVector2Array([wing[0], wing[1], wing[2]]), Color(VFX.RIM, 0.35), 1.2, true)
+
+## The sexton: a hunched robe under a patched mantle, a low hood with one ember
+## eye, a rope girdle and the bronze hand-bell. The bell hangs in front at
+## rest, rises overhead through the windup and swings down with the toll.
+func _draw_sexton(w: float, h: float, base: Color, mid: Color, t: float, tw: float, flash: bool) -> void:
+	var sway := sin(t * 2.2) * 1.5
+	var robe := PackedVector2Array([
+		Vector2(-w * 0.46, h * 0.24), Vector2(-w * 0.5, -h * 0.06), Vector2(-w * 0.36, -h * 0.32),
+		Vector2(-w * 0.1, -h * 0.44), Vector2(w * 0.14, -h * 0.34), Vector2(w * 0.32, -h * 0.12),
+		Vector2(w * 0.36, h * 0.14), Vector2(w * 0.42, h * 0.5), Vector2(w * 0.2, h * 0.4),
+		Vector2(w * 0.02, h * 0.5), Vector2(-w * 0.18, h * 0.4), Vector2(-w * 0.4, h * 0.5),
+	])
+	VFX.draw_shaded_polygon(self, robe, mid, not flash)
+	VFX.draw_rim(self, robe, 1.0)
+	# The mantle over the hump, its ragged edge falling across the back.
+	draw_colored_polygon(PackedVector2Array([
+		Vector2(-w * 0.5, -h * 0.06), Vector2(-w * 0.36, -h * 0.32), Vector2(-w * 0.1, -h * 0.44),
+		Vector2(w * 0.14, -h * 0.34), Vector2(w * 0.06, -h * 0.12), Vector2(-w * 0.1, -h * 0.04),
+		Vector2(-w * 0.22, h * 0.04), Vector2(-w * 0.36, -h * 0.02),
+	]), base if flash else base.lightened(0.1))
+	# Rope girdle, knotted in front, its loose end swinging.
+	var rope := Color.WHITE if flash else Color("c9b48a")
+	var knot := Vector2(w * 0.14, h * 0.11)
+	draw_line(Vector2(-w * 0.46, h * 0.1), Vector2(w * 0.36, h * 0.12), base.darkened(0.3), 2.5, true)
+	draw_polyline(PackedVector2Array([knot, knot + Vector2(1.0 + sway * 0.5, h * 0.14), knot + Vector2(2.0 + sway, h * 0.26)]), rope, 1.6, true)
+	draw_circle(knot, 2.2, rope)
+	# Hood hung low and forward, a hollow face and one ember eye.
+	var hood := Vector2(w * 0.24, -h * 0.28)
+	draw_circle(hood, w * 0.3, mid if flash else mid.darkened(0.15))
+	VFX.draw_rim_circle(self, hood, w * 0.3, 1.0, 0.8)
+	VFX.draw_ellipse(self, hood + Vector2(w * 0.08, 1.0), w * 0.16, w * 0.2, Color(0.05, 0.03, 0.06))
+	VFX.draw_ember_dot(self, hood + Vector2(w * 0.12, 0.0), 2.0 + tw * 0.8, VFX.GOLD, 0.75 + 0.25 * sin(t * 9.0) + tw * 0.5)
+	# The bell arm: quick up overhead, a trembling hold, then down through the toll.
+	var lift := ease(tw, 0.4)
+	var rung := 0.0
+	if state == EState.RECOVER:
+		rung = clampf((st_timer - float(data.recover) + TOLL_FOLLOW) / TOLL_FOLLOW, 0.0, 1.0)
+	var shoulder := Vector2(w * 0.1, -h * 0.18)
+	# Raised, the bell rides clear above the hood so the eye still shows under it.
+	var hand := Vector2(w * 0.5, -h * 0.12).lerp(Vector2(w * 0.04, -h * 1.12), lift).lerp(Vector2(w * 0.66, h * 0.1), rung)
+	var elbow := (shoulder + hand) * 0.5 + Vector2(4.0, 3.0)
+	draw_polyline(PackedVector2Array([shoulder, elbow, hand]), base if flash else base.darkened(0.1), 6.0, true)
+	var tremble := sin(t * 60.0) * 0.08 * tw * tw
+	_draw_bell(hand, -0.45 * lift + 0.6 * rung + tremble, t, flash)
+	if tw > 0.0:
+		_draw_ripples(hand + Vector2(0.0, 17.0).rotated(-0.45 * lift), tw, t)
+	draw_circle(hand, 3.0, base)
+
+## The bronze hand-bell hanging from `hand`, tipped by `angle`: a turned wooden
+## handle, a bevelled flaring body with a riveted waist band, a heavy lip and
+## the clapper swinging under it.
+func _draw_bell(hand: Vector2, angle: float, t: float, flash: bool) -> void:
+	var xf := Transform2D(angle, hand)
+	var bronze := Color.WHITE if flash else Color("b58a4a")
+	var dark := Color("5e4220")
+	var shine := Color("f2d59a")
+	var wood := Color("4a3020")
+	draw_line(xf * Vector2(0.0, -3.0), xf * Vector2(0.0, 8.0), wood, 4.0, true)
+	draw_circle(xf * Vector2(0.0, -4.0), 3.0, wood)
+	var body := xf * PackedVector2Array([
+		Vector2(-5.0, 8.0), Vector2(5.0, 8.0), Vector2(7.5, 12.0), Vector2(8.5, 19.0),
+		Vector2(12.5, 25.0), Vector2(-12.5, 25.0), Vector2(-8.5, 19.0), Vector2(-7.5, 12.0),
+	])
+	VFX.draw_shaded_polygon(self, body, bronze, not flash)
+	# Bevel: the flank toward the knight catches the light, the far one falls dark.
+	draw_colored_polygon(xf * PackedVector2Array([
+		Vector2(5.0, 8.0), Vector2(7.5, 12.0), Vector2(8.5, 19.0), Vector2(12.5, 25.0),
+		Vector2(8.5, 25.0), Vector2(5.5, 19.0), Vector2(4.5, 12.0), Vector2(3.0, 8.0),
+	]), Color(shine, 0.5))
+	draw_colored_polygon(xf * PackedVector2Array([
+		Vector2(-5.0, 8.0), Vector2(-3.0, 8.0), Vector2(-4.5, 12.0), Vector2(-5.5, 19.0),
+		Vector2(-8.5, 25.0), Vector2(-12.5, 25.0), Vector2(-8.5, 19.0), Vector2(-7.5, 12.0),
+	]), Color(dark, 0.5))
+	draw_line(xf * Vector2(-8.0, 15.0), xf * Vector2(8.0, 15.0), dark, 2.0, true)
+	for x: float in [-5.0, 0.0, 5.0]:
+		draw_circle(xf * Vector2(x, 15.0), 1.1, shine)
+	draw_line(xf * Vector2(-13.0, 25.0), xf * Vector2(13.0, 25.0), dark, 3.0, true)
+	draw_circle(xf * Vector2(sin(t * 14.0) * 1.5, 28.0), 2.4, Color(0.12, 0.1, 0.12))
+
+## The tell drawn round the raised bell: paper ripple rings, each a cut strip
+## over its own shadow, spreading and fading from the bell on both sides and
+## gaining strength through the windup. Reduced motion holds them still.
+func _draw_ripples(center: Vector2, tw: float, t: float) -> void:
+	const SPAN := 36.0
+	var ink := Content.TOLL_COLOR.lightened(0.4)
+	for i in range(3):
+		var r := 14.0 + fmod(t * 40.0 + float(i) * SPAN / 3.0, SPAN)
+		var a := minf(1.0, 1.3 * tw * (1.0 - (r - 14.0) / SPAN))
+		for side: float in [0.0, PI]:
+			draw_arc(center + Vector2(1.5, 1.5), r, side - 0.8, side + 0.8, 10, Color(0.04, 0.02, 0.05, 0.5 * a), 4.0, true)
+			draw_arc(center, r, side - 0.8, side + 0.8, 10, Color(ink, a), 3.0, true)

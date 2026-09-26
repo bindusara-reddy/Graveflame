@@ -60,7 +60,7 @@ func _test_content() -> void:
 	# Combat
 	check(Content.COMBO.size() == 3, "COMBO has 3 swings")
 	# Enemies — six archetypes
-	check(Content.ENEMY.size() == Content.EnemyKind.size() and Content.ENEMY.size() >= 6, "ENEMY defines every archetype (six, with the carrion crow)")
+	check(Content.ENEMY.size() == Content.EnemyKind.size() and Content.ENEMY.size() >= 7, "ENEMY defines every archetype (seven, with the sexton)")
 	check(Content.ENEMY.has(Content.EnemyKind.BRUTE), "BRUTE kind exists")
 	check(Content.ENEMY.has(Content.EnemyKind.BOMBER), "BOMBER kind exists")
 	check(bool(Content.ENEMY[Content.EnemyKind.BRUTE].get("shielded", false)), "BRUTE is shielded")

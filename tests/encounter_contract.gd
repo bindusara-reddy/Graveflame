@@ -4,6 +4,8 @@ extends "res://tests/harness.gd"
 ## chamber's waves are planned. Headless, on a bare floor with a stand-in knight.
 ##   godot4 --headless --path . --script res://tests/encounter_contract.gd
 
+const SfxSynth := preload("res://scripts/sfx_synth.gd")
+
 var _floor: StaticBody2D
 var _knight: Node2D
 
@@ -17,12 +19,78 @@ func run() -> void:
 	await _test_wisp_skirmishes()
 	await _test_bomber_blast()
 	await _test_oaths()
+	await _test_sexton_tolls()
 	_clear_arena()
 	await _test_pits()
+	await _test_toll_ends_with_its_floor()
 	await _test_ledge_drop()
 	_test_wave_plan()
+	_test_sexton_plan()
 	await _test_room_plan()
 	await finish("ENCOUNTER")
+
+
+## A toll as the game spawns it from a sexton's wave_requested arguments.
+func _toll(args: Array) -> Projectile:
+	var wave := Projectile.new()
+	wave.style = args[4]
+	wave.setup("enemy", args[0], args[1], args[2], 120.0, 0, args[3], args[5])
+	root.add_child(wave)
+	return wave
+
+
+## A sexton backs away from a close knight, voices its raised bell, and its
+## toll rolls both ways along the floor, low enough to hop and parried home
+## like any shot.
+func _test_sexton_tolls() -> void:
+	var sexton := await _foe(Enemy.Kind.SEXTON, _knight.global_position.x + 120.0)
+	var start := sexton.global_position.x
+	await ticks(30)
+	check(sexton.global_position.x > start + 20.0, "a sexton backs away from a close knight")
+	var tells: Array = []
+	var tolls: Array = []
+	sexton.telegraphed.connect(func(kind: String, _pos: Vector2, _elite: bool): tells.append(kind))
+	sexton.wave_requested.connect(func(pos, vel, dmg, life, style, color): tolls.append([pos, vel, dmg, life, style, color]))
+	sexton.global_position.x = _knight.global_position.x + 300.0
+	sexton._begin_windup()
+	check(tells == ["sexton"] and SfxSynth.LEVELS.has("tell_" + tells[0]), "the sexton's raised bell is voiced")
+	sexton.st_timer = 0.0
+	await ticks(2)
+	check(tolls.size() == 2 and tolls[0][1].x * tolls[1][1].x < 0.0 and tolls.all(func(a): return a[1].y == 0.0), "its toll rolls out both ways along the floor")
+	var toward: Array = tolls[0] if tolls[0][1].x < 0.0 else tolls[1]
+	var crest: float = Content.FLOOR_Y - toward[0].y + 12.0
+	check(crest < 40.0 and crest > 0.0, "the toll hugs the floor, a hop clears it (crest %d px)" % roundi(crest))
+	var wave := _toll(toward)
+	var from: Vector2 = wave.global_position
+	await ticks(10)
+	check(wave.global_position.x < from.x - 40.0 and is_equal_approx(wave.global_position.y, from.y), "the toll travels along the floor toward the knight")
+	check(wave.get_meta("attack_kind") == "projectile" and wave.monitorable, "a parry can catch the toll like any shot")
+	wave.reflect(Vector2.RIGHT)
+	await ticks(60)
+	check(sexton.hp < sexton.hp_max, "a parried toll rolls home into its sexton")
+	if is_instance_valid(wave):
+		wave.queue_free()
+	sexton.queue_free()
+	await ticks(1)
+
+
+## A toll stops where its floor ends: at a pit's lip and at the chamber wall.
+## A sexton cut down comes apart along the blow like any creature.
+func _test_toll_ends_with_its_floor() -> void:
+	var room := _empty_room("gap", Vector2(1000.0, Content.FLOOR_Y - 27.0))
+	var lip := _toll([Vector2(560.0, Content.FLOOR_Y - Enemy.TOLL_LIFT), Vector2(340.0, 0.0), 10.0, 1.5, "toll", Content.TOLL_COLOR])
+	var wall := _toll([Vector2(-100.0, Content.FLOOR_Y - Enemy.TOLL_LIFT), Vector2(-340.0, 0.0), 10.0, 1.5, "toll", Content.TOLL_COLOR])
+	var open := _toll([Vector2(900.0, Content.FLOOR_Y - Enemy.TOLL_LIFT), Vector2(340.0, 0.0), 10.0, 1.5, "toll", Content.TOLL_COLOR])
+	await ticks(24)
+	check(not is_instance_valid(lip), "a toll stops at a pit's lip")
+	check(not is_instance_valid(wall), "a toll stops at the chamber wall")
+	check(is_instance_valid(open) and open.global_position.x > 1000.0, "a toll rolls on while floor lies ahead")
+	open.queue_free()
+	room._spawn_enemy(Enemy.Kind.SEXTON, Vector2(1100.0, Content.FLOOR_Y - 40.0))
+	await ticks(2)
+	room.enemies[-1].take_damage(99999.0, Vector2.LEFT, 0.0)
+	check(room.get_children().any(func(n): return n.get_script() == Room.Severed), "a felled sexton comes apart along the blow")
+	await _free_room(room)
 
 
 ## Chambers climb steadily, open with their newcomer, stage each set piece
@@ -58,6 +126,30 @@ func _test_wave_plan() -> void:
 		check(staged.size() == Content.SET_PIECES.size() and staged.values().max() == 1, "seed %d stages every set piece exactly once" % run_seed)
 
 
+## Sextons toll from their debut chamber on and never before; a chamber holds
+## at most one a wave and two in all, one where it debuts.
+func _test_sexton_plan() -> void:
+	var debut := int(Content.DEBUTS[Content.EnemyKind.SEXTON])
+	var early := 0
+	var crowded := 0
+	var later := 0
+	for run_seed in range(40):
+		for idx in range(Content.ROOMS_BEFORE_BOSS + 1):
+			var rng := RandomNumberGenerator.new()
+			rng.seed = run_seed * 31 + idx
+			var in_room := 0
+			for wave: Array in Content.generate_waves(idx, rng, Content.set_piece_for(idx, run_seed)):
+				var n := wave.count(Content.EnemyKind.SEXTON)
+				crowded += 1 if n > 1 else 0
+				in_room += n
+			early += in_room if idx < debut else 0
+			crowded += 1 if in_room > (1 if idx == debut else 2) else 0
+			later += in_room if idx > debut else 0
+	check(early == 0, "no sexton tolls before chamber %d" % debut)
+	check(crowded == 0, "one sexton a wave, two a chamber, one where it debuts")
+	check(later > 0, "the chambers after its debut still call sextons")
+
+
 ## A live chamber names its newcomer, keeps its first wave clear of the entry,
 ## and the last chamber before the throne always fields a champion.
 func _test_room_plan() -> void:
@@ -73,6 +165,18 @@ func _test_room_plan() -> void:
 	for foe in room.enemies:
 		check(foe.global_position.distance_to(room.get_entry_point()) >= Room.SPAWN_CLEARANCE, "the first wave lands clear of the entry")
 	room.queue_free()
+	# Every wave of the sexton's debut chamber, called in turn, names it once.
+	lessons.clear()
+	var tolled := Room.new()
+	tolled.setup(Content.ROOM_TEMPLATES[1], false, stand_in, 11)
+	tolled.room_index = Content.DEBUTS[Content.EnemyKind.SEXTON]
+	tolled.lesson_requested.connect(func(id: String): lessons.append(id))
+	root.add_child(tolled)
+	for w in range(1, tolled.wave_count()):
+		tolled._wave_index = w
+		tolled._spawn_wave()
+	check(lessons.count("debut_sexton") == 1 and Content.HINTS.has("debut_sexton"), "the sexton's debut chamber teaches its lesson once")
+	tolled.queue_free()
 	for run_seed in [5, 6, 7]:
 		var last := Room.new()
 		last.setup(Content.ROOM_TEMPLATES[2], false, stand_in, run_seed)

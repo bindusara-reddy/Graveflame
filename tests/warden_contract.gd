@@ -222,7 +222,7 @@ func _test_shots() -> void:
 	check(buried == 0 and reached == 4, "no fan shot buries itself short of the knight, and one still reaches a grounded knight")
 	check(shots[0][2] == Boss.SHOT_COLOR, "the Warden's shots burn ember-bright")
 	var waves: Array = []
-	boss.wave_requested.connect(func(pos, _vel, _dmg, _life): waves.append(pos))
+	boss.wave_requested.connect(func(pos, _vel, _dmg, _life, _style, _color): waves.append(pos))
 	shots.clear()
 	boss._emit_slam_waves()
 	check(waves.size() == 2 and is_equal_approx(waves[0].y, Content.FLOOR_Y - Boss.WAVE_LOW), "the slam's shockwaves run along the floor")

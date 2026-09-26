@@ -101,7 +101,7 @@ const COMBO := [
 ]
 
 # --- Enemy archetypes ---
-enum EnemyKind { STALKER, HOPPER, WISP, BRUTE, BOMBER, CROW }
+enum EnemyKind { STALKER, HOPPER, WISP, BRUTE, BOMBER, CROW, SEXTON }
 ## `name` is what the game calls a creature aloud: its debut lesson and an elite's oath.
 const ENEMY := {
 	EnemyKind.STALKER: { "name": "STALKER", "hp": 40.0,  "speed": 150.0, "damage": 14.0, "knock": 240.0, "cd": 1.3, "windup": 0.45, "recover": 0.5,  "score": 12, "w": 34.0, "h": 46.0, "color": Color("c44b3f") },
@@ -112,12 +112,22 @@ const ENEMY := {
 	## Carrion crow: circles overhead, shrieks while it hangs in the air, then
 	## dives along a line it commits to. Sidestep the line or parry it down.
 	EnemyKind.CROW:    { "name": "CARRION CROW", "hp": 24.0,  "speed": 230.0, "damage": 13.0, "knock": 220.0, "cd": 1.9, "windup": 0.55, "recover": 0.55, "score": 18, "w": 34.0, "h": 26.0, "color": Color("5a4a78"), "dive_speed": 760.0 },
+	## Sexton: a hunched bell-ringer that keeps its distance on its own floor,
+	## raises its hand-bell and rolls a toll along the floor both ways. Jump the
+	## toll or parry it home. `damage` is the toll's bite.
+	EnemyKind.SEXTON:  { "name": "SEXTON", "hp": 44.0,  "speed": 115.0, "damage": 14.0, "knock": 260.0, "cd": 2.8, "windup": 0.85, "recover": 0.7,  "score": 22, "w": 34.0, "h": 52.0, "color": Color("4f7f86"), "poise": 2.0, "toll_speed": 340.0, "toll_life": 1.5 },
 }
 const CROW_HOVER := 165.0
 const WISP_SHOT_SPEED := 420.0
 const WISP_SHOT_LIFE := 2.4
 const WISP_SHOT_DAMAGE := 10.0
 const WISP_RANGE := 520.0
+## The stretch of floor a sexton keeps between itself and the knight: it backs
+## off inside the near edge and closes in beyond the far one.
+const SEXTON_NEAR := 260.0
+const SEXTON_FAR := 460.0
+## The toll's bronze: the colour of the bell that rang it.
+const TOLL_COLOR := Color("c79a52")
 
 # --- Boss ---
 const BOSS_HP := 520.0
@@ -453,7 +463,7 @@ const WAVE_PLAN := [[2, 3], [2, 4], [2, 3, 3], [2, 3, 4], [3, 4, 4]]
 ## the start. A generated chamber opens with its newcomer beside a lone
 ## stalker, and the game names it (HINTS "debut_<kind>") the first time.
 const DEBUTS := {
-	EnemyKind.HOPPER: 1, EnemyKind.WISP: 1, EnemyKind.BOMBER: 2, EnemyKind.CROW: 3, EnemyKind.BRUTE: 4,
+	EnemyKind.HOPPER: 1, EnemyKind.WISP: 1, EnemyKind.BOMBER: 2, EnemyKind.CROW: 3, EnemyKind.BRUTE: 4, EnemyKind.SEXTON: 5,
 }
 
 ## Authored waves that test a lesson from an earlier chamber. A seeded few of
@@ -468,6 +478,7 @@ const SET_PIECES := [
 ## Threat costs used by the wave generator. Heavier archetypes unlock with depth.
 const THREAT_COST := {
 	EnemyKind.STALKER: 2.0, EnemyKind.HOPPER: 2.0, EnemyKind.WISP: 2.5, EnemyKind.BRUTE: 4.0, EnemyKind.BOMBER: 3.0, EnemyKind.CROW: 2.5,
+	EnemyKind.SEXTON: 3.5,
 }
 
 static func _unlocked_kinds(room_index: int) -> Array:
@@ -514,16 +525,17 @@ static func _roll_wave(size: int, room_index: int, kinds: Array, rng: RandomNumb
 		threat += float(THREAT_COST[kind])
 	return wave
 
-## Composition rules: one bomber and one brute a wave, never more than two
-## flyers at once (two divers is a coin flip, not a read), and at most two
-## brutes a chamber, one where they debut.
+## Composition rules: one bomber a wave, never more than two flyers at once
+## (two divers is a coin flip, not a read), and the heavy pieces, brute and
+## sexton, one a wave and at most two a chamber, one where they debut, so a
+## deep chamber gains a new threat without stacking it.
 static func _fits(kind: int, wave: Array, room: Array, room_index: int) -> bool:
 	match kind:
 		EnemyKind.BOMBER:
 			return not wave.has(kind)
 		EnemyKind.WISP, EnemyKind.CROW:
 			return wave.count(EnemyKind.WISP) + wave.count(EnemyKind.CROW) < 2
-		EnemyKind.BRUTE:
+		EnemyKind.BRUTE, EnemyKind.SEXTON:
 			var in_room := 0
 			for other: Array in room:
 				in_room += other.count(kind)
@@ -594,6 +606,7 @@ const HINTS := {
 	"debut_bomber": "POWDER PILGRIM.  Dash clear of its ring, or cut it down before it lights.",
 	"debut_crow": "CARRION CROW.  Watch its dashed line, then sidestep or parry the dive.",
 	"debut_brute": "IRON PENITENT.  Its shield faces you: strike from behind, or break its guard.",
+	"debut_sexton": "SEXTON.  Its bell rolls along the floor: jump the toll, or parry it home.",
 }
 
 # --- Vows (unlocked by the first victory) ---
